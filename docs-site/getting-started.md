@@ -7,16 +7,16 @@ This page explains how Noxiouse is configured, built, and structured on disk in 
 ## 1. System Requirements
 
 - **OS**: Windows 10 / 11 (x64)
-- **GPU**: Vulkan 1.4 capable GPU (`1.4.350+` SDK) supporting:
-  - `VK_EXT_descriptor_heap` (Bindless resource & sampler heaps)
-  - `VK_KHR_unified_image_layouts` (Permanent `VK_IMAGE_LAYOUT_GENERAL`)
-  - `VK_EXT_mesh_shader` (Task + Mesh shader stages)
-  - `VK_KHR_acceleration_structure`, `VK_KHR_ray_query`, `VK_KHR_ray_tracing_pipeline` (Hardware Ray Tracing)
-  - Optional NVIDIA RTX features: **DLSS Super Resolution** and **DLSS Ray Reconstruction** via Streamline (`sl.interposer.dll`), plus **NRD** real-time denoisers.
+- **GPU**: Vulkan 1.4 (`1.4.363+` SDK) **or** Direct3D 12 (Agility SDK `1.620.2`) capable GPU supporting:
+  - Bindless resource & sampler heaps (`VK_EXT_descriptor_heap` / D3D12 SM 6.6+ dynamic resources)
+  - `VK_KHR_unified_image_layouts` (Permanent `VK_IMAGE_LAYOUT_GENERAL` on Vulkan)
+  - Mesh Shaders (`VK_EXT_mesh_shader` / D3D12 Mesh Shader Tier 1)
+  - Hardware Ray Tracing (`VK_KHR_acceleration_structure`, `VK_KHR_ray_query`, `VK_KHR_ray_tracing_pipeline` / DXR 1.1)
+  - Optional NVIDIA RTX features: **DLSS Super Resolution** and **DLSS Ray Reconstruction** via Streamline `2.14.16` (`sl.interposer.dll`), plus **NRD `v4.18.0`** real-time denoisers.
 - **Compiler & Tooling**:
-  - Visual Studio 2022 (MSVC C++20)
+  - Visual Studio 2026 (`ClangCL`, C++20)
   - CMake `3.25+`
-  - .NET 9.0 SDK (`net9.0`) for building `Nox.ScriptCore` and game C# scripts
+  - .NET 10.0 SDK (`net10.0`) for building `Nox.ScriptCore`, `Coral.Managed`, and game C# scripts
 
 ---
 
@@ -26,13 +26,13 @@ This page explains how Noxiouse is configured, built, and structured on disk in 
 
 | File Path | Plain-English Explanation |
 | :--- | :--- |
-| [`CMakeLists.txt`](file:///E:/dev/noxiouse/CMakeLists.txt) | Root CMake build definition (`C++20`). Defines build options (`NOX_DIST`, `NOX_BUILD_EDITOR`), configures **Jolt Physics** (with `JPH_DOUBLE_PRECISION=ON` for 64-bit Large World Coordinates and `JPH_DEBUG_RENDERER`), adds the **Coral** .NET 9 C++/C# interop library (`NoxCore/vendors/Coral/Coral.Native`), adds `msdf-atlas-gen` for SDF font generation, and includes `NoxCore`, `NoxEditor`, and `NoxRuntime`. |
+| [`CMakeLists.txt`](file:///E:/dev/noxiouse/CMakeLists.txt) | Root CMake build definition (`C++20`). Defines build options (`NOX_DIST`, `NOX_BUILD_EDITOR`, `NOX_BUILD_RUNTIME`), configures **Jolt Physics v5.7** (`JPH_DOUBLE_PRECISION=ON` for 64-bit LWC), fetches **Coral `320c90d`** (.NET 10 C++/C# interop) and **D3D12MemoryAllocator v3.3.0**, adds `msdf-atlas-gen`, and includes `NoxCore`, `NoxEditor`, and `NoxRuntime`. |
 | [`README.md`](file:///E:/dev/noxiouse/README.md) | Quick-start overview of the repository, prerequisites, and build steps. |
 | [`PROJECT_CONTEXT.md`](file:///E:/dev/noxiouse/PROJECT_CONTEXT.md) | High-level architectural map of the engine's modules, conventions, and frame flow. |
 | [`architecture.md`](file:///E:/dev/noxiouse/architecture.md) | Deep-dive specification of the `NRI` abstraction layer and the frame-compiled `RenderGraph` design decisions (`D1–D15`). |
 | [`GEMINI.md`](file:///E:/dev/noxiouse/GEMINI.md) | Repository engineering rules (Zero Graphics Leak, Bindless, Reverse-Z, Render Graph passes, and Rendering Pipeline invariants). |
-| [`NoxCore/CMakeLists.txt`](file:///E:/dev/noxiouse/NoxCore/CMakeLists.txt) | Builds the `NoxCore` static library with precompiled header `src/NoxPCH.h`, linking SDL3, GLM (`GLM_FORCE_EXPLICIT_CTOR`), Vulkan 1.4, EnTT, Slang (delay-loaded via `/DELAYLOAD:slang.dll`), Streamline, NRD, RTXDI, Dear ImGui, ImGuizmo, `imgui-node-editor`, `meshoptimizer`, `OffsetAllocator`, `bc7enc`/`rgbcx`, `xatlas`, `bcdec`, `yaml-cpp`, `spdlog`, `xxHash`, `box2d`, `msdf-atlas-gen`, `KTX`, and `Jolt`. |
-| [`NoxEditor/CMakeLists.txt`](file:///E:/dev/noxiouse/NoxEditor/CMakeLists.txt) | Builds the `NoxEditor` executable, runs `dotnet build` on `NoxScriptCore/Nox.ScriptCore.csproj` and `Facerun/Assets/Scripts/Facerun.csproj`, and copies required runtime DLLs (SDL3, Slang, Streamline/DLSS/NGX, NRD, KTX) next to `NoxEditor.exe`. |
+| [`NoxCore/CMakeLists.txt`](file:///E:/dev/noxiouse/NoxCore/CMakeLists.txt) | Builds the `NoxCore` static library with precompiled header `src/NoxPCH.h`, linking `NoxRHI` (Vulkan 1.4 + D3D12), `NoxUI`, `NoxTasks`, `NoxAudio`, `NoxNet`, `Coral.Native`, SDL3, GLM, EnTT, Slang `2026.22.1`, Streamline `2.14.16`, NRD `v4.18.0`, RTXDI, `meshoptimizer v1.3`, `OffsetAllocator`, `bc7enc`/`rgbcx`, `xatlas`, `bcdec`, `yaml-cpp`, `spdlog`, `xxHash`, `box2d v3.1`, `msdf-atlas-gen`, `KTX`, and `Jolt v5.7`. |
+| [`NoxEditor/CMakeLists.txt`](file:///E:/dev/noxiouse/NoxEditor/CMakeLists.txt) | Builds the `NoxEditor` executable (`NoxUI`), runs `dotnet build` on `NoxScriptCore/Nox.ScriptCore.csproj` and `Facerun/Assets/Scripts/Facerun.csproj` (`net10.0`), and copies required runtime DLLs (`nethost.dll`, `Coral.Managed.dll`, SDL3, Slang, Streamline/DLSS/NGX, NRD, DirectX 12 Agility SDK `1.620.2`, Steam Audio, KTX) next to `NoxEditor.exe`. |
 | [`NoxRuntime/CMakeLists.txt`](file:///E:/dev/noxiouse/NoxRuntime/CMakeLists.txt) | Builds the lightweight `NoxRuntime` shipping game executable (`WIN32` windowed subsystem when `NOX_DIST=ON`) and copies runtime DLLs so **File > Package Game** can bundle it directly. |
 
 ### Key CMake Options

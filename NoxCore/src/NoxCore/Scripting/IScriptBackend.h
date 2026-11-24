@@ -32,6 +32,10 @@ namespace Nox
         virtual bool WaitForDebugger(uint32_t timeoutMilliseconds) = 0;
         virtual bool HasType(std::string_view fullName) const = 0;
         virtual std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName) const = 0;
+        virtual std::vector<ScriptEventInfo> GetExposedEvents(std::string_view fullName) const = 0;
+        virtual std::vector<std::string> GetCallableMethods(std::string_view fullName) const = 0;
+        virtual bool SubscribeEvent(ScriptInstanceHandle source, std::string_view eventName,
+                                    ScriptInstanceHandle target, std::string_view targetMethod) = 0;
         virtual ScriptInstanceHandle CreateInstance(std::string_view fullName, UUID entity) = 0;
         virtual void SetEntityField(ScriptInstanceHandle instance, std::string_view fieldName, UUID entity) = 0;
         virtual void SetFieldValue(ScriptInstanceHandle instance, std::string_view fieldName, const ScriptValue& value) = 0;

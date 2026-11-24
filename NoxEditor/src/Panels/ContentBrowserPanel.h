@@ -1,207 +1,209 @@
 #pragma once
-#include <functional>
+
 #include <filesystem>
+#include <chrono>
+#include <functional>
+#include <future>
+#include <memory>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
+#include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Asset/AssetMetadata.h"
+#include "NoxCore/Core/Ref.h"
 #include "NoxCore/Core/UUID.h"
-#include <NoxTasks/JobSystem.h>
-#include <NoxAudio/AudioTypes.h>
-#include "ThumbnailCache.h"
+#include <NoxUI/Core/UITypes.h>
+#include <NoxUI/Widgets/UIMenu.h>
 
-struct ImGuiPayload;
+namespace NoxUI
+{
+        class UIBreadcrumb;
+        class UIButton;
+        class UIDrawList;
+        class UIDropdown;
+        class UIElement;
+        class UILabel;
+        class UISearchBar;
+        class UIStackBox;
+        class UITreeView;
+    }
 
 namespace Nox
 {
+
+    class ContentTileView;
+    class ContentPathBar;
+
+    // How an asset type looks in the editor: its name ("Static Mesh"), its colour (the line under a tile's picture, as in
+    // Unreal) and its icon (drawn with vectors: crisp at any tile size, no image files).
+    struct AssetTypeVisual
+    {
+        const char* Label = "File";
+        NoxUI::UIColor Color{ 0.62f, 0.66f, 0.74f, 1.0f };
+    };
+    AssetTypeVisual GetAssetTypeVisual(AssetType type);
+    // The type's icon centred at `center`, `size` pixels across.
+    void DrawAssetTypeIcon(NoxUI::UIDrawList& drawList, AssetType type, const NoxUI::UIVec2& center, float size, const NoxUI::UIColor& color);
+    void DrawFolderIcon(NoxUI::UIDrawList& drawList, const NoxUI::UIVec2& center, float size, const NoxUI::UIColor& color);
+
+    // One file or folder the browser shows.
+    struct ContentEntry
+    {
+        std::filesystem::path Path;   // absolute
+        std::string Name;             // the file's name without its extension (a folder's name)
+        std::string Extension;        // ".nmat"
+        AssetHandle Handle = 0;       // 0: a folder, or a file the registry does not know (a C# script)
+        AssetType Type = AssetType::None;
+        bool IsDirectory = false;
+        bool IsScript = false;        // a .cs file: opened in the code editor
+    };
+
+    // The Content Browser (Unreal's): the project's Assets folder as a folder tree on the left and the open folder's files as
+    // tiles on the right -- a picture of the asset (a rendered mesh or material, the texture itself, else the type's icon), a
+    // line in the type's colour, the name, the type at the bottom right. Search finds assets in the open folder and below.
+    //
+    //  - Click selects (Ctrl / Shift for more, Ctrl+A all); double-click opens (a folder, a scene, a material ...); drag tiles
+    //    into the viewport to place them, onto a folder tile to move them; drag entities from the hierarchy onto the tiles to
+    //    make a prefab. Right-click: Open, Rename (F2), Duplicate, Delete (Del), Find References, Reimport, Show in Explorer,
+    //    Copy Path; on empty space: New Folder and the asset types + Add makes.
+    //  - Ctrl + mouse wheel resizes the tiles; Back / Forward walk the folders visited; Backspace goes up.
     class ContentBrowserPanel
     {
     public:
-        ContentBrowserPanel(Ref<Project> project);
-        
-        void OnImGuiRender();
-        void OnExternalFileDrop(const std::filesystem::path& path);
-        // Lists the asset folder again (files added from outside the panel: an MCP import, a new material).
-        void Refresh() { RefreshAssetTree(); }
-        // Called with an asset's handle when it's double-clicked (or just created); EditorLayer decides what
-        // opening means per AssetType, so this panel doesn't need to know about any editor window.
+        ContentBrowserPanel();
+        ~ContentBrowserPanel();
+
+        Ref<NoxUI::UIElement> BuildUI();
+        // Once a frame: a folder or files changed outside the editor show up, a model import finishes, thumbnails come in.
+        void Update(float dt);
+        // Everything read again (the project changed, files were added by a tool).
+        void Refresh();
+        // The textures its tiles show right now (the editor's unused-asset sweep keeps them loaded).
+        void CollectAssetReferences(std::unordered_set<AssetHandle>& handles) const;
+
+        // A file dropped on the editor window from the system or picked with Import: copied into the open folder and imported
+        // (a model opens the import dialog first).
+        void ImportFile(const std::filesystem::path& path);
+
+        // The open folder, relative to the asset directory ("" for the root).
+        std::filesystem::path CurrentFolder() const;
+        // An asset just made elsewhere (a prefab from the hierarchy): shown, selected, its name ready to be typed.
+        void ShowNewAsset(AssetHandle handle);
+
         void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
-        // The folder being shown (relative to the asset directory; empty for the root), and "this asset was just created": the browser
-        // shows it, selects it and puts its name into rename mode (next frame).
-        std::filesystem::path CurrentFolder() const
-        {
-            const std::filesystem::path relative = m_CurrentDirectory.lexically_relative(m_BaseDirectory);
-            return relative == "." ? std::filesystem::path() : relative;
-        }
-        void ShowNewAsset(AssetHandle handle) { m_PendingShowAsset = handle; }
-        // Called when entities are dragged from the hierarchy onto the browser: creates the prefab in the given folder (relative
-        // to the asset directory) and returns its handle, 0 on failure. The new asset then goes into rename mode.
-        void SetCreatePrefabCallback(std::function<AssetHandle(UUID, const std::filesystem::path&)> callback) { m_CreatePrefab = std::move(callback); }
-        // Called for the right-click "Create Variant" of a prefab: creates the variant in the folder (relative to the asset
-        // directory), returns its handle (0 on failure); it then goes into rename mode.
-        void SetCreateVariantCallback(std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> callback) { m_CreateVariant = std::move(callback); }
-        // The assets the open scenes use right now (unsaved changes included), for the reference checks before deleting.
+        // Entities dragged from the hierarchy onto the browser: the prefab made in `folder` (relative), its handle or 0.
+        void SetCreatePrefabCallback(std::function<AssetHandle(uint64_t dragId, const std::filesystem::path& folder)> callback) { m_CreatePrefab = std::move(callback); }
+        // A prefab's right-click Create Variant: the variant made next to it in `folder` (relative), its handle or 0.
+        void SetCreateVariantCallback(std::function<AssetHandle(AssetHandle base, const std::filesystem::path& folder)> callback) { m_CreateVariant = std::move(callback); }
+        // Replace References: what uses `from` uses `to` instead (the files, the loaded assets and the open scene; the editor does it).
+        void SetReplaceReferencesCallback(std::function<void(AssetHandle from, AssetHandle to)> callback) { m_ReplaceReferences = std::move(callback); }
+        // The assets the open scenes use (unsaved changes included): Delete warns about them too.
         void SetSceneReferencesCallback(std::function<void(std::unordered_set<AssetHandle>&)> callback) { m_SceneReferences = std::move(callback); }
-        // Replace References in the open scenes (the project's files are rewritten by the asset manager).
-        void SetReplaceInScenesCallback(std::function<void(AssetHandle, AssetHandle)> callback) { m_ReplaceInScenes = std::move(callback); }
-    private:
-        void RefreshAssetTree();
-        AssetHandle FindAssetHandle(const std::filesystem::path& relativePath) const;
-        void DuplicateAsset(AssetHandle handle);
-        Ref<Texture2D> GetThumbnail(AssetHandle handle, const AssetMetadata& metadata, bool& rendered);
-        // A prefab tile's color: blue, purple for a variant.
-        ImVec4 PrefabTileColor(AssetHandle handle, const AssetMetadata& metadata);
-        void SetImportDestination(const std::filesystem::path& path);
-        // Windows-style rename: the asset's name becomes a text field with the whole name selected.
-        void BeginRename(AssetHandle handle);
-        void RequestPrefabFromDrop(const ImGuiPayload* payload, const std::filesystem::path& folder);
-        // Assets dragged from the browser onto a folder (tile, tree, path): moved there next frame.
-        void AcceptAssetMoveDrop(const std::filesystem::path& folder);
-        // The right-click menu of an asset tile; delete / find references / unused assets dialogs and what they act on.
-        void DrawAssetContextMenu(AssetHandle handle, const AssetMetadata& metadata);
-        void RequestDelete(std::vector<AssetHandle> handles);
-        void DrawAssetDialogs();
-        void ProcessPendingAssetActions();
+        // Saved, imported, failed: shown as a toast by the editor.
+        void SetNotifyCallback(std::function<void(NoxUI::UINotification)> callback) { m_Notify = std::move(callback); }
+        // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the browser is in the drawer).
+        void SetToolbarExtra(Ref<NoxUI::UIElement> element) { m_ToolbarExtra = std::move(element); }
+        // What the browser is busy with in the background (the status bar shows it), empty when nothing.
+        std::string GetBusyText() const;
 
-        // The modern layout (docs/Future.md item 2): a toolbar with the add/import buttons, a clickable path, search, a type filter
-        // and the tile size; the folder tree on the left; the tiles of the folder (or the search results) on the right.
-        void DrawToolbar();
-        void CreateTimeline();
-        // A Material Shader (Custom Lit: a .slang file with light() and ambient()) from the template, in the folder shown.
-        void CreateMaterialShader();
-        void DrawBreadcrumb();
+    private:
+        friend class ContentTileView;
+        friend class ContentPathBar;
+
+        void NavigateTo(const std::filesystem::path& absoluteFolder, bool recordHistory = true);
+        void GoBack();
+        void GoForward();
+        void GoUp();
+        void RebuildEntries();
         void RebuildFolderTree();
-        struct FolderNode;
-        void DrawFolderTree(const FolderNode& node);
-        void DrawTiles();
-        // m_VisibleEntries for the current folder, search text and type filter (rebuilt when one of them or the folder changes).
-        void UpdateVisibleEntries();
-        bool PassesTypeFilter(AssetType type) const;
-    private:
-        Ref<Project> m_Project;
-        Ref<ThumbnailCache> m_ThumbnailCache;
-        
-        std::filesystem::path m_BaseDirectory;
-        std::filesystem::path m_CurrentDirectory;
+        void SyncChrome();         // breadcrumb, back / forward, footer
+        void Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message = {});
 
-        Ref<Texture2D> m_DirectoryIcon;
-        Ref<Texture2D> m_FileIcon;
+        // Actions (the tiles' menus and keys call these).
+        void Activate(const ContentEntry& entry);
+        void BeginRename(AssetHandle handle);
+        void CommitRename(AssetHandle handle, const std::string& newName);
+        void Duplicate(AssetHandle handle);
+        void RequestDelete(std::vector<AssetHandle> handles);
+        void ShowReferences(AssetHandle handle);
+        // Who uses assets is looked up on a worker thread (it reads the project's files); the dialog opens when it is known.
+        enum class ReferenceCheckMode : uint8_t { Delete, Show, Replace };
+        void StartReferenceCheck(ReferenceCheckMode mode, std::vector<AssetHandle> handles);
+        void FinishReferenceCheck();
+        void ShowDeleteDialog(NoxUI::UIContext& context, const std::vector<AssetHandle>& handles,
+                              const std::vector<std::vector<std::filesystem::path>>& users, const std::unordered_set<AssetHandle>& inScene);
+        // Replace References: the asset to use instead (same type, searchable), what will be rewritten and what cannot be.
+        void ShowReplaceDialog(NoxUI::UIContext& context, AssetHandle from, const std::vector<std::filesystem::path>& users, bool sceneUses);
+        void CreateVariant(AssetHandle base);
+        void MoveAssets(const std::vector<AssetHandle>& handles, const std::filesystem::path& absoluteFolder);
+        void CreatePrefabFromDrop(uint64_t dragId, const std::filesystem::path& absoluteFolder);
+        void NewFolder();
+        void CreateMaterial();
+        void CreateGraph(int kind); // 0 animation, 1 audio, 2 material
+        void CreateMaterialShader();
+        void CreateTimeline();
+        void CreateScript();
+        void OpenModelImportDialog(const std::filesystem::path& relativeSource, const std::filesystem::path& externalSource);
+        void ShowInExplorer(const std::filesystem::path& absolutePath);
+        void PickAndImport();
+        // A new file of the open folder: registered, listed, selected and put into rename mode.
+        void AdoptNewFile(const std::filesystem::path& absolutePath);
+        std::vector<NoxUI::UIMenuItem> BuildAssetMenu(const ContentEntry& entry);
+        std::vector<NoxUI::UIMenuItem> BuildFolderSpaceMenu();
+        std::vector<NoxUI::UIMenuItem> BuildAddMenu();
+        bool PassesFilter(AssetType type, bool isScript) const;
 
-        struct BrowserEntry
-        {
-            std::filesystem::path Path;
-            AssetMetadata Metadata;
-            AssetHandle Handle = 0;
-            bool IsDirectory = false;
-            std::string Id;   // ImGui id of its button, built once per refresh
-            std::string Name; // file name shown under it
-        };
-        std::vector<BrowserEntry> m_CurrentEntries;
-        // What the tiles show: the folder's entries, or with a search every matching asset below the folder; filtered by type.
-        std::vector<BrowserEntry> m_VisibleEntries;
-        std::string m_VisibleKey; // the inputs m_VisibleEntries was built from
-        uint64_t m_EntriesVersion = 0; // bumped by every RefreshAssetTree
+        std::filesystem::path m_BaseDirectory;    // the project's Assets folder
+        std::filesystem::path m_CurrentDirectory; // absolute
+        std::vector<std::filesystem::path> m_Back;
+        std::vector<std::filesystem::path> m_Forward;
 
-        struct FolderNode
-        {
-            std::filesystem::path Path; // absolute
-            std::string Name;
-            std::vector<FolderNode> Children;
-        };
-        FolderNode m_FolderTree;
-        bool m_FolderTreeDirty = true;
-        double m_FolderTreeTime = 0.0; // ImGui time of the last rebuild
-        // The periodic look for folders made outside the editor, on an IO worker: walking a big project's folders took ~24 ms on the
-        // main thread every 2 s (a frame spike each time). Swapped in when done.
-        NoxTasks::TaskFuture<FolderNode> m_FolderTreeJob;
-        static FolderNode ScanFolderTree(const std::filesystem::path& base);
-        std::filesystem::path m_TreeRevealedDirectory; // the folder the tree was last unfolded to
+        std::vector<ContentEntry> m_Entries;      // what the tiles show (folder content, or search results)
+        std::string m_Search;
+        int m_TypeFilter = 0;
+        std::filesystem::file_time_type m_FolderStamp{};
+        size_t m_RegistrySize = 0;
+        float m_RescanTimer = 0.0f;
+        bool m_EntriesDirty = true;
+        bool m_TreeDirty = true;
+        std::unordered_map<uint64_t, std::filesystem::path> m_TreeFolders; // tree node id -> absolute folder
+        bool m_ImportsWereRunning = false;
+        // What the tiles list now: a refresh of the same listing keeps its scroll position and selection.
+        std::filesystem::path m_ListedDirectory;
+        std::string m_ListedSearch;
+        int m_ListedFilter = -1;
+        size_t m_TreeSignature = 0; // the folder tree is rebuilt only when its folders changed
 
-        char m_SearchBuffer[128] = {0};
-        int m_TypeFilter = 0; // index into the toolbar's type list, 0 = all
-        float m_ThumbnailSize = 96.0f;
-        float m_Padding = 16.0f;
-        // Selected assets of the folder (click, Ctrl+click, Shift+click, Ctrl+A): dragging one of them drags all.
-        std::unordered_set<AssetHandle> m_Selected;
-        size_t m_LastClickedEntry = 0;
-        std::filesystem::path m_EntriesDirectory;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UITreeView> m_FolderTree;
+        Ref<ContentTileView> m_Tiles;
+        Ref<ContentPathBar> m_PathBar;
+        Ref<NoxUI::UIElement> m_ToolbarExtra;
+        Ref<NoxUI::UISearchBar> m_SearchBar;
+        Ref<NoxUI::UIDropdown> m_FilterDropdown;
+        Ref<NoxUI::UIButton> m_BackButton;
+        Ref<NoxUI::UIButton> m_ForwardButton;
+        Ref<NoxUI::UILabel> m_Footer;
 
-        char m_ImportDestPathBuffer[256] = {0};
-        char m_ImportFileNameBuffer[128] = {0};
-        std::filesystem::path m_PendingImportPath;
-        std::filesystem::path m_PendingExternalSourcePath;
-        std::filesystem::path m_PendingPackageDirectory;
-        bool m_ShowImportModal = false;
-        MeshImportSettings m_ImportSettings; // the import dialog's Static / Skeletal / Animations options
-        // What the dialog shows about the file (read when it opens): its size in the file's own units, and the unit the user picked.
-        void ReadImportFileInfo(const std::filesystem::path& absoluteSource);
-        bool m_ImportHasBounds = false;
-        glm::vec3 m_ImportBoundsMin{ 0.0f };
-        glm::vec3 m_ImportBoundsMax{ 0.0f };
-        int m_ImportSourceUnit = 0;         // WorldUnits::SourceUnit, or 5 = custom scale
-        float m_ImportFitHeightCm = 0.0f; // "Fit to height"; 0 = not set yet, and it is remembered across imports once you do
-        bool m_WindowHovered = false;
-        bool m_ShowCreateScriptModal = false;
-        char m_NewScriptName[128] = "NewBehaviour";
-        bool m_ShowCreateGraphModal = false;
-        char m_NewGraphName[128] = "NewAnimationGraph";
-        int m_CreateGraphKind = 0; // what the Create Graph dialog makes: 0 animation graph (.nanimgraph), 1 audio graph (.naudiograph), 2 material graph (.nmatgraph)
         std::function<void(AssetHandle)> m_OpenAsset;
-        std::function<AssetHandle(UUID, const std::filesystem::path&)> m_CreatePrefab;
-        std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> m_CreateVariant;
-        AssetHandle m_PendingShowAsset = 0;
-        bool m_HasVariantRequest = false;
-        AssetHandle m_VariantBase = 0;
-        // Handled at the start of the next frame (the entry list must not change while it is being drawn).
-        bool m_HasPrefabDrop = false;
-        UUID m_PrefabDropEntity = 0;
-        std::filesystem::path m_PrefabDropFolder;
-        AssetHandle m_RenameHandle = 0;
-        char m_RenameBuffer[128] = {0};
-        bool m_RenameFocus = false;
-        bool m_RenameCommit = false;
-        std::string m_RenameCommitText;
-
+        std::function<AssetHandle(uint64_t, const std::filesystem::path&)> m_CreatePrefab;
         std::function<void(std::unordered_set<AssetHandle>&)> m_SceneReferences;
-        // Asset management (Future.md item 2, B3): moves dropped on folders, deletes with their reference check, find references,
-        // unused assets. The lists are filled when the dialog opens (they read the project's files).
-        std::vector<AssetHandle> m_PendingMoveAssets;
-        std::filesystem::path m_PendingMoveFolder;
-        struct DeleteCandidate
-        {
-            AssetHandle Handle = 0;
-            std::string Name;
-            std::vector<std::string> UsedBy; // files, and "the open scene" for in-memory use
-        };
-        std::vector<DeleteCandidate> m_DeleteCandidates;
-        bool m_OpenDeleteDialog = false;
-        AssetHandle m_ReferencesAsset = 0;
-        std::vector<std::string> m_References;
-        bool m_OpenReferencesDialog = false;
-        // Sound Settings (clips and audio graphs): priority and concurrency, edited for the selected sounds and saved on OK.
-        AssetHandle m_SoundSettingsAsset = 0;
-        NoxAudio::AudioSoundSettings m_SoundSettings;
-        bool m_OpenSoundSettingsDialog = false;
-        // Replace References: from (the asset), to (picked in the dialog among the same type).
-        AssetHandle m_ReplaceFrom = 0;
-        AssetHandle m_ReplaceTo = 0;
-        char m_ReplaceFilter[128] = {};
-        bool m_OpenReplaceDialog = false;
-        std::function<void(AssetHandle, AssetHandle)> m_ReplaceInScenes;
-        struct UnusedEntry
-        {
-            AssetHandle Handle = 0;
-            std::string Path;
-            bool Delete = true;
-        };
-        std::vector<UnusedEntry> m_UnusedAssets;
-        bool m_OpenUnusedDialog = false;
+        std::function<AssetHandle(AssetHandle, const std::filesystem::path&)> m_CreateVariant;
+        std::function<void(AssetHandle, AssetHandle)> m_ReplaceReferences;
+        std::function<void(NoxUI::UINotification)> m_Notify;
+        AssetHandle m_PendingShow = 0;
 
-        // Sound preview (a clip's play button, or a double-click): plays the clip once through the editor's own voices (the Editor
-        // group: Play / Stop leave it alone), as Unreal's thumbnail play button does. Clicking again, or another clip, stops it.
-        void ToggleAudioPreview(AssetHandle clip);
-        void UpdateAudioPreview();
-        bool IsPreviewing(AssetHandle clip) const;
-        AssetHandle m_PreviewClip = 0;
-        uint64_t m_PreviewVoice = 0; // NoxAudio::AudioVoiceHandle
-        bool m_PreviewPending = false; // waiting for the clip to load
+        struct ReferenceCheck
+        {
+            ReferenceCheckMode Mode = ReferenceCheckMode::Delete;
+            std::vector<AssetHandle> Handles;
+            std::unordered_set<AssetHandle> InScene;          // what the open scenes use (taken on the main thread)
+            std::future<std::vector<std::vector<std::filesystem::path>>> Users; // per handle
+            NoxUI::UIContext* Context = nullptr;                 // the window it was asked in (the dialog opens there)
+            std::string Name;                                 // the first asset's file name
+        };
+        std::unique_ptr<ReferenceCheck> m_ReferenceCheck;
     };
-};
+}

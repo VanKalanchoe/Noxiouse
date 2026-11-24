@@ -1,65 +1,74 @@
 #pragma once
+
 #include <functional>
 #include <set>
+#include <string>
+#include <unordered_map>
 #include <vector>
+
 #include <glm/glm.hpp>
 
 #include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/WorldPartition.h"
 
+namespace NoxUI
+{
+        class UIContext;
+        class UIElement;
+        class UIStackBox;
+    }
+
 namespace Nox
 {
-    class Scene;
     class HLODBuilder;
+    class Scene;
+    class WorldPartitionMap;
 
-    // World partition (docs/Engine_Architecture_Plan_2026.md §5.13.1), like Unreal's World Partition window: the world's cells on a
-    // top-down map -- their state (unloaded, loading, loaded), their content bounds, the editor camera and its loading range -- to
-    // load and unload cells or regions by hand while editing; in Play and Simulate the streaming's state, read-only. Also converts a
-    // scene into a world and changes its settings. Window > World Partition.
+    // Window > World Partition (Unreal's World Partition window): converts a scene into a world and changes its settings; the
+    // world's cells on a top-down map (unloaded, loading, loaded, activated; their content bounds; the editor camera and its
+    // loading range) to load and unload cells by hand while editing; the HLOD settings and Build HLODs. In Play and Simulate the
+    // streaming's state, read-only.
     class WorldPartitionPanel
     {
     public:
-        // Saves the scene (unloading a changed cell asks to save first).
-        void SetSaveCallback(std::function<void()> save) { m_Save = std::move(save); }
-        // Build HLODs (the editor saves, builds over the next frames, and saves again); the build running, if any.
-        void SetBuildHLODsCallback(std::function<void()> build, std::function<const HLODBuilder*()> running)
+        struct Hooks
         {
-            m_BuildHLODs = std::move(build);
-            m_RunningBuild = std::move(running);
-        }
+            std::function<Ref<Scene>()> ActiveScene;
+            std::function<bool()> Editing;
+            std::function<glm::dvec3()> StreamingSource;   // the camera the cells stream around
+            std::function<void()> Save;
+            std::function<void()> SceneChanged;            // a world setting changed (an undo step; unsaved)
+            std::function<void()> BuildHLODs;
+            std::function<const HLODBuilder*()> RunningBuild;
+            std::function<void(const std::string& text, std::function<void()> save, std::function<void()> dontSave)> AskSave;
+        };
 
-        // `scene`: the scene shown (the editor's while editing, the running copy in Play / Simulate); `editing`: cells can be changed.
-        void OnImGuiRender(const Ref<Scene>& scene, const glm::dvec3& cameraPosition, bool editing);
-
-        bool IsOpen() const { return m_Open; }
-        void SetOpen(bool open) { m_Open = open; }
-        // The loaded cells' content bounds in the viewports.
-        bool ShowCellsInViewport() const { return m_Open && m_ShowInViewport; }
-
-    private:
-        void DrawSettings(Scene& scene, bool editing);
-        void DrawToolbar(Scene& scene, const glm::dvec3& cameraPosition, bool editing);
-        void DrawMap(Scene& scene, const glm::dvec3& cameraPosition, bool editing);
-        void DrawHLODs(Scene& scene, bool editing);
-        void DrawUnloadPrompt(Scene& scene);
-        // Unloads the cells, asking first when one has unsaved changes.
-        void RequestUnload(Scene& scene, std::vector<WorldCellCoord> cells);
+        void SetHooks(Hooks hooks) { m_Hooks = std::move(hooks); }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
+        void Update();
+        // The loaded cells' content bounds drawn in the viewports (while the window is open and Show in Viewport is on).
+        bool ShowCellsInViewport() const { return m_ShowInViewport; }
 
     private:
-        bool m_Open = false;
+        uint64_t Signature() const;
+        void Rebuild();
+        // Unloads the cells, asking first (Save / Don't Save / Cancel) when one has unsaved changes.
+        void RequestUnload(std::vector<WorldCellCoord> cells);
+        void Changed() const;
+
+        Hooks m_Hooks;
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
+        Ref<NoxUI::UIElement> m_Map; // (a WorldPartitionMap, defined in the .cpp)
+        std::unordered_map<std::string, bool> m_Expanded;
+        uint64_t m_Signature = 0;
+        bool m_Rebuild = true;
         bool m_ShowInViewport = true;
         bool m_FollowCamera = true;
-        glm::vec2 m_ViewCenter{ 0.0f };   // world x, z at the map's center
-        float m_UnitsPerPixel = 0.0f;     // 0: fitted to the world on the next draw
-        std::set<WorldCellCoord> m_Selection;
-        bool m_BoxSelecting = false;
-        glm::vec2 m_BoxStart{ 0.0f };
-        std::vector<WorldCellCoord> m_PendingUnload; // waiting for the save prompt's answer
-        bool m_OpenUnloadPrompt = false;
         WorldPartitionSettings m_NewSettings;  // the convert / cell size fields
         const Scene* m_SettingsScene = nullptr; // the scene they were taken from
-        std::function<void()> m_Save;
-        std::function<void()> m_BuildHLODs;
-        std::function<const HLODBuilder*()> m_RunningBuild;
+        std::set<WorldCellCoord> m_Selection;   // cells picked on the map
     };
 }

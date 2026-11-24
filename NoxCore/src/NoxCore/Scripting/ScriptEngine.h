@@ -54,6 +54,10 @@ namespace Nox
         }
         static IScriptBackend* GetBackend() { return s_Backend.get(); }
         static std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName);
+        static std::vector<ScriptEventInfo> GetExposedEvents(std::string_view fullName);
+        static std::vector<std::string> GetCallableMethods(std::string_view fullName);
+        // Connects all ScriptComponent::EventBindings across the active runtime scene (called after entities are created or reloaded).
+        static void BindAllEvents();
     private:
         // Exposed field values of an entity's script instances: class -> field -> value (kept across a hot reload).
         using FieldSnapshot = std::unordered_map<std::string, std::unordered_map<std::string, ScriptValue>>;

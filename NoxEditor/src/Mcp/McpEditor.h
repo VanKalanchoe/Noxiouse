@@ -28,10 +28,8 @@ namespace Nox::Mcp
 
         // Main thread, at the start of each frame: the tool calls that came in run here.
         void Update();
-        // Inside a menu (Tools): the MCP Server sub-menu.
-        void DrawMenu();
 
-        // The same, for a menu that is not ImGui's (NoxEditorV2): what the menu shows and what its items do.
+        // What the Tools > MCP Server menu shows and what its items do.
         struct MenuState
         {
             bool Enabled = false;

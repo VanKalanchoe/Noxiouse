@@ -14,13 +14,13 @@
 #include "NoxCore/Asset/AssetManager.h"
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/TextureImporter.h"
-#include "NoxCore/Core/VirtualFileSystem.h"
-#include "NoxCore/Scripting/ScriptEngine.h"
+#include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/VirtualFileSystem.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Project/ProjectSerializer.h"
-#include "NoxCore/Core/Application.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Scripting/ScriptEngine.h"
 
 namespace Nox
 {
@@ -45,7 +45,6 @@ namespace Nox
                 return true;
             }
 
-            // A directory tree, skipping what `skip` refuses (given the path relative to `source`).
             template <typename Skip>
             void Tree(const std::filesystem::path& source, const std::filesystem::path& destination, Skip&& skip)
             {
@@ -71,7 +70,6 @@ namespace Nox
             return text;
         }
 
-        // `path` is `directory` or somewhere below it.
         bool IsWithin(const std::filesystem::path& path, const std::filesystem::path& directory)
         {
             std::error_code error;
@@ -79,7 +77,6 @@ namespace Nox
             return !relative.empty() && *relative.begin() != "..";
         }
 
-        // The files a .gltf names (buffers, images), relative to it; data: URIs are inside the file.
         std::vector<std::string> GltfUris(const std::filesystem::path& gltf)
         {
             std::vector<std::string> uris;
@@ -112,7 +109,6 @@ namespace Nox
         const std::filesystem::path engineAssets = std::filesystem::current_path() / "assets";
         const std::filesystem::path output = settings.OutputDirectory;
 
-        // A server is named <Project>Server: that name alone makes the runtime a dedicated server (and a game's must not end so).
         const std::string baseName = settings.Server ? config.Name + "Server" : config.Name;
 #ifdef _WIN32
         const std::filesystem::path runtime = binaryDirectory / "NoxRuntime.exe";
@@ -148,24 +144,26 @@ namespace Nox
 
         std::error_code error;
         std::filesystem::create_directories(output, error);
-        // The game's content is written fresh (a stale asset must not ship); the rest is overwritten file by file.
         std::filesystem::remove_all(output / "Game", error);
         Copier copier{ report };
 
-        // 1. The runtime: everything next to the editor's executable but the editor, debug files and editor state (and the output
-        //    folder itself, when it was chosen in there).
         const std::string assemblyName = ScriptEngine::GetProjectAssemblyName();
         copier.Tree(binaryDirectory, output, [&](const std::filesystem::path& relative, bool directory)
         {
-            // Scripts/: the engine's (Core) and this project's assembly only, not another game's built next to the editor.
             if (directory && relative.parent_path() == "Scripts" && relative.filename() != "Core" && relative.filename() != assemblyName)
                 return true;
             if (directory)
                 return IsWithin(binaryDirectory / relative, output) || (relative.parent_path().empty() && Lower(relative.filename().string()) == "assets") ||
-                       (settings.Server && relative.parent_path().empty() && Lower(relative.filename().string()) == "shaders"); // (a server draws nothing)
+                       (settings.Server && relative.parent_path().empty() &&
+                        (Lower(relative.filename().string()) == "shaders" || Lower(relative.filename().string()) == "agilitysdk"));
             const std::string name = Lower(relative.filename().string());
             const std::string extension = Lower(relative.extension().string());
-            if (settings.PrecompiledShadersOnly && name.rfind("slang", 0) == 0 && (extension == ".dll" || extension == ".so" || extension == ".dylib"))
+            if (settings.PrecompiledShadersOnly &&
+                ((name.rfind("slang", 0) == 0 || name == "dxcompiler.dll" || name == "dxil.dll") &&
+                 (extension == ".dll" || extension == ".so" || extension == ".dylib")))
+                return true;
+            // Never ship the D3D12 debug validation layer in packaged games; AgilitySDK/D3D12Core.dll is copied automatically.
+            if (name == "d3d12sdklayers.dll")
                 return true;
             return name.rfind("noxeditor", 0) == 0 || name.rfind("noxruntime", 0) == 0 || extension == ".pdb" || extension == ".ilk" ||
                    extension == ".exp" || extension == ".lib" || extension == ".log" || name == "imgui.ini";
@@ -173,7 +171,6 @@ namespace Nox
         report.Executable = output / executableName;
         copier.File(runtime, report.Executable);
 
-        // The project's scripts as last built (the project's own build, or the one next to the editor): Scripts/<Name>/.
         {
             std::filesystem::path core, game;
             if (ScriptEngine::FindAssemblies(core, game))
@@ -190,7 +187,6 @@ namespace Nox
                 report.Warnings.push_back("The project's script assembly was not found (build its scripts first): scripts will not run");
         }
 
-        // 1b. The .NET runtime itself (self-contained): its host resolver and the shared framework, version 9.
         if (settings.SelfContainedDotNet)
         {
             std::vector<std::filesystem::path> roots;
@@ -205,20 +201,19 @@ namespace Nox
             bool copied = false;
             for (const std::filesystem::path& root : roots)
             {
-                // The newest 9.x of each part.
-                auto newest9 = [&](const std::filesystem::path& folder)
+                auto newest10 = [&](const std::filesystem::path& folder)
                 {
                     std::filesystem::path best;
                     for (const auto& entry : std::filesystem::directory_iterator(folder, error))
                     {
                         const std::string name = entry.path().filename().string();
-                        if (entry.is_directory(error) && name.rfind("9.", 0) == 0 && (best.empty() || name > best.filename().string()))
+                        if (entry.is_directory(error) && name.rfind("10.", 0) == 0 && (best.empty() || name > best.filename().string()))
                             best = entry.path();
                     }
                     return best;
                 };
-                const std::filesystem::path fxr = newest9(root / "host/fxr");
-                const std::filesystem::path framework = newest9(root / "shared/Microsoft.NETCore.App");
+                const std::filesystem::path fxr = newest10(root / "host/fxr");
+                const std::filesystem::path framework = newest10(root / "shared/Microsoft.NETCore.App");
                 if (fxr.empty() || framework.empty())
                     continue;
                 auto all = [](const std::filesystem::path&, bool) { return false; };
@@ -228,19 +223,15 @@ namespace Nox
                 break;
             }
             if (!copied)
-                report.Warnings.push_back("Self-contained .NET: no .NET 9 runtime found (DOTNET_ROOT, Program Files/dotnet): the game needs one installed");
+                report.Warnings.push_back("Self-contained .NET: no .NET 10 runtime found (DOTNET_ROOT, Program Files/dotnet): the game needs one installed");
         }
 
-        // The project's Material Shaders (Custom Lit, CustomLitShaders.h) and material graphs went with the executable's shaders/ folder
-        // above: the generated sources in shaders/Generated and their binaries, as the editor last built them (the graphs themselves go
-        // in the pack: the game compiles their parameter layouts again). A build that failed has no binary to ship.
         if (!settings.Server)
         {
             if (const Renderer* renderer = Application::Get().GetRenderer();
                 renderer && renderer->GetCustomLitStatus().ShaderCount > 0 && !renderer->GetCustomLitStatus().Ready)
                 report.Warnings.push_back("The project's Material Shaders do not compile (" + renderer->GetCustomLitStatus().Message +
                                           "): Custom Lit materials are lit as Default Lit in the game until they do and it is packaged again");
-            // The material graphs likewise (the same generated file; the G-buffer resolve's variant): a graph not built is not drawn.
             if (const Renderer* renderer = Application::Get().GetRenderer(); renderer)
             {
                 const Renderer::CustomLitStatus& status = renderer->GetCustomLitStatus();
@@ -250,13 +241,11 @@ namespace Nox
                 if (status.GraphCount > 0 && !status.GraphsReady)
                     report.Warnings.push_back("The project's material graphs are not built (" + (status.Building ? std::string("still building") : status.Message) +
                                               "): their materials show their own values in the game until they are and it is packaged again");
-                for (const auto& [path, error] : status.GraphErrors)
-                    report.Warnings.push_back("Material graph " + path + " does not compile (" + error + "): its materials show their own values");
+                for (const auto& [path, err] : status.GraphErrors)
+                    report.Warnings.push_back("Material graph " + path + " does not compile (" + err + "): its materials show their own values");
             }
         }
 
-        // 2. The engine's assets the runtime reads (shaders are compiled at start, fonts for text, textures for defaults) -- none for a
-        //    server, which draws nothing.
         for (const char* folder : { "shaders", "fonts", "textures" })
         {
             if (settings.Server)
@@ -267,9 +256,7 @@ namespace Nox
                 report.Warnings.push_back(std::string("The engine's assets/") + folder + " folder was not found (is the editor running from NoxEditor/?)");
         }
 
-        // 3. The assets the scenes need.
         std::vector<AssetHandle> roots{ config.StartScene };
-        // The project's mixer (and the impulse responses its convolution reverbs name).
         if (const AssetHandle mixer = assetManager->FindHandleByPath(config.AudioMixer, AssetType::AudioMixer))
             roots.push_back(mixer);
         else
@@ -288,8 +275,6 @@ namespace Nox
             if (it->is_regular_file(error) && it->path().extension() == ".cs")
                 scripts.push_back(it->path());
         }
-        // A world's cells (§5.13.1) are scene files that are not assets: what they name is needed too, and they ship with their scene.
-        // Again until no new world turns up (a level a cell names can be a world).
         std::unordered_set<AssetHandle> assets = assetManager->CollectDependencies(roots, scripts);
         std::vector<std::filesystem::path> cellFiles;
         for (size_t found = 0;;)
@@ -309,7 +294,7 @@ namespace Nox
                 }
                 catch (const YAML::Exception&)
                 {
-                    continue; // (not text: a runtime scene, which is never a project's own)
+                    continue;
                 }
                 if (cellDirectory.empty())
                     continue;
@@ -326,7 +311,6 @@ namespace Nox
             tokenFiles.insert(tokenFiles.end(), cellFiles.begin(), cellFiles.end());
             assets = assetManager->CollectDependencies(roots, tokenFiles);
         }
-        // A server leaves out what only drawing and sound use: it never loads them (NET0: textures, fonts, sound clips, acoustics).
         if (settings.Server)
         {
             std::erase_if(assets, [&](AssetHandle handle)
@@ -344,7 +328,6 @@ namespace Nox
             if (std::filesystem::exists(source, error))
                 copier.File(source, gameAssets / relative);
         };
-        // A file and its companions next to it ("x.nsmesh.hash", "x.nanim.notifies").
         auto copyWithCompanions = [&](const std::filesystem::path& relative)
         {
             copyAsset(relative);
@@ -365,11 +348,9 @@ namespace Nox
             {
             case AssetType::Texture2D:
             {
-                // The cooked .ntex beside the source (the source stays home); a texture never cooked ships its source to cook there.
                 std::filesystem::path cooked = metadata.FilePath;
                 if (cooked.extension() != ".ntex")
                     cooked.replace_extension(".ntex");
-                // Not cooked yet: cooked now (the game then ships the GPU-ready, block-compressed file, not the PNG/JPG).
                 if (!std::filesystem::exists(assetDirectory / cooked, error) && TextureImporter::CookTexture(assetDirectory, metadata))
                     ++report.Cooked;
                 if (std::filesystem::exists(assetDirectory / cooked, error))
@@ -383,7 +364,6 @@ namespace Nox
             }
             case AssetType::MeshSource:
             {
-                // A model placed as itself: the file and what it names (buffers, images).
                 copyWithCompanions(metadata.FilePath);
                 const std::filesystem::path folder = metadata.FilePath.parent_path();
                 for (const std::string& uri : GltfUris(assetDirectory / metadata.FilePath))
@@ -397,13 +377,10 @@ namespace Nox
         }
 
         for (const std::filesystem::path& cell : cellFiles)
-            copyWithCompanions(cell.lexically_relative(assetDirectory)); // (and its cooked file, "<cell>.noxcell.cooked")
+            copyWithCompanions(cell.lexically_relative(assetDirectory));
 
-        // 4. Its registry and the project file.
         assetManager->SerializeAssetRegistry(gameAssets / config.AssetRegistryPath, assets);
 
-        // 5. Into one pack: the game opens it and reads each asset's bytes from its offset when it loads (only the table of
-        //    contents stays in memory); the loose copies go.
         if (settings.PackFiles)
         {
             std::vector<std::filesystem::path> files;
@@ -418,7 +395,7 @@ namespace Nox
             if (VFS::WritePack(output / "Game" / "Content.npak", gameAssets, files, packError, &packBytes))
             {
                 std::filesystem::remove_all(gameAssets, error);
-                report.Files = report.Files - std::min(report.Files, files.size()) + 1; // (the files on disk: the packed ones are one pack now)
+                report.Files = report.Files - std::min(report.Files, files.size()) + 1;
                 NOX_CORE_INFO("Packed {} files into Content.npak ({:.1f} MB)", files.size(), static_cast<double>(packBytes) / (1024.0 * 1024.0));
             }
             else

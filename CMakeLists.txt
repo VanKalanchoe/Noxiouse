@@ -102,13 +102,8 @@ if(NOX_WITH_MCP)
 endif()
 add_subdirectory(NoxEditor)
 
-option(NOX_BUILD_EDITOR_V2 "Build NoxEditorV2 (custom UI editor)" ON)
-if(NOX_BUILD_EDITOR_V2)
-    add_subdirectory(NoxEditorV2)
-endif()
-
 # The standalone player (docs/Runtime_And_Packaging_Plan_2026-10.md, R1). Off by default until it has been built and tried.
-option(NOX_BUILD_RUNTIME "Build NoxRuntime, the standalone player (no editor)" OFF)
+option(NOX_BUILD_RUNTIME "Build NoxRuntime, the standalone player (no editor)" ON)
 if(NOX_BUILD_RUNTIME)
     add_subdirectory(NoxRuntime)
 endif()
@@ -118,3 +113,4 @@ option(NOX_BUILD_TESTS "Build the engine's command-line tests (NoxNetTest, NoxTo
 if(NOX_BUILD_TESTS)
     add_subdirectory(Tests)
 endif()
+

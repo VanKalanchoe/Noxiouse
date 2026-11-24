@@ -5,7 +5,6 @@
 #include <utility>
 #include <vector>
 
-#include <imgui.h>
 #include <NRIHPP/NRI.hpp>
 
 #include "NoxCore/Asset/Asset.h"
@@ -73,11 +72,6 @@ namespace Nox
         void generateMipmaps(nri::CommandBuffer& cmdBuffer)
         {
             m_Texture.generateMipmaps(cmdBuffer.handle());
-        }
-
-        ImTextureID getImTextureID() const
-        {
-            return m_Texture ? static_cast<ImTextureID>(m_Texture.getDescriptorSlot()) : static_cast<ImTextureID>(0);
         }
 
         static AssetType GetStaticType() { return AssetType::Texture2D; }

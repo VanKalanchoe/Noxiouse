@@ -19,7 +19,6 @@ namespace Nox
 
         virtual void OnUpdate(Timestep ts) {}
         virtual void OnRender() {}
-        virtual void OnImGuiRender() {}
         
         const std::string& GetName() const { return m_Name; }
 

@@ -2,7 +2,6 @@
 #include "NoxCore/Utils/Utils.h"
 
 #define SDL_MAIN_USE_CALLBACKS 1  /* use the callbacks instead of main() */
-#include <imgui_impl_sdl3.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -17,7 +16,6 @@
 #include "NoxCore/Events/InputEvents.h"
 #include "NoxCore/Events/WindowEvents.h"
 #include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/ImGui/ImGuiLayer.h"
 #include "NoxCore/UI/Core/UILayer.h"
 #include <NoxTasks/NoxTasks.h>
 #include <NoxNet/NetLog.h>
@@ -129,17 +127,14 @@ namespace Nox
 #endif
         m_Window = std::make_shared<Window>(m_Specification.WindowSpec);
 
-        renderer = std::make_unique<Renderer>(m_Window, m_Specification.isEditor, m_Specification.UseImGui);
+        renderer = std::make_unique<Renderer>(m_Window, m_Specification.isEditor);
 
-        // ImGui
-        if (m_Specification.isEditor && m_Specification.UseImGui)
-            m_ImGuiLayer = PushLayer<ImGuiLayer>(*renderer);
-        else if (!m_Specification.UseImGui && m_Window && m_Window->getHandle())
+        if (m_Specification.isEditor && m_Window && m_Window->getHandle())
             m_UILayer = PushLayer<UILayer>(*m_Window, *renderer);
 
 #if NOX_PROFILE_STATS
-        // Nox Stats (F3) for every app: an ImGui window in the editor, the engine's screen-space text in a game.
-        PushLayer<StatsOverlayLayer>(*renderer, m_Specification.isEditor);
+        // Nox Stats (F3) screen-space overlay for both editor and runtime.
+        PushLayer<StatsOverlayLayer>(*renderer);
 #endif
     }
 
@@ -160,8 +155,6 @@ namespace Nox
         while (!m_LayerStack.empty())
         {
             Layer* layer = m_LayerStack.back().get();
-            if (layer == m_ImGuiLayer)
-                m_ImGuiLayer = nullptr;
             if (layer == m_UILayer)
                 m_UILayer = nullptr;
             m_LayerStack.pop_back();
@@ -208,15 +201,6 @@ namespace Nox
                 NOX_PROFILE_SCOPE("Layers OnRender");
                 for (const std::unique_ptr<Layer>& layer : m_LayerStack)
                     layer->OnRender();
-            }
-
-            if (applicationState.app->GetSpecification().isEditor && m_ImGuiLayer)
-            {
-                NOX_PROFILE_SCOPE("ImGui Build");
-                m_ImGuiLayer->Begin();
-                for (const std::unique_ptr<Layer>& layer : m_LayerStack)
-                    layer->OnImGuiRender();
-                m_ImGuiLayer->End();
             }
 
             if (renderer)
@@ -354,23 +338,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
     return SDL_APP_CONTINUE; /* carry on with the program! */
 }
 
-// While the mouse is captured (relative mode: the editor camera flying, a script's Input.CursorLocked) it is the viewport's alone, as
-// in Unreal. SDL still puts a position in its events then, a virtual one moved by the motion across the whole window under the hidden
-// cursor, and ImGui followed it: hovering and clicking the hierarchy or the details panel behind the viewport. Releases still reach
-// ImGui, so the button that started the capture is not left held there.
-static bool ImGuiTakesEvent(const SDL_Event& event)
-{
-    switch (event.type)
-    {
-    case SDL_EVENT_MOUSE_MOTION:
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_WHEEL:
-        return !Nox::Input::IsRelativeMouseMode();
-    default:
-        return true;
-    }
-}
-
 /* This function runs when a new event (mouse input, keypresses, etc) occurs. */
 SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 {
@@ -379,9 +346,6 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
     auto applicationState = static_cast<Nox::AppState*>(appstate);
     if (!applicationState || !applicationState->app)
         return SDL_APP_CONTINUE;
-
-    if (applicationState->app->GetSpecification().isEditor && applicationState->app->GetSpecification().UseImGui && ImGuiTakesEvent(*currentEvent))
-        ImGui_ImplSDL3_ProcessEvent(currentEvent);
 
     if (Nox::UILayer* uiLayer = applicationState->app->GetUILayer())
     {

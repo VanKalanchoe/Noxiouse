@@ -1,6 +1,6 @@
 namespace Nox;
 
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Event)]
 public sealed class ExposeAttribute : Attribute
 {
     // Optional unit hint for the Inspector, like Unreal's "Units" property metadata: "cm", "m", "cm/s", "m/s" or "km/h". The field

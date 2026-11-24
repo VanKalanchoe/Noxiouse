@@ -875,9 +875,18 @@ namespace Nox
             bool IsModelNode() const { return ModelInstance != 0; }
         };
 
+        struct EventBinding
+        {
+            UUID TargetEntity = 0;
+            std::string TargetClass;
+            std::string TargetMethod;
+        };
+
         std::vector<std::string> ClassNames;
         std::unordered_map<std::string, std::unordered_map<std::string, EntityReference>> EntityReferences;
         std::unordered_map<std::string, std::unordered_map<std::string, ScriptValue>> FieldOverrides;
+        // className -> eventName -> list of target (entity, class, method) bindings wired in the Inspector.
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<EventBinding>>> EventBindings;
         
         ScriptComponent() = default;
         ScriptComponent(const ScriptComponent&) = default;

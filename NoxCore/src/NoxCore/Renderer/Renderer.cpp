@@ -36,8 +36,6 @@
 #include "NoxCore/Utils/PlatformUtils.h"
 #include "Passes/FrameGraphResources.h"
 
-#include <imgui_impl_sdl3.h>
-#include <NRIHPP/imgui_impl_noxrhi.h>
 #include <NoxUI/Backends/noxui_impl_noxrhi.h>
 
 namespace Nox
@@ -528,7 +526,7 @@ namespace Nox
         return packed;
     }
 
-    Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor, bool useImGui) : m_window(std::move(window)), m_isEditor(isEditor), m_useImGui(useImGui)
+    Renderer::Renderer(std::shared_ptr<Window> window, bool isEditor) : m_window(std::move(window)), m_isEditor(isEditor)
     {
         NOX_CORE_INFO("Renderer Start");
 
@@ -847,7 +845,6 @@ namespace Nox
 
 
         ShutdownNoxUI();
-        shutdownImGui();
         NoxUI::UIGlyphCache::Get().SetTextureID(NoxUI::kInvalidTextureID);
         NoxUI::UIGlyphCache::Get().Reset();
         m_glyphAtlas = nullptr;
@@ -1519,7 +1516,7 @@ namespace Nox
 
         m_device.waitIdle();
         // The game's final image is in the bindless heap: the old one leaves it before the new one is registered.
-        if ((!m_isEditor || !m_useImGui) && m_sceneResource)
+        if (m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() != ~0u)
             m_resourceHeap.unregisterTexture(m_sceneResource->GetDescriptorIndexSlot());
         createSceneResources();
 
@@ -4427,7 +4424,7 @@ namespace Nox
     {
         if (!texture)
             return;
-        const uint32_t slot = (!m_useImGui) ? texture->GetDescriptorIndexSlot() : ~0u;
+        const uint32_t slot = texture->GetDescriptorIndexSlot();
         std::scoped_lock lock(m_deferredReleasesMutex);
         if (slot != ~0u)
             m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, DeferredTextureSlot{ slot, std::move(texture) } });
@@ -7154,48 +7151,6 @@ namespace Nox
         m_noxUIInitialized = false;
     }
 
-    void Renderer::initImGui()
-    {
-        if (m_imguiInitialized || !m_device || !m_window)
-            return;
-        ImGui_ImplSDL3_InitForOther(m_window->getHandle());
-        ImGui_ImplNoxRHI_InitInfo info{};
-        info.device = &m_device;
-        info.resourceHeap = &m_resourceHeap;
-        info.samplerHeap = &m_samplerHeap;
-        info.samplerSlot = 0;
-        info.colorFormat = NRI_FORMAT_SURFACE;
-        info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-        info.linearColorOutput = true;
-        info.enableViewports = (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0;
-        m_imguiInitialized = ImGui_ImplNoxRHI_Init(info);
-    }
-
-    void Renderer::shutdownImGui()
-    {
-        if (!m_imguiInitialized)
-            return;
-        if (m_device)
-            m_device.waitIdle();
-        ImGui_ImplNoxRHI_Shutdown();
-        m_imguiInitialized = false;
-    }
-
-    void Renderer::beginImGui()
-    {
-        if (m_imguiInitialized)
-            ImGui_ImplNoxRHI_NewFrame();
-    }
-
-    void Renderer::endImGui()
-    {
-        if (m_imguiInitialized && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable))
-        {
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-        }
-    }
-
     bool Renderer::evaluateNRDShadows(nri::CommandBuffer& cmd, NriTexture inPenumbra, NriTexture inMV, NriTexture inNormalRough,
                                       NriTexture inViewZ, NriTexture outShadow, const float lightDir[3], glm::vec2 mvScale,
                                       uint32_t frameIdx, bool resetHistory)
@@ -7730,7 +7685,7 @@ namespace Nox
                 .format = NRI_FORMAT_SURFACE,
                 .directFormat = UINT32_MAX
             }));
-            if (!m_useImGui && view.Output && m_resourceHeap)
+            if (view.Output && m_resourceHeap)
                 m_resourceHeap.registerTexture(*view.Output);
             view.Size = size;
         }

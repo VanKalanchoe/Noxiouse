@@ -288,7 +288,7 @@ namespace Nox
     class Renderer
     {
     public:
-        Renderer(std::shared_ptr<Nox::Window> window, bool isEditor, bool useImGui = true);
+        Renderer(std::shared_ptr<Nox::Window> window, bool isEditor);
         ~Renderer();
 
         NoxUI::UIDrawList* GetUIDrawList() { return &m_uiDrawList; }
@@ -359,10 +359,6 @@ namespace Nox
 
         void drawFrame();
         void resizeWindow();
-        void initImGui();
-        void shutdownImGui();
-        void beginImGui();
-        void endImGui();
 
         void BeginScene(const Camera& camera, const glm::dmat4& cameraWorldMatrix);
         // Large world coordinates (Engine_Architecture_Plan_2026.md §5.14a): the GPU's world space is centred on this point, which
@@ -2892,13 +2888,11 @@ namespace Nox
         glm::vec3 m_cameraForward{0.0f, 0.0f, -1.0f};
         float m_cameraNear = 0.1f;
         float m_cameraFOV = 30.0f;
-        bool m_useImGui = true;
         nri::Upscaler m_dlssSR{};
         nri::Upscaler m_dlssRR{};
         nri::Denoiser m_denoiser{};
         NoxUI::UIDrawList m_uiDrawList;
         bool m_noxUIInitialized = false;
-        bool m_imguiInitialized = false;
         // The UI glyph cache's atlas (RendererGlyphAtlas.cpp): R8, created on first use. uploadGlyphAtlas copies the glyphs rasterized
         // since the last call (true when it recorded copies); resetGlyphAtlasIfFull empties a full atlas between frames.
         Ref<Texture2D> m_glyphAtlas;

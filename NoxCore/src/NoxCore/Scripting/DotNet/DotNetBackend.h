@@ -23,6 +23,10 @@ namespace Nox
         static constexpr int32_t kScriptApiVersion = 23;
         bool HasType(std::string_view fullName) const override;
         std::vector<ScriptFieldInfo> GetExposedFields(std::string_view fullName) const override;
+        std::vector<ScriptEventInfo> GetExposedEvents(std::string_view fullName) const override;
+        std::vector<std::string> GetCallableMethods(std::string_view fullName) const override;
+        bool SubscribeEvent(ScriptInstanceHandle source, std::string_view eventName,
+                            ScriptInstanceHandle target, std::string_view targetMethod) override;
         ScriptInstanceHandle CreateInstance(std::string_view fullName, UUID entity) override;
         void SetEntityField(ScriptInstanceHandle instance, std::string_view fieldName, UUID entity) override;
         void SetFieldValue(ScriptInstanceHandle instance, std::string_view fieldName, const ScriptValue& value) override;
@@ -42,9 +46,8 @@ namespace Nox
     private:
         struct Instance { uint32_t Generation; Coral::ManagedObject Object; std::string ClassName; int32_t CallbackMask = 0; };
         Instance* FindInstance(ScriptInstanceHandle handle);
+        const ScriptFieldInfo* FindExposedField(std::string_view className, std::string_view fieldName) const;
         void ClearModule();
-        // Loads the assemblies into a new load context (no module may be loaded); false (nothing loaded) when they do not load.
-        bool LoadModuleFrom(const std::filesystem::path& coreAssembly, const std::filesystem::path& gameAssembly);
         void RegisterInternalCalls(Coral::ManagedAssembly& coreAssembly);
 
         Coral::HostInstance m_Host;
@@ -53,6 +56,8 @@ namespace Nox
         Coral::ManagedAssembly* m_GameAssembly = nullptr;
         std::unordered_map<std::string, const Coral::Type*> m_Types;
         std::unordered_map<std::string, std::vector<ScriptFieldInfo>> m_ExposedFields;
+        std::unordered_map<std::string, std::vector<ScriptEventInfo>> m_ExposedEvents;
+        std::unordered_map<std::string, std::vector<std::string>> m_CallableMethods;
         std::unordered_map<std::string, int32_t> m_CallbackMasks; // per class (EntityBehaviour.GetCallbackMask)
         std::unordered_map<std::string, uint32_t> m_ReplicatedFieldCounts; // per class (EntityBehaviour.NetReplicatedFieldCount)
         std::vector<uint8_t> m_NetBuffer = std::vector<uint8_t>(4096); // the scripts write their replicated fields into it

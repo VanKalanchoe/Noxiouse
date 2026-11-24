@@ -261,7 +261,7 @@ namespace Nox::ProjectLibrary
             "    <OutputType>Library</OutputType>\n"
             "    <AssemblyName>" + name + "</AssemblyName>\n"
             "    <RootNamespace>" + name + "</RootNamespace>\n"
-            "    <TargetFramework>net9.0</TargetFramework>\n"
+            "    <TargetFramework>net10.0</TargetFramework>\n"
             "    <ImplicitUsings>enable</ImplicitUsings>\n"
             "    <Nullable>enable</Nullable>\n"
             "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"

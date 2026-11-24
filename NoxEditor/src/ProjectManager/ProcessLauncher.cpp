@@ -76,6 +76,7 @@ namespace Nox
         CloseHandle(process.hProcess);
         return true;
     }
+
     bool ChildProcess::Launch(const std::filesystem::path& executable, const std::vector<std::string>& arguments, bool console, std::string& error)
     {
         Kill();
@@ -136,6 +137,7 @@ namespace Nox
         SDL_DestroyProcess(process); // (only the handle: the process keeps running)
         return true;
     }
+
     bool ChildProcess::Launch(const std::filesystem::path& executable, const std::vector<std::string>& arguments, bool console, std::string& error)
     {
         (void)console; // (a terminal program's output goes where this process's goes)

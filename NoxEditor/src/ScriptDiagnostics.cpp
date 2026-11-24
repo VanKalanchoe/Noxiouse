@@ -43,7 +43,7 @@ namespace Nox
             ScriptDiagnostic diagnostic;
             diagnostic.File = Trim(match[1].str());
             if (diagnostic.File == "MSBUILD" || diagnostic.File == "CSC" || diagnostic.File.empty())
-                diagnostic.File.clear(); // (a message about the build itself, not a file)
+                diagnostic.File.clear();
             diagnostic.Line = match[2].matched ? std::stoi(match[2].str()) : 0;
             diagnostic.Column = match[3].matched ? std::stoi(match[3].str()) : 0;
             diagnostic.Severity = match[4].str();

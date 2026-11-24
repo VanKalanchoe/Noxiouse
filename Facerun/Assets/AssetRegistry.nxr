@@ -91696,6 +91696,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10479440153309460311
+    FilePath: Scenes/CoralFeatureTest.nox
+    SourceFilePath: Scenes/CoralFeatureTest.nox
+    Type: AssetType::Scene
   - Handle: 10479579987295696405
     FilePath: StreamingTest/Meshes/Tile_61_3.nsmesh
     Type: AssetType::StaticMesh

@@ -57,7 +57,7 @@ echo Installing all dependencies...
 vcpkg install sdl3[vulkan] glm entt spdlog xxhash yaml-cpp box2d freetype skia stb ktx[vulkan] tinyobjloader gamenetworkingsockets --triplet=x64-windows
 
 :: slang
-set SLANG_VERSION=2026.14.1
+set SLANG_VERSION=2026.22.1
 set SLANG_URL=https://github.com/shader-slang/slang/releases/download/v%SLANG_VERSION%/slang-%SLANG_VERSION%-windows-x86_64.zip
 set DEST_DIR=../NoxCore/vendors/slang
 
@@ -80,7 +80,7 @@ if not exist "%DEST_DIR%" (
 :: -------------
 
  :: Streamline (NVIDIA DLSS SDK)
-    set STREAMLINE_VERSION=2.14.1
+    set STREAMLINE_VERSION=2.14.16
     set STREAMLINE_URL=https://github.com/NVIDIA-RTX/Streamline/releases/download/v%STREAMLINE_VERSION%/streamline-sdk-v%STREAMLINE_VERSION%.zip
     set "STREAMLINE_DIR=%VENDORS_DIR%\Streamline"
 
@@ -101,7 +101,7 @@ if not exist "%DEST_DIR%" (
     )
 
     :: NRD (NVIDIA Real-Time Denoisers)
-    set NRD_VERSION=v4.17.3
+    set NRD_VERSION=v4.18.0
     set "NRD_DIR=%VENDORS_DIR%\NRD"
     set "NRD_BUILD_DIR=%TEMP%\NRD_build"
 
@@ -112,21 +112,34 @@ if not exist "%DEST_DIR%" (
         git clone --depth 1 --branch %NRD_VERSION% --recursive https://github.com/NVIDIA-RTX/NRD.git "%NRD_BUILD_DIR%" || exit /b 1
         pushd "%NRD_BUILD_DIR%"
 
-        call 1-Deploy.bat
+        rem NRD v4.18.0+ moved helper scripts into Scripts\Windows\; fall back to root if older.
+        if exist "Scripts\Windows\1-Deploy.bat" (
+            call Scripts\Windows\1-Deploy.bat
+        ) else (
+            call 1-Deploy.bat
+        )
         if errorlevel 1 (
             echo Failed to deploy NRD.
             popd
             exit /b 1
         )
 
-        call 2-Build.bat
+        if exist "Scripts\Windows\2-Build.bat" (
+            call Scripts\Windows\2-Build.bat
+        ) else (
+            call 2-Build.bat
+        )
         if errorlevel 1 (
             echo Failed to build NRD.
             popd
             exit /b 1
         )
 
-        call 3-PrepareSDK.bat
+        if exist "Scripts\Windows\3-PrepareSDK.bat" (
+            call Scripts\Windows\3-PrepareSDK.bat
+        ) else (
+            call 3-PrepareSDK.bat
+        )
         if errorlevel 1 (
             echo Failed to prepare NRD SDK.
             popd
@@ -152,6 +165,23 @@ if not exist "%DEST_DIR%" (
         echo NRD %NRD_VERSION% installed successfully in "%NRD_DIR%".
     ) else (
         echo NRD already installed in "%NRD_DIR%", skipping.
+    )
+
+    rem DirectX 12 Agility SDK (standalone from NRD so NRD updates never wipe it)
+    set AGILITYSDK_VERSION=1.620.2
+    set AGILITYSDK_URL=https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/%AGILITYSDK_VERSION%
+    set "AGILITYSDK_DIR=%VENDORS_DIR%\AgilitySDK"
+
+    if not exist "%AGILITYSDK_DIR%\D3D12Core.dll" (
+        echo Downloading DirectX 12 Agility SDK %AGILITYSDK_VERSION%...
+        if not exist "%AGILITYSDK_DIR%" mkdir "%AGILITYSDK_DIR%"
+        curl -L "%AGILITYSDK_URL%" -o "%TEMP%\agilitysdk.zip" || exit /b 1
+        echo Extracting Agility SDK...
+        tar -xf "%TEMP%\agilitysdk.zip" -C "%AGILITYSDK_DIR%" --strip-components=4 "build/native/bin/x64/D3D12Core.dll" "build/native/bin/x64/d3d12SDKLayers.dll"
+        del "%TEMP%\agilitysdk.zip"
+        echo DirectX 12 Agility SDK %AGILITYSDK_VERSION% installed in "%AGILITYSDK_DIR%".
+    ) else (
+        echo DirectX 12 Agility SDK already installed in "%AGILITYSDK_DIR%", skipping.
     )
 
     rem Steam Audio (Valve, Apache 2.0): HRTF, occlusion / transmission, reflections (docs/Audio_Architecture_Plan_2026.md, A4)

@@ -18,6 +18,9 @@ namespace Nox {
         virtual int GetMaxConcurrency() const override;
         virtual JobHandle CreateJob(const char* inJobName, JPH::ColorArg inColor,
                                     const JobFunction& inJobFunction, JPH::uint32 inNumDependencies = 0) override;
+        virtual void CreateJobs(const char* inJobName, JPH::ColorArg inColor,
+                                const JobFunction& inJobFunction, JobHandle* outJobs, JPH::uint32 inNumJobs,
+                                JPH::uint32 inNumDependencies = 0) override;
 
     protected:
         virtual void QueueJob(Job* inJob) override;

@@ -1,4 +1,6 @@
 #include "DotNetBackend.h"
+#include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdlib>
 
@@ -1359,81 +1361,177 @@ namespace Nox
         m_Host.Shutdown();
     }
 
+    namespace
+    {
+        bool GetMemberBool(const Coral::ManagedObject& object, std::string_view name, bool isProperty)
+        {
+            if (!isProperty)
+                return object.GetFieldValue<bool>(name);
+            Coral::Bool32 value = 0;
+            object.GetPropertyValueRaw(name, &value);
+            return value != 0;
+        }
+
+        void SetMemberBool(Coral::ManagedObject& object, std::string_view name, bool isProperty, bool value)
+        {
+            if (!isProperty)
+            {
+                object.SetFieldValue(name, value);
+                return;
+            }
+            // Coral's ManagedObject.SetPropertyValue calls Marshalling.MarshalPointer which reads 1 byte for bool.
+            object.SetPropertyValueRaw(name, &value);
+        }
+
+        std::string GetMemberString(const Coral::ManagedObject& object, std::string_view name, bool isProperty)
+        {
+            if (!isProperty)
+                return object.GetFieldValue<std::string>(name);
+            Coral::String raw;
+            object.GetPropertyValueRaw(name, &raw);
+            std::string result = raw.Data() ? std::string(raw) : std::string();
+            Coral::String::Free(raw);
+            return result;
+        }
+
+        void SetMemberString(Coral::ManagedObject& object, std::string_view name, bool isProperty, const std::string& value)
+        {
+            if (!isProperty)
+            {
+                object.SetFieldValue(name, value);
+                return;
+            }
+            Coral::String raw = Coral::String::New(value);
+            object.SetPropertyValueRaw(name, &raw);
+            Coral::String::Free(raw);
+        }
+
+        int64_t GetMemberEnum(const Coral::ManagedObject& object, std::string_view name, bool isProperty, uint8_t byteSize)
+        {
+            auto readRaw = [&](void* dst)
+            {
+                if (isProperty) object.GetPropertyValueRaw(name, dst);
+                else object.GetFieldValueRaw(name, dst);
+            };
+            switch (byteSize)
+            {
+                case 1: { int8_t v = 0; readRaw(&v); return static_cast<int64_t>(v); }
+                case 2: { int16_t v = 0; readRaw(&v); return static_cast<int64_t>(v); }
+                case 8: { int64_t v = 0; readRaw(&v); return v; }
+                default: { int32_t v = 0; readRaw(&v); return static_cast<int64_t>(v); }
+            }
+        }
+
+        void SetMemberEnum(Coral::ManagedObject& object, std::string_view name, bool isProperty, int64_t value)
+        {
+            // Coral's Marshalling.MarshalEnum reads 1, 2, 4, or 8 bytes from the pointer (little-endian low bytes match).
+            if (isProperty) object.SetPropertyValueRaw(name, &value);
+            else object.SetFieldValueRaw(name, &value);
+        }
+
+        std::vector<std::pair<std::string, int64_t>> ParseEnumMembers(std::string_view encoded, uint8_t& outByteSize)
+        {
+            outByteSize = 4;
+            std::vector<std::pair<std::string, int64_t>> options;
+            size_t pos = 0;
+            bool firstLine = true;
+            while (pos < encoded.size())
+            {
+                size_t end = encoded.find('\n', pos);
+                if (end == std::string_view::npos)
+                    end = encoded.size();
+                std::string_view line = encoded.substr(pos, end - pos);
+                if (!line.empty() && line.back() == '\r')
+                    line.remove_suffix(1);
+                if (firstLine)
+                {
+                    firstLine = false;
+                    int32_t sz = 4;
+                    if (!line.empty() && line.find('=') == std::string_view::npos &&
+                        std::from_chars(line.data(), line.data() + line.size(), sz).ec == std::errc{})
+                    {
+                        outByteSize = static_cast<uint8_t>(std::clamp(sz, 1, 8));
+                        pos = end + 1;
+                        continue;
+                    }
+                }
+                const size_t eq = line.find('=');
+                if (eq != std::string_view::npos && eq > 0 && eq + 1 < line.size())
+                {
+                    int64_t value = 0;
+                    const char* first = line.data() + eq + 1;
+                    const char* last = line.data() + line.size();
+                    if (std::from_chars(first, last, value).ec == std::errc{})
+                        options.emplace_back(std::string(line.substr(0, eq)), value);
+                }
+                pos = end + 1;
+            }
+            return options;
+        }
+    }
+
     bool DotNetBackend::LoadModule(const std::filesystem::path& coreAssembly,
                                    const std::filesystem::path& gameAssembly)
     {
-        // The module running now goes first: unloading any load context clears every type Coral has cached, the types of a
-        // context loaded meanwhile too (AssemblyLoader.UnloadAssemblyLoadContext), so the new module's types would be dead (no
-        // script types found, "Cannot invoke method ... on a null type"). A build that does not load brings the module before
-        // back (its generation's copies stay for the session), so the scripts that worked keep working.
-        const std::filesystem::path previousCore = m_CorePath;
-        const std::filesystem::path previousGame = m_GamePath;
-        const bool hadModule = m_LoadContext != nullptr;
-        ClearModule();
-        if (LoadModuleFrom(coreAssembly, gameAssembly))
-            return true;
-        if (hadModule && LoadModuleFrom(previousCore, previousGame))
-            NOX_CORE_WARN("Scripts: the scripts loaded before were loaded again");
-        return false;
-    }
-
-    bool DotNetBackend::LoadModuleFrom(const std::filesystem::path& coreAssembly, const std::filesystem::path& gameAssembly)
-    {
+        // Atomic hot-reload: Coral's per-ALC reflection caches let us load and validate the new context while the old one is
+        // still alive. If anything fails (missing DLL, API mismatch), we unload only the new context and leave the running
+        // module and its live instances untouched.
         const std::string searchPath = coreAssembly.parent_path().string() + ";" +
                                        gameAssembly.parent_path().string();
-        auto loadContext = std::make_unique<Coral::AssemblyLoadContext>(
+        auto newLoadContext = std::make_unique<Coral::AssemblyLoadContext>(
             m_Host.CreateAssemblyLoadContext("NoxGameScripts-" + std::to_string(++m_LoadContextCount), searchPath));
-        Coral::ManagedAssembly* core = &loadContext->LoadAssembly(coreAssembly.string());
-        Coral::ManagedAssembly* game = &loadContext->LoadAssembly(gameAssembly.string());
-        if (core->GetLoadStatus() != Coral::AssemblyLoadStatus::Success ||
-            game->GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
+        Coral::ManagedAssembly* newCore = &newLoadContext->LoadAssembly(coreAssembly.string());
+        Coral::ManagedAssembly* newGame = &newLoadContext->LoadAssembly(gameAssembly.string());
+        if (newCore->GetLoadStatus() != Coral::AssemblyLoadStatus::Success ||
+            newGame->GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
         {
             NOX_CORE_ERROR("Failed to load managed scripting assemblies '{}', '{}'", coreAssembly.string(), gameAssembly.string());
-            m_Host.UnloadAssemblyLoadContext(*loadContext);
+            m_Host.UnloadAssemblyLoadContext(*newLoadContext);
             return false;
         }
+
+        const Coral::Type& api = static_cast<const Coral::ManagedAssembly*>(newCore)->GetLocalType("Nox.ScriptApi");
         {
             // The managed API this engine was written against (ScriptApi.cs): another version's internal calls do not match.
-            const Coral::Type& api = static_cast<const Coral::ManagedAssembly*>(core)->GetLocalType("Nox.ScriptApi");
             const int32_t version = api ? api.InvokeStaticMethod<int32_t>("GetVersion") : 0;
             if (version != kScriptApiVersion)
             {
                 NOX_CORE_ERROR("Nox.ScriptCore '{}' has script API version {}, the engine needs {}: rebuild NoxScriptCore (and the "
                                "game's scripts) with this engine", coreAssembly.string(), version, kScriptApiVersion);
-                m_Host.UnloadAssemblyLoadContext(*loadContext);
+                m_Host.UnloadAssemblyLoadContext(*newLoadContext);
                 return false;
             }
         }
 
-        m_LoadContext = std::move(loadContext);
-        m_CoreAssembly = core;
-        m_GameAssembly = game;
-        m_CorePath = coreAssembly;
-        m_GamePath = gameAssembly;
-        // Handles of the module before (kept anywhere) no longer reach the new instances.
-        ++m_Generation;
+        RegisterInternalCalls(*newCore);
 
-        RegisterInternalCalls(*m_CoreAssembly);
-        auto& entityBehaviour = m_CoreAssembly->GetLocalType("Nox.EntityBehaviour");
-        for (auto& type : m_GameAssembly->GetLocalTypes())
+        std::unordered_map<std::string, const Coral::Type*> newTypes;
+        std::unordered_map<std::string, std::vector<ScriptFieldInfo>> newExposedFields;
+        std::unordered_map<std::string, std::vector<ScriptEventInfo>> newExposedEvents;
+        std::unordered_map<std::string, std::vector<std::string>> newCallableMethods;
+
+        auto& entityBehaviour = newCore->GetLocalType("Nox.EntityBehaviour");
+        for (auto& type : newGame->GetLocalTypes())
         {
             if (type.IsSubclassOf(entityBehaviour))
-                m_Types.emplace(std::string(type.GetFullName()), &type);
+                newTypes.emplace(std::string(type.GetFullName()), &type);
         }
 
-        for (const auto& [className, type] : m_Types)
+        for (const auto& [className, type] : newTypes)
         {
             Coral::ManagedObject defaults = type->CreateInstance();
-            auto& exposed = m_ExposedFields[className];
-            for (Coral::FieldInfo field : type->GetFields())
+            auto& exposed = newExposedFields[className];
+
+            auto reflectMember = [&](const std::string& name, Coral::Type& memberType,
+                                     std::vector<Coral::Attribute> attributes, bool isProperty, bool forceReadOnly)
             {
                 bool isExposed = false;
                 bool disallowSelf = false;
                 std::string unit;
                 std::string tooltip;
                 float minimum = 0.0f, maximum = 0.0f;
-                bool readOnly = false;
-                for (Coral::Attribute attribute : field.GetAttributes())
+                bool readOnly = forceReadOnly;
+                for (Coral::Attribute& attribute : attributes)
                 {
                     const std::string attributeName(attribute.GetType().GetFullName());
                     if (attributeName == "Nox.ExposeAttribute")
@@ -1443,31 +1541,67 @@ namespace Nox
                         tooltip = attribute.GetFieldValue<std::string>("Tooltip");
                         minimum = attribute.GetFieldValue<float>("Min");
                         maximum = attribute.GetFieldValue<float>("Max");
-                        readOnly = attribute.GetFieldValue<bool>("ReadOnly");
+                        readOnly = readOnly || attribute.GetFieldValue<bool>("ReadOnly");
                     }
                     else if (attributeName == "Nox.DisallowSelfAttribute")
                         disallowSelf = true;
                 }
-                if (!isExposed) continue;
+                if (!isExposed) return;
 
-                const std::string name(field.GetName());
-                const std::string fieldType(field.GetType().GetFullName());
+                const std::string memberTypeName(memberType.GetFullName());
                 const size_t fieldCountBefore = exposed.size();
-                if (fieldType == "System.Boolean") exposed.push_back({name, ScriptFieldType::Bool, defaults.GetFieldValue<bool>(name)});
-                else if (fieldType == "System.Int32") exposed.push_back({name, ScriptFieldType::Int, defaults.GetFieldValue<int32_t>(name)});
-                else if (fieldType == "System.UInt32") exposed.push_back({name, ScriptFieldType::UInt, defaults.GetFieldValue<uint32_t>(name)});
-                else if (fieldType == "System.Int64") exposed.push_back({name, ScriptFieldType::Long, defaults.GetFieldValue<int64_t>(name)});
-                else if (fieldType == "System.UInt64") exposed.push_back({name, ScriptFieldType::ULong, defaults.GetFieldValue<uint64_t>(name)});
-                else if (fieldType == "System.Single") exposed.push_back({name, ScriptFieldType::Float, defaults.GetFieldValue<float>(name)});
-                else if (fieldType == "System.Double") exposed.push_back({name, ScriptFieldType::Double, defaults.GetFieldValue<double>(name)});
-                else if (fieldType == "System.String") exposed.push_back({name, ScriptFieldType::String, defaults.GetFieldValue<std::string>(name)});
-                else if (fieldType == "Nox.Vector3")
+                if (memberTypeName == "System.Boolean")
+                    exposed.push_back({name, ScriptFieldType::Bool, GetMemberBool(defaults, name, isProperty)});
+                else if (memberTypeName == "System.Int32")
+                    exposed.push_back({name, ScriptFieldType::Int, isProperty ? defaults.GetPropertyValue<int32_t>(name) : defaults.GetFieldValue<int32_t>(name)});
+                else if (memberTypeName == "System.UInt32")
+                    exposed.push_back({name, ScriptFieldType::UInt, isProperty ? defaults.GetPropertyValue<uint32_t>(name) : defaults.GetFieldValue<uint32_t>(name)});
+                else if (memberTypeName == "System.Int64")
+                    exposed.push_back({name, ScriptFieldType::Long, isProperty ? defaults.GetPropertyValue<int64_t>(name) : defaults.GetFieldValue<int64_t>(name)});
+                else if (memberTypeName == "System.UInt64")
+                    exposed.push_back({name, ScriptFieldType::ULong, isProperty ? defaults.GetPropertyValue<uint64_t>(name) : defaults.GetFieldValue<uint64_t>(name)});
+                else if (memberTypeName == "System.Single")
+                    exposed.push_back({name, ScriptFieldType::Float, isProperty ? defaults.GetPropertyValue<float>(name) : defaults.GetFieldValue<float>(name)});
+                else if (memberTypeName == "System.Double")
+                    exposed.push_back({name, ScriptFieldType::Double, isProperty ? defaults.GetPropertyValue<double>(name) : defaults.GetFieldValue<double>(name)});
+                else if (memberTypeName == "System.String")
+                    exposed.push_back({name, ScriptFieldType::String, GetMemberString(defaults, name, isProperty)});
+                else if (memberTypeName == "Nox.Vector3")
                 {
-                    const ManagedVector3 value = defaults.GetFieldValue<ManagedVector3>(name);
+                    const ManagedVector3 value = isProperty ? defaults.GetPropertyValue<ManagedVector3>(name) : defaults.GetFieldValue<ManagedVector3>(name);
                     exposed.push_back({name, ScriptFieldType::Vector3, glm::vec3(value.X, value.Y, value.Z)});
                 }
-                else if (fieldType == "Nox.Entity") exposed.push_back({name, ScriptFieldType::Entity, UUID(0)});
-                else NOX_CORE_WARN("Unsupported [Expose] field '{}.{}' of type '{}'", className, name, fieldType);
+                else if (memberTypeName == "Nox.Entity")
+                    exposed.push_back({name, ScriptFieldType::Entity, UUID(0)});
+                else
+                {
+                    Coral::Type& baseType = memberType.GetBaseType();
+                    if (baseType && std::string(baseType.GetFullName()) == "System.Enum")
+                    {
+                        uint8_t enumByteSize = 4;
+                        std::vector<std::pair<std::string, int64_t>> options;
+                        if (api)
+                        {
+                            Coral::String arg = Coral::String::New(memberTypeName);
+                            Coral::String encoded = api.InvokeStaticMethod<Coral::String>("GetEnumMembers", arg);
+                            Coral::String::Free(arg);
+                            if (encoded.Data())
+                                options = ParseEnumMembers(std::string(encoded), enumByteSize);
+                            Coral::String::Free(encoded);
+                        }
+                        const int64_t defaultVal = GetMemberEnum(defaults, name, isProperty, enumByteSize);
+                        ScriptFieldInfo info{name, ScriptFieldType::Enum, defaultVal};
+                        info.EnumOptions = std::move(options);
+                        info.EnumByteSize = enumByteSize;
+                        exposed.push_back(std::move(info));
+                    }
+                    else
+                    {
+                        NOX_CORE_WARN("Unsupported [Expose] {} '{}.{}' of type '{}'",
+                                      isProperty ? "property" : "field", className, name, memberTypeName);
+                    }
+                }
+
                 if (exposed.size() != fieldCountBefore)
                 {
                     exposed.back().DisallowSelf = disallowSelf;
@@ -1476,10 +1610,91 @@ namespace Nox
                     exposed.back().Min = minimum;
                     exposed.back().Max = maximum;
                     exposed.back().ReadOnly = readOnly;
+                    exposed.back().IsProperty = isProperty;
                 }
+            };
+
+            for (Coral::FieldInfo field : type->GetFields())
+            {
+                if (field.IsStatic()) continue;
+                reflectMember(std::string(field.GetName()), field.GetType(), field.GetAttributes(), false, false);
             }
+
+            for (Coral::PropertyInfo prop : type->GetProperties())
+            {
+                if (prop.IsStatic() || !prop.HasGetter()) continue;
+                const bool noPublicSetter = !prop.HasSetter() || prop.GetSetterAccessibility() != Coral::TypeAccessibility::Public;
+                reflectMember(std::string(prop.GetName()), prop.GetType(), prop.GetAttributes(), true, noPublicSetter);
+            }
+
+            // Phase 5: Reflect [Expose] C# events (System.Action) and public parameterless void methods for Inspector wiring.
+            auto& exposedEvents = newExposedEvents[className];
+            for (Coral::EventInfo ev : type->GetEvents())
+            {
+                if (ev.IsStatic()) continue;
+                bool isExposed = false;
+                std::string tooltip;
+                for (Coral::Attribute& attribute : ev.GetAttributes())
+                {
+                    if (std::string(attribute.GetType().GetFullName()) == "Nox.ExposeAttribute")
+                    {
+                        isExposed = true;
+                        tooltip = attribute.GetFieldValue<std::string>("Tooltip");
+                    }
+                }
+                if (!isExposed) continue;
+                const std::string handlerType(ev.GetEventHandlerType().GetFullName());
+                if (handlerType != "System.Action")
+                {
+                    NOX_CORE_WARN("Unsupported [Expose] event '{}.{}' of handler type '{}' (only System.Action is supported in Inspector)",
+                                  className, std::string(ev.GetName()), handlerType);
+                    continue;
+                }
+                exposedEvents.push_back({ std::string(ev.GetName()), handlerType, tooltip });
+            }
+
+            auto& callableMethods = newCallableMethods[className];
+            constexpr int32_t kBindingFlagsDeclaredOnly = 2;
+            for (Coral::MethodInfo method : type->GetMethods(kBindingFlagsDeclaredOnly))
+            {
+                if (method.GetAccessibility() != Coral::TypeAccessibility::Public) continue;
+                if (!method.GetParameterTypes().empty()) continue;
+                if (std::string(method.GetReturnType().GetFullName()) != "System.Void") continue;
+                const std::string mname(method.GetName());
+                if (mname.rfind("get_", 0) == 0 || mname.rfind("set_", 0) == 0 ||
+                    mname.rfind("add_", 0) == 0 || mname.rfind("remove_", 0) == 0 ||
+                    mname == "OnCreate" || mname == "OnUpdate" || mname == "OnDestroy" ||
+                    mname == "OnFixedUpdate" || mname == "OnLateUpdate" || mname == "OnAfterReload")
+                    continue;
+                callableMethods.push_back(mname);
+            }
+
             defaults.Destroy();
         }
+
+        // Commit the new module and unload the previous context afterwards.
+        for (auto& [_, instance] : m_Instances)
+            if (instance->Object.IsValid()) instance->Object.Destroy();
+        m_Instances.clear();
+        m_CallbackMasks.clear();
+        m_ReplicatedFieldCounts.clear();
+
+        auto oldLoadContext = std::move(m_LoadContext);
+        m_LoadContext = std::move(newLoadContext);
+        m_CoreAssembly = newCore;
+        m_GameAssembly = newGame;
+        m_CorePath = coreAssembly;
+        m_GamePath = gameAssembly;
+        m_Types = std::move(newTypes);
+        m_ExposedFields = std::move(newExposedFields);
+        m_ExposedEvents = std::move(newExposedEvents);
+        m_CallableMethods = std::move(newCallableMethods);
+        // Handles of the module before (kept anywhere) no longer reach the new instances.
+        ++m_Generation;
+
+        if (oldLoadContext)
+            m_Host.UnloadAssemblyLoadContext(*oldLoadContext);
+
         NOX_CORE_INFO("Loaded {} C# script types", m_Types.size());
         return true;
     }
@@ -1516,6 +1731,8 @@ namespace Nox
         m_Instances.clear();
         m_Types.clear();
         m_ExposedFields.clear();
+        m_ExposedEvents.clear();
+        m_CallableMethods.clear();
         m_CallbackMasks.clear();
         m_ReplicatedFieldCounts.clear();
         // Handles of the module going stop working (a new one is a new generation, also when the old one is loaded back).
@@ -1649,6 +1866,45 @@ namespace Nox
         return it == m_ExposedFields.end() ? std::vector<ScriptFieldInfo>{} : it->second;
     }
 
+    std::vector<ScriptEventInfo> DotNetBackend::GetExposedEvents(std::string_view fullName) const
+    {
+        auto it = m_ExposedEvents.find(std::string(fullName));
+        return it == m_ExposedEvents.end() ? std::vector<ScriptEventInfo>{} : it->second;
+    }
+
+    std::vector<std::string> DotNetBackend::GetCallableMethods(std::string_view fullName) const
+    {
+        auto it = m_CallableMethods.find(std::string(fullName));
+        return it == m_CallableMethods.end() ? std::vector<std::string>{} : it->second;
+    }
+
+    bool DotNetBackend::SubscribeEvent(ScriptInstanceHandle source, std::string_view eventName,
+                                       ScriptInstanceHandle target, std::string_view targetMethod)
+    {
+        if (!m_CoreAssembly)
+            return false;
+        auto srcIt = m_Instances.find(source.ID);
+        auto dstIt = m_Instances.find(target.ID);
+        if (srcIt == m_Instances.end() || srcIt->second->Generation != m_Generation ||
+            dstIt == m_Instances.end() || dstIt->second->Generation != m_Generation)
+            return false;
+        if (!srcIt->second->Object.IsValid() || !dstIt->second->Object.IsValid())
+            return false;
+
+        const Coral::Type& api = static_cast<const Coral::ManagedAssembly*>(m_CoreAssembly)->GetLocalType("Nox.ScriptApi");
+        if (!api)
+            return false;
+
+        const int64_t srcHandle = reinterpret_cast<int64_t>(srcIt->second->Object.m_Handle);
+        const int64_t dstHandle = reinterpret_cast<int64_t>(dstIt->second->Object.m_Handle);
+        Coral::String evName = Coral::String::New(eventName);
+        Coral::String mName = Coral::String::New(targetMethod);
+        const int32_t ok = api.InvokeStaticMethod<int32_t>("SubscribeEvent", srcHandle, evName, dstHandle, mName);
+        Coral::String::Free(evName);
+        Coral::String::Free(mName);
+        return ok != 0;
+    }
+
     ScriptInstanceHandle DotNetBackend::CreateInstance(std::string_view fullName, UUID entity)
     {
         auto it = m_Types.find(std::string(fullName));
@@ -1667,27 +1923,70 @@ namespace Nox
         return { id, m_Generation };
     }
 
+    const ScriptFieldInfo* DotNetBackend::FindExposedField(std::string_view className, std::string_view fieldName) const
+    {
+        auto it = m_ExposedFields.find(std::string(className));
+        if (it == m_ExposedFields.end())
+            return nullptr;
+        for (const ScriptFieldInfo& info : it->second)
+            if (info.Name == fieldName)
+                return &info;
+        return nullptr;
+    }
+
     void DotNetBackend::SetEntityField(ScriptInstanceHandle handle, std::string_view fieldName, UUID entity)
     {
         auto it = m_Instances.find(handle.ID);
         if (it == m_Instances.end() || handle.Generation != m_Generation)
             return;
 
+        const ScriptFieldInfo* info = FindExposedField(it->second->ClassName, fieldName);
+        if (info && info->ReadOnly)
+            return;
+        const bool isProperty = info && info->IsProperty;
+
         struct ManagedEntity { uint64_t ID; };
-        it->second->Object.SetFieldValue(fieldName, ManagedEntity{ static_cast<uint64_t>(entity) });
+        const ManagedEntity managed{ static_cast<uint64_t>(entity) };
+        if (isProperty) it->second->Object.SetPropertyValue(fieldName, managed);
+        else it->second->Object.SetFieldValue(fieldName, managed);
     }
 
     void DotNetBackend::SetFieldValue(ScriptInstanceHandle handle, std::string_view fieldName, const ScriptValue& value)
     {
         auto it = m_Instances.find(handle.ID);
         if (it == m_Instances.end() || handle.Generation != m_Generation) return;
+        const ScriptFieldInfo* info = FindExposedField(it->second->ClassName, fieldName);
+        if (info && info->ReadOnly) return;
+        const bool isProperty = info && info->IsProperty;
         auto& object = it->second->Object;
+
+        if (info && info->Type == ScriptFieldType::Enum)
+        {
+            if (const int64_t* v64 = std::get_if<int64_t>(&value))
+                SetMemberEnum(object, fieldName, isProperty, *v64);
+            else if (const int32_t* v32 = std::get_if<int32_t>(&value))
+                SetMemberEnum(object, fieldName, isProperty, static_cast<int64_t>(*v32));
+            return;
+        }
+
         std::visit([&](const auto& data)
         {
             using T = std::decay_t<decltype(data)>;
-            if constexpr (std::is_same_v<T, std::string>) object.SetFieldValue(fieldName, data);
-            else if constexpr (std::is_same_v<T, glm::vec3>) object.SetFieldValue(fieldName, ManagedVector3{data.x, data.y, data.z});
-            else if constexpr (!std::is_same_v<T, std::monostate> && !std::is_same_v<T, UUID>) object.SetFieldValue(fieldName, data);
+            if constexpr (std::is_same_v<T, bool>)
+                SetMemberBool(object, fieldName, isProperty, data);
+            else if constexpr (std::is_same_v<T, std::string>)
+                SetMemberString(object, fieldName, isProperty, data);
+            else if constexpr (std::is_same_v<T, glm::vec3>)
+            {
+                const ManagedVector3 mv{data.x, data.y, data.z};
+                if (isProperty) object.SetPropertyValue(fieldName, mv);
+                else object.SetFieldValue(fieldName, mv);
+            }
+            else if constexpr (!std::is_same_v<T, std::monostate> && !std::is_same_v<T, UUID>)
+            {
+                if (isProperty) object.SetPropertyValue(fieldName, data);
+                else object.SetFieldValue(fieldName, data);
+            }
         }, value);
     }
 
@@ -1696,27 +1995,32 @@ namespace Nox
         auto it = m_Instances.find(handle.ID);
         if (it == m_Instances.end() || handle.Generation != m_Generation)
             return {};
+        const ScriptFieldInfo* info = FindExposedField(it->second->ClassName, fieldName);
+        const bool isProperty = info && info->IsProperty;
         const Coral::ManagedObject& object = it->second->Object;
         switch (type)
         {
-            case ScriptFieldType::Bool: return object.GetFieldValue<bool>(fieldName);
-            case ScriptFieldType::Int: return object.GetFieldValue<int32_t>(fieldName);
-            case ScriptFieldType::UInt: return object.GetFieldValue<uint32_t>(fieldName);
-            case ScriptFieldType::Long: return object.GetFieldValue<int64_t>(fieldName);
-            case ScriptFieldType::ULong: return object.GetFieldValue<uint64_t>(fieldName);
-            case ScriptFieldType::Float: return object.GetFieldValue<float>(fieldName);
-            case ScriptFieldType::Double: return object.GetFieldValue<double>(fieldName);
-            case ScriptFieldType::String: return object.GetFieldValue<std::string>(fieldName);
+            case ScriptFieldType::Bool: return GetMemberBool(object, fieldName, isProperty);
+            case ScriptFieldType::Int: return isProperty ? object.GetPropertyValue<int32_t>(fieldName) : object.GetFieldValue<int32_t>(fieldName);
+            case ScriptFieldType::UInt: return isProperty ? object.GetPropertyValue<uint32_t>(fieldName) : object.GetFieldValue<uint32_t>(fieldName);
+            case ScriptFieldType::Long: return isProperty ? object.GetPropertyValue<int64_t>(fieldName) : object.GetFieldValue<int64_t>(fieldName);
+            case ScriptFieldType::ULong: return isProperty ? object.GetPropertyValue<uint64_t>(fieldName) : object.GetFieldValue<uint64_t>(fieldName);
+            case ScriptFieldType::Float: return isProperty ? object.GetPropertyValue<float>(fieldName) : object.GetFieldValue<float>(fieldName);
+            case ScriptFieldType::Double: return isProperty ? object.GetPropertyValue<double>(fieldName) : object.GetFieldValue<double>(fieldName);
+            case ScriptFieldType::String: return GetMemberString(object, fieldName, isProperty);
             case ScriptFieldType::Vector3:
             {
-                const ManagedVector3 value = object.GetFieldValue<ManagedVector3>(fieldName);
+                const ManagedVector3 value = isProperty ? object.GetPropertyValue<ManagedVector3>(fieldName) : object.GetFieldValue<ManagedVector3>(fieldName);
                 return glm::vec3(value.X, value.Y, value.Z);
             }
             case ScriptFieldType::Entity:
             {
                 struct ManagedEntity { uint64_t ID; };
-                return UUID(object.GetFieldValue<ManagedEntity>(fieldName).ID);
+                const ManagedEntity value = isProperty ? object.GetPropertyValue<ManagedEntity>(fieldName) : object.GetFieldValue<ManagedEntity>(fieldName);
+                return UUID(value.ID);
             }
+            case ScriptFieldType::Enum:
+                return GetMemberEnum(object, fieldName, isProperty, info ? info->EnumByteSize : 4);
         }
         return {};
     }

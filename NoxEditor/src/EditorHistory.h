@@ -31,8 +31,8 @@ namespace Nox
     public:
         struct FrameInfo
         {
-            bool InteractionActive = false; // an ImGui item is held or the gizmo is dragged: nothing is taken until it ends
-            bool InteractionEnded = false; // an ImGui item / the gizmo was released or an editor shortcut ran this frame
+            bool InteractionActive = false; // an item is held or the gizmo is dragged: nothing is taken until it ends
+            bool InteractionEnded = false; // an item / the gizmo was released or an editor shortcut ran this frame
             bool GizmoEnded = false;       // the gizmo was released this frame (names the step)
             bool AssetsLoading = false;    // background loads still running: what they spawn may still change the scene
             UUID Watched = 0;              // the entity the Properties panel shows (0 = none)

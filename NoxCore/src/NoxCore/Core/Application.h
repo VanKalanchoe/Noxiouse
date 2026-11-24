@@ -18,7 +18,6 @@ namespace NoxTasks
 namespace Nox
 {
     class Renderer;
-    class ImGuiLayer;
     class UILayer;
     class Application;
 
@@ -138,8 +137,7 @@ namespace Nox
         ApplicationCommandLineArgs CommandLineArgs;
         WindowSpecification WindowSpec;
         bool isEditor = false;
-        bool UseImGui = true;
-        // A dedicated server (docs/Networking_Plan_2026-11.md, NET0): no window, no renderer, no ImGui, no audio device; the main loop
+        // A dedicated server (docs/Networking_Plan_2026-11.md, NET0): no window, no renderer, no audio device; the main loop
         // runs at TickRate and sleeps in between (nothing paces it otherwise). Assets load without the GPU (Application::IsHeadless).
         bool Headless = false;
         uint32_t TickRate = 60; // updates a second while headless
@@ -200,8 +198,6 @@ namespace Nox
 
             if (it != m_LayerStack.end())
                 {
-                    if (static_cast<const void*>(it->get()) == static_cast<const void*>(m_ImGuiLayer))
-                        m_ImGuiLayer = nullptr;
                     if (static_cast<const void*>(it->get()) == static_cast<const void*>(m_UILayer))
                         m_UILayer = nullptr;
                     m_LayerStack.erase(it); // layer is destroyed here
@@ -229,7 +225,6 @@ namespace Nox
         uint32_t GetTickRate() const { return (std::max)(m_Specification.TickRate, 1u); }
         const ApplicationSpecification& GetSpecification() const { return m_Specification; }
         std::shared_ptr<Window> getWindow() { return m_Window; }
-        ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
         UILayer* GetUILayer() { return m_UILayer; }
 
         static double GetTime();
@@ -248,7 +243,6 @@ namespace Nox
         inline static bool s_QuitConfirmed = false;
     private:
         std::shared_ptr<Window> m_Window;
-        ImGuiLayer* m_ImGuiLayer = nullptr;
         UILayer* m_UILayer = nullptr;
         /* We will use this renderer to draw into this window every frame. */
         std::unique_ptr<Renderer> renderer;

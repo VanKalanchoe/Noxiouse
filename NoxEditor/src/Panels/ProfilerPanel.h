@@ -1,85 +1,72 @@
 #pragma once
-#include <cstdint>
+
 #include <memory>
 #include <string>
 #include <vector>
+#include <functional>
+
+#include "NoxCore/Core/Ref.h"
+#include "NoxCore/Profiling/Profiler.h"
+
+namespace NoxUI
+{
+        class UIContext;
+        class UIElement;
+        class UILabel;
+    }
 
 namespace Nox
 {
-    struct TimelineFrame;
-    struct TimelineScope;
-    struct ProfileCapture;
 
-    // The frame timeline (docs/Engine_Architecture_Plan_2026.md §5.1, like Unreal Insights' timing view inside the editor): the
-    // last frames' times as a graph, and the picked frame's scopes on a time axis, one lane per thread and one per GPU queue
-    // (graphics, async compute, transfer; on the CPU clock where the device calibrates its timestamps), with the frame's scopes in
-    // a sortable table. The frames slower than a threshold are kept apart (spikes), memory is drawn under the frame graph, and the
-    // whole timeline can be saved to a .noxprof file and opened again. Opened from Window > Profiler; the profiler keeps the frames
-    // only while the window is open and recording.
+    // Window > Profiler (Unreal Insights / Tracy in the editor): the frame-time graph of the kept frames (click one to show it), VRAM
+    // and RAM under it, the picked frame's timeline (the GPU queues, the main thread, the other threads; wheel zooms, drag pans,
+    // click a scope to mark it, double-click zooms to it) and its scopes summed in a table (click a header to sort, a row to mark).
+    // Spikes: slow frames kept apart. Save / Load: .noxprof captures.
     class ProfilerPanel
     {
     public:
-        ProfilerPanel();
-        ~ProfilerPanel();
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
+        // Once a frame: `shown` while the window is open (frames are kept only while someone looks: the copies cost a little).
+        void Update(bool shown);
 
-        void OnImGuiRender();
+        // The state the graph, timeline and table elements share.
+        enum class FrameSource : uint8_t { Recent, Spikes };
+        struct State
+        {
+            bool Paused = false;
+            bool Follow = true; // the newest complete frame stays picked and in view
+            bool ShowMemory = true;
+            FrameSource Source = FrameSource::Recent;
+            uint64_t SelectedFrame = 0;
+            bool HasSelection = false;
+            double ViewStartNs = 0.0;
+            double ViewDurationNs = 0.0;
+            uint32_t HighlightScope = ~0u;
+            std::string Filter;
+            std::unique_ptr<ProfileCapture> Capture; // a loaded .noxprof, shown instead of the live frames
+            std::string CaptureName;
 
-        bool IsOpen() const { return m_Open; }
-        void SetOpen(bool open) { m_Open = open; }
+            uint32_t FrameCount() const;
+            const TimelineFrame& Frame(uint32_t index) const;
+            uint32_t FrameSlots() const;
+            uint32_t ThreadCount() const;
+            const std::string& ThreadName(uint32_t lane) const;
+            struct ScopeDetails { const char* Name = "?"; const char* Function = ""; const char* File = ""; uint32_t Line = 0; bool IsWait = false; };
+            ScopeDetails Scope(uint32_t scopeId) const;
+            int32_t FindFrame(uint64_t number) const;
+            void SelectFrame(uint32_t index);
+            void FollowNewest();
+        };
 
     private:
-        enum class FrameSource : uint8_t
-        {
-            Recent, // the last frames
-            Spikes  // the slow frames kept apart
-        };
-
-        struct ScopeDetails
-        {
-            const char* Name = "?";
-            const char* Function = "";
-            const char* File = "";
-            uint32_t Line = 0;
-            bool IsWait = false;
-        };
-
-        void DrawToolbar();
-        void DrawFrameGraph();
-        void DrawMemoryGraph();
-        void DrawTimeline();
-        void DrawScopeTable();
-        void ScopeTooltip(const TimelineScope& scope, const TimelineFrame& frame, bool gpu) const;
-
-        // The frames shown: the live profiler's or a loaded capture's, recent ones or spikes.
-        uint32_t FrameCount() const;
-        const TimelineFrame& Frame(uint32_t index) const;
-        uint32_t FrameSlots() const; // the frame graph's width in frames
-        uint32_t ThreadCount() const;
-        const std::string& ThreadName(uint32_t lane) const;
-        ScopeDetails Scope(uint32_t scopeId) const;
-        const char* ScopeName(uint32_t scopeId) const { return Scope(scopeId).Name; }
-
-        int32_t FindFrame(uint64_t number) const; // index into the frames shown, -1: not there
-        void SelectFrame(uint32_t index);
-        void FollowNewest();
         void SaveCapture();
         void LoadCapture();
+        void LoadCaptureFrom(const std::string& path);
 
-    private:
-        bool m_Open = false;
-        bool m_Paused = false;
-        bool m_Follow = true; // the newest complete frame stays selected and in view
-        bool m_ShowMemory = true;
-        FrameSource m_Source = FrameSource::Recent;
-        uint64_t m_SelectedFrame = 0;
-        bool m_HasSelection = false;
-        double m_ViewStartNs = 0.0;
-        double m_ViewDurationNs = 0.0;
-        uint32_t m_HighlightScope = ~0u;
-        char m_Filter[64] = {};
-
-        std::unique_ptr<ProfileCapture> m_Capture; // a loaded .noxprof, shown instead of the live frames
-        std::string m_CaptureName;
-        std::string m_Message; // the last save / load result
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        std::shared_ptr<State> m_State = std::make_shared<State>();
+        std::string m_Message;
     };
 }

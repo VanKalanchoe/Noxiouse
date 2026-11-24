@@ -1,8 +1,7 @@
-// Final passes: ImGui / present to the swapchain, the entity-picking readback copy and render graph texture inspection.
+// Final passes: NoxUI / present to the swapchain, the entity-picking readback copy and render graph texture inspection.
 #include "NoxCore/Renderer/Renderer.h"
 
 #include <array>
-#include <NRIHPP/imgui_impl_noxrhi.h>
 #include <NoxUI/Backends/noxui_impl_noxrhi.h>
 
 #include "FrameGraphResources.h"
@@ -24,27 +23,11 @@ namespace Nox
         for (const Ref<Texture2D>& image : m_takenExtraViewImages)
             extraViewImages.push_back(m_renderGraph.ImportTexture("Asset Thumbnail", image->GetHandle()));
 
-        const bool drawImGui = m_isEditor && m_useImGui && m_imguiInitialized;
         const bool drawNoxUI = m_noxUIInitialized && !m_uiDrawList.IsEmpty();
-        NriImguiDrawDataDesc imguiDrawData{};
-        if (drawImGui)
-        {
-            if (ImDrawData* dd = ImGui::GetDrawData())
-                imguiDrawData = ImGui_ImplNoxRHI_PrepareDrawData(dd, frameIndex, 0);
-        }
         NoxUI_NoxRHIDrawData noxUIDrawData{};
         if (drawNoxUI)
             noxUIDrawData = NoxUI_ImplNoxRHI_PrepareDrawData(m_uiDrawList, frameIndex, 0);
 
-        if (drawImGui && imguiDrawData.drawListCount > 0)
-        {
-            m_renderGraph.AddPass("ImGui Upload", RGPassFlags::NeverCull,
-                [](RGBuilder& builder) { builder.RecordExclusive("ImGui"); },
-                [imguiDrawData](RGPassContext& context)
-                {
-                    ImGui_ImplNoxRHI_CopyData(context.Cmd(), imguiDrawData);
-                });
-        }
         if (drawNoxUI)
         {
             m_renderGraph.AddPass("NoxUI Upload", RGPassFlags::NeverCull,
@@ -55,32 +38,23 @@ namespace Nox
                 });
         }
 
-        // Editor: ImGui (its viewport window shows the scene image). Runtime: fullscreen present of the scene image.
-        m_renderGraph.AddPass("ImGui / Present Pass", RGPassFlags::Raster,
+        // Editor: NoxUI (its viewport window shows the scene image). Runtime: fullscreen present of the scene image.
+        m_renderGraph.AddPass("Present Pass", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
                 ReadIfValid(builder, resources.Scene);
                 for (const RGTexture image : extraViewImages)
                     ReadIfValid(builder, image);
-                // The image arrives from an Undefined transition (contents discarded) and ImGui / the present triangle cover
+                // The image arrives from an Undefined transition (contents discarded) and NoxUI / the present triangle cover
                 // all of it: clear, never load.
                 builder.SwapchainTarget(m_swapChain, m_frame.imageIndex, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE);
-                if (drawImGui)
-                    builder.RecordExclusive("ImGui");
                 if (drawNoxUI)
                     builder.RecordExclusive("NoxUI");
                 builder.SetRenderArea(m_swapChainExtent, RGViewport::None);
             },
-            [this, hasScene = resources.Scene.IsValid(), drawImGui, imguiDrawData, drawNoxUI, noxUIDrawData](RGPassContext& context)
+            [this, hasScene = resources.Scene.IsValid(), drawNoxUI, noxUIDrawData](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
-
-                if (drawImGui)
-                {
-                    if (imguiDrawData.drawListCount > 0)
-                        ImGui_ImplNoxRHI_RenderDrawData(cmd, imguiDrawData);
-                    return;
-                }
 
                 // Viewport / scissor (counts and values are both dynamic).
                 float w = static_cast<float>(m_swapChainExtent.width);
@@ -159,7 +133,7 @@ namespace Nox
     
                 }
 
-                if (m_isEditor && !m_useImGui && m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() == ~0u)
+                if (m_isEditor && m_sceneResource && m_sceneResource->GetDescriptorIndexSlot() == ~0u)
                 {
                     m_resourceHeap.registerTexture(*m_sceneResource);
                     uniformData.imageHeapIndexOffset = m_resourceHeap.getImageHeapIndexOffset();

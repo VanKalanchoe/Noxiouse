@@ -6,8 +6,6 @@
 #include <fstream>
 #include <sstream>
 
-#include <imgui.h>
-
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
@@ -306,50 +304,5 @@ namespace Nox::Mcp
     {
         if (m_Initialized)
             Console::Get().Execute("mcp.RotateToken");
-    }
-
-    void McpEditor::DrawMenu()
-    {
-        if (!ImGui::BeginMenu("MCP Server"))
-            return;
-        bool enabled = m_Enabled->Get();
-        if (ImGui::MenuItem("Enabled", nullptr, &enabled))
-            m_Enabled->Set(enabled);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Lets AI tools (Claude Code, Codex, Gemini CLI, Cursor ...) read and use this editor over MCP, from this machine only");
-        if (m_Server.IsRunning())
-            ImGui::TextDisabled("Listening on %s -- %zu calls", Url().c_str(), m_Server.GetCallCount());
-        else if (!m_Problem.empty())
-            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", m_Problem.c_str());
-        else
-            ImGui::TextDisabled("Off");
-
-        ImGui::Separator();
-        ImGui::TextDisabled("Clients may:");
-        for (int32_t access = 0; access <= 2; ++access)
-            if (ImGui::MenuItem(AccessLabel(access), nullptr, m_Access->Get() == access))
-                m_Access->Set(access);
-
-        ImGui::Separator();
-        const bool ready = m_Server.IsRunning() && !m_Token.empty();
-        if (ImGui::MenuItem("Copy connect command (Claude Code)", nullptr, false, ready))
-        {
-            ImGui::SetClipboardText(std::format("claude mcp add --transport http nox {} --header \"Authorization: Bearer {}\"", Url(), m_Token).c_str());
-            NOX_CORE_INFO("MCP: the Claude Code connect command is on the clipboard (it holds the token: do not share it)");
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Paste it into a terminal in the project folder; then start Claude Code there");
-        if (ImGui::MenuItem("Copy JSON config (other MCP clients)", nullptr, false, ready))
-        {
-            const Json config{ { "mcpServers", Json{ { "nox", Json{ { "type", "http" }, { "url", Url() },
-                                                                    { "headers", Json{ { "Authorization", "Bearer " + m_Token } } } } } } } };
-            ImGui::SetClipboardText(config.dump(2).c_str());
-            NOX_CORE_INFO("MCP: the JSON config is on the clipboard (it holds the token: do not share it)");
-        }
-        if (ImGui::MenuItem("Rotate token", nullptr, false, m_Initialized))
-            Console::Get().Execute("mcp.RotateToken");
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("A new token: connected clients stop working until they get the new connect command");
-        ImGui::EndMenu();
     }
 }

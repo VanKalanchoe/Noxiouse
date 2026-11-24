@@ -1,6 +1,6 @@
 # Noxiouse Engine Documentation
 
-Welcome to the official documentation for **Noxiouse Engine** — a modern **C++20 / Vulkan 1.4 / .NET 9** 3D game engine and editor built around a **bindless GPU-driven visibility-buffer renderer**, a **frame-compiled Render Graph**, **decoupled hardware Ray Tracing & ReSTIR**, **Large World Coordinates (64-bit `double`)**, **World Partition & HLOD streaming**, **Jolt 3D / Box2D v3 physics**, **Skeletal Animation Graphs & Sequencer**, and **C# Hot-Reload Scripting**.
+Welcome to the official documentation for **Noxiouse Engine** — a modern **C++20 / Vulkan 1.4 & Direct3D 12 / .NET 10** 3D game engine and custom **NoxUI** editor built around a **bindless GPU-driven visibility-buffer renderer**, a **frame-compiled Render Graph**, **decoupled hardware Ray Tracing & ReSTIR**, **Large World Coordinates (64-bit `double`)**, **World Partition & HLOD streaming**, **Jolt 3D / Box2D v3 physics**, **Skeletal Animation Graphs & Sequencer**, and **C# Atomic Hot-Reload Scripting**.
 
 :::{tip}
 **Want to browse right now without installing Python or Sphinx?**
@@ -15,9 +15,9 @@ Noxiouse is organized into four targets plus a sample game project:
 
 | Target / Folder | Type | Plain-English Purpose |
 | :--- | :--- | :--- |
-| **`NoxCore/`** | Static Library (`C++20`) | The core engine: `NRI` graphics abstraction, Vulkan 1.4 backend, frame-compiled `RenderGraph`, hybrid visibility-buffer + RT + path-traced `Renderer`, `Scene` ECS (47 components), `Asset` cooking & streaming pipeline, `Physics` (Jolt 3D + Box2D 2D), `Animation` & `NodeGraph`, `Scripting` (.NET 9 / Coral), `Tasks` (`JobSystem`), and `Profiling`. |
-| **`NoxScriptCore/`** | Managed Class Library (`C# / net9.0`) | The `Nox` C# API (`Nox.ScriptCore.dll`) providing `EntityBehaviour`, `Entity`, component wrappers, `Physics`, `Mesh` / `MeshBuilder`, `Jobs`, `Scene`, `Input`, `WorldUnits`, and `Vector3d`. |
-| **`NoxEditor/`** | Executable (`C++20`) | The full authoring environment with multi-viewport layout, gizmos, Undo/Redo, 12 specialized panels (Hierarchy/Inspector, Content Browser, Material Editor, Node Graph Editor, Animation Clip, Sequencer Timeline, Render Graph Inspector, Profiler, World Partition, Levels), and 1-click `.npak` Game Packager. Also houses all **113 Slang/HLSL shaders** in `NoxEditor/assets/shaders/`. |
+| **`NoxCore/`** | Static Library (`C++20`) | The core engine: `NoxRHI` graphics abstraction (Vulkan 1.4 + Direct3D 12), frame-compiled `RenderGraph`, hybrid visibility-buffer + RT + path-traced `Renderer`, `Scene` ECS, `Asset` cooking & streaming pipeline, `Physics` (Jolt 3D v5.7 + Box2D v3.1), `Animation` & `NodeGraph`, `Scripting` (.NET 10 / Coral `320c90d`), `Tasks` (`NoxTasks`), `Audio` (`NoxAudio`), `Network` (`NoxNet`), and `Profiling`. |
+| **`NoxScriptCore/`** | Managed Class Library (`C# / net10.0`) | The `Nox` C# API (`Nox.ScriptCore.dll`) providing `EntityBehaviour`, `Entity`, `[Expose]` (fields, properties, enums, events), component wrappers, `Physics`, `Mesh` / `MeshBuilder`, `Jobs`, `Scene`, `Input`, `WorldUnits`, and `Vector3d`. |
+| **`NoxEditor/`** | Executable (`C++20` / `NoxUI`) | The custom `NoxUI`-powered authoring environment (zero Dear ImGui) with multi-viewport layout, gizmos, Undo/Redo, specialized panels (Hierarchy, Inspector with live Play-mode C# sync, Content Browser, Material Editor, Node Graph Editor, Animation Clip, Sequencer Timeline, Render Graph Inspector, Profiler, World Partition, Levels), and 1-click `.npak` Game Packager. Also houses all single-source **Slang shaders** in `NoxEditor/assets/shaders/`. |
 | **`NoxRuntime/`** | Executable (`C++20`) | The lightweight shipping game player that mounts a cooked `.npak` archive, boots the startup scene in `RuntimeAssetManager` read-only mode, and runs the game loop without editor overhead. |
 | **`Facerun/`** | Sample Project (`.nproj` + `C#`) | A playable testbed project showcasing character controllers, weapons/projectiles, multithreaded voxel terrain generation, additive level streaming, and World Partition streaming. |
 
@@ -57,7 +57,7 @@ flowchart TD
     G5 --> G6["DLSS Super Resolution / Ray Reconstruction or Custom TAA"]
     G6 --> G7["Auto-Exposure + Filmic Tonemapping + 2D Overlays + Selection Outlines + Extra Editor Views"]
     G7 --> H["RenderGraph::Compile() & Multi-Threaded Execute()"]
-    H --> I["ImGui / Swapchain Present & FrameArena::Reset()"]
+    H --> I["NoxUI / Swapchain Present & FrameArena::Reset()"]
 ```
 
 ---
@@ -113,6 +113,10 @@ file-reference
 
 ## What's New (November 2026)
 
+- **Direct3D 12 Backend Parity (`--dx12` / `--vk`):** full Direct3D 12 parity across `NoxEditor` and `NoxRuntime` via `NoxRHI` with DirectX 12 Agility SDK `1.620.2`, `D3D12MemoryAllocator v3.3.0`, async compute, parallel command recording, and single-source Slang shaders (`NoxGpu.slang`) alongside Vulkan 1.4.
+- **Native `NoxUI` Editor (ImGui Removed):** promoted the custom `NoxUI` editor to `NoxEditor` and completely removed Dear ImGui, ImGuizmo, and `imgui-node-editor` from the engine.
+- **.NET 10 & Coral `320c90d` Modern C# Scripting:** upgraded `NoxScriptCore` and game scripts to `net10.0` with **atomic hot-reload** (old scripts stay alive if a reload fails), **`[Expose]` C# `enum` dropdowns**, **`[Expose]` C# properties** (`get`/`set` validation, auto `ReadOnly`, and live Play-mode sync/editing in the Inspector), and **`[Expose]` C# `event` (`System.Action`) UnityEvent-style Inspector wiring** (see `Facerun/Assets/Scenes/CoralFeatureTest.nox`).
+- **Updated Vendor Stack:** Slang `2026.22.1`, Streamline `2.14.16`, NRD `v4.18.0`, JoltPhysics `v5.7.0`, Box2D `v3.1`, VulkanMemoryAllocator-Hpp `v3.5.0+1`, tinygltf `v3.1.0`, Tracy `v0.15.0`, meshoptimizer `v1.3`, and taskflow `v4.1.0`.
 - **Faster translucent shader:** the forward shader's secondary-ray code is no longer inlined several times over (4.7 MB -> 1.2 MB of SPIR-V for its main entry point): graph saves and the editor's first start compile it much faster (measured: start-up 35 s -> 13 s, a graph save 45 s -> 21 s); a graph's shaders compile in parallel and the graph shows on opaque surfaces after a few seconds while the rest finishes; the ray tracing passes' mask variants are built in the background and swapped in without stopping the editor, and only when the Opacity Mask itself changed; slow GPU driver compiles are logged.
 - **Material graph lighting (Custom Light / Custom Ambient):** a Custom Lit material can be lit by its graph instead of a hand-written Material Shader -- the new Lit Surface, Light and Ambient Light nodes feed the Material Output's Custom Light and Custom Ambient pins (toon bands, rims, hatching from nodes).
 - **Material graph World Position Offset in ray tracing:** a mesh moved by its graph's World Position Offset (a wave, wind) is moved for ray tracing too, every frame: ray-traced shadows, reflections, GI and the path tracer follow it.

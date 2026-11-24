@@ -1,393 +1,267 @@
 #pragma once
-#include <array>
-#include <filesystem>
-#include <chrono>
-#include <functional>
-#include <optional>
-#include <unordered_map>
-#include <unordered_set>
 
-#include "NoxCore/Core/Layer.h"
-#include "NoxCore/Events/InputEvents.h"
+#include <array>
+#include <chrono>
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
 #include "EditorHistory.h"
-#include "ScriptBuilder.h"
-#include "Panels/SceneHierarchyPanel.h"
+#include "EditorViewport.h"
+#include "GamePackager.h"
 #include "Panels/ContentBrowserPanel.h"
-#include "Panels/ProfilerPanel.h"
+#include "Panels/InspectorPanel.h"
 #include "Panels/OutputLogPanel.h"
-#include "Panels/WorldPartitionPanel.h"
+#include "Panels/AssetEditor.h"
 #include "Panels/LevelsPanel.h"
 #include "Panels/MixerPanel.h"
-#include "NoxCore/Scene/HLODBuilder.h"
-#include "NoxCore/Audio/AcousticBake.h"
-#include "StreamingTestWorld.h"
+#include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
-#include "Panels/NodeGraphEditorPanel.h"
-#include "Panels/MaterialEditorPanel.h"
-#include "Panels/AnimationClipPanel.h"
-#include "Panels/TimelinePanel.h"
-#include "NoxCore/Renderer/Font.h"
-#include "NoxCore/Renderer/Renderer.h"
-#include "NoxCore/Scene/SceneLoader.h"
-#include "NoxCore/Network/NetSession.h"
+#include "Panels/WorldPartitionPanel.h"
+#include "Panels/ProjectSettingsPanel.h"
+#include "Panels/RendererSettingsPanel.h"
+#include "Panels/NodeGraph/NodeGraphEditor.h"
+#include "EditorCommands.h"
+#include "EditorSelection.h"
+#include "Panels/SceneHierarchyPanel.h"
 #include "ProjectManager/ProcessLauncher.h"
-
-namespace NoxMcp
-{
-    class ServerProbe;
-}
+#include "ScriptBuilder.h"
+#include "StreamingTestWorld.h"
+#include "NoxCore/Asset/Asset.h"
+#include "NoxCore/Asset/PrimitiveShapes.h"
+#include "NoxCore/Core/Layer.h"
+#include "NoxCore/Events/InputEvents.h"
+#include "NoxCore/Core/Ref.h"
+#include "NoxCore/Renderer/Texture2D.h"
+#include "NoxCore/Network/NetSession.h"
+#include "NoxCore/Renderer/EditorCamera.h"
+#include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/Scene.h"
+#include "NoxCore/Scene/SceneLoader.h"
+#include <NoxUI/Layout/UIWindow.h>
+#include <NoxUI/Widgets/UIMenu.h>
 
 namespace Nox::Mcp
 {
     class McpEditor;
 }
 
+namespace NoxUI
+{
+        class UIDockSpace;
+        class UIDrawerHost;
+        class UIElement;
+        class UIImage;
+        class UILabel;
+        class UIStackBox;
+        class UIWindow;
+    }
+
 namespace Nox
 {
+    class Renderer;
+    class Renderer2D;
+    class Scene;
+
+
     class EditorLayer : public Layer
     {
     public:
-        // `projectFile`: the project to open (from the command line or the Project Manager); empty asks for one.
-        // `createBasicScene`: the project was just made from the Basic template; its first scene (sky, sun, floor, camera) is made
-        // and saved as its Start Scene.
         explicit EditorLayer(std::filesystem::path projectFile = {}, bool createBasicScene = false);
         ~EditorLayer() override;
-        
-        void OnEvent(Event& event) override;
-        void OnUpdate(Timestep ts) override;
-        void OnRender() override;
-        void OnImGuiRender() override;
-        
-    private:
-        // UI Panels
-        void UI_ToolBar();
-        
-        bool OnKeyPressed(KeyPressedEvent& e);
-        bool IsButtonHovered() const;
-        bool OnMouseButtonPressed(MouseButtonPressedEvent& event);
-        void OnOverlayRender();
-        void UI_StatusBar();
 
-        // A new project: its .nproj picked in a save dialog, its folders made beside it. False when cancelled or it failed.
+        void OnUpdate(Timestep ts) override;
+        void OnEvent(Event& event) override;
+
+    private:
+        enum class SceneState
+        {
+            Edit = 0,
+            Play = 1,
+            Simulate = 2
+        };
+
+        // Blocking (the start-up loop, before the editor runs); the menus use the Async ones (the dialog does not stop the editor).
         bool NewProject();
-        // A .nproj picked in a dialog. False when cancelled or it did not load.
         bool OpenProject();
+        void NewProjectAsync();
+        // File > Save All: the scene, the asset editors, materials edited in the Inspector, the mixer.
+        void SaveAll();
+        void OpenProjectAsync();
         bool OpenProject(const std::filesystem::path& path);
-        // Scripts never built (a project just made, or cloned without its build output): built now, loaded when done. Only once
-        // the script engine is up -- before that it does not know where the executable's Scripts/Core is.
-        void BuildScriptsIfNeverBuilt();
-        // No project given, or `failed` did not open: a choice of opening one, making one or quitting (asked again until one
-        // opens). False: the user chose to quit.
         bool OpenStartupProject(const std::filesystem::path& failed = {});
-        // File > Project Manager...: a new editor process showing the Project Manager, this one closes.
         void OpenProjectManager();
-        // The Basic template's scene (Unreal's default level): a procedural sky, a sun, a floor with collision and a camera, saved as
-        // Assets/Scenes/Main.nox and made the Start Scene.
+
+        void NewScene();
+        void OpenScene(AssetHandle handle);
+        void FinishSceneLoad();
+        // `then` runs once the scene is written or not (an untitled scene asks for its name first, without stopping the editor).
+        void SaveScene(std::function<void(bool saved)> then = {});
+        void SaveSceneAs(std::function<void(bool saved)> then = {});
+        bool SaveSceneTo(std::filesystem::path path);
+        // Unsaved work (the scene, open graphs, the mixer): asked about before what would drop it -- Save (then go on), Don't Save
+        // (the edits are dropped: graphs go back to their files; then go on), Cancel. `action` names what would happen ("opening
+        // the project"); `scope` is what the action drops (a new scene drops the scene, not an open graph's edits). Without
+        // unsaved work in scope it goes on at once.
+        enum UnsavedScope : uint32_t { UnsavedScene = 1, UnsavedAssets = 2, UnsavedMixer = 4, UnsavedAll = 7 }; // (assets: the open asset editors)
+        void ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed, uint32_t scope = UnsavedAll);
+        bool HasUnsavedChanges(uint32_t scope = UnsavedAll) const;
+        // Save / Don't Save / Cancel: the dialog every unsaved-changes question uses.
+        void ShowSaveChangesDialog(const std::string& text, std::function<void()> save, std::function<void()> dontSave);
+        void UpdateSceneDirtyState();
+        // The scene the editor shows changed (opened, Play / Stop, undo put another copy back): the selection and the panels follow.
+        void SetSceneContext(const Ref<Scene>& scene);
+        void SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path);
+
         void CreateBasicScene();
-        // The scene file's asset (registered if it is not yet), and, while the project has no Start Scene, that scene becomes it.
+        void CreateShape(PrimitiveShape shape, const std::string& folder = {});
+        void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder);
+        void FocusOnEntity(Entity entity);
+        void SnapSelectionToFloor();
+        void SnapSelectionToGrid();
+        AssetHandle GetShapeAsset(PrimitiveShape shape);
         AssetHandle RegisterSceneAsset(const std::filesystem::path& scenePath);
         void AdoptStartSceneIfNone(const std::filesystem::path& scenePath);
-        bool m_CreateBasicScene = false;
-        // The Basic scene's first view (Unreal's: above the floor, looking down at it); applied once the editor camera exists.
         void ApplyBasicSceneView();
-        bool m_ApplyBasicSceneView = false;
-        // The project's picture for the Project Manager: the viewport read back, scaled down, written as Saved/Thumbnail.png.
         void CaptureProjectThumbnail();
-        bool m_ThumbnailPending = false; // a project without a picture: taken a few seconds after it opened
-        float m_ThumbnailTimer = 0.0f;
-        float m_CustomLitPollTimer = 0.0f;
-        std::string m_CustomLitSignature; // CustomLitSignature() as last built
-        void SaveProject();
-        
-        // Each viewport's camera per scene, in <project>/Cache/EditorCameras.txt: a scene opens where it was looked at last.
-        void SaveEditorCameras();
-        // Whether the active viewport's camera had a saved view for this scene.
-        bool RestoreEditorCameras();
-        // Moves the selection's positions to the nearest point of the location step's grid.
-        void SnapSelectionToGrid();
-        void NewScene();
-        void OpenScene();
-        void OpenScene(AssetHandle handle);
-        // The scene being opened (SceneLoader: read and parsed on a thread, its entities created a slice a frame); the one shown
-        // until then stays. FinishSceneLoad swaps it in.
-        void FinishSceneLoad();
-        void UI_SceneLoadProgress();
-        void PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder);
-        // Basic shapes (docs/Future.md item 10): the static mesh asset of a shape, written into the project's Shapes folder and
-        // imported the first time it is asked for (0 on failure); CreateShape places it where the editor camera looks.
-        AssetHandle GetShapeAsset(PrimitiveShape shape);
-        void CreateShape(PrimitiveShape shape, const std::string& folder);
-        // Writes a prefab from the dragged hierarchy entity (or the whole selection when it is part of it) into the Content
-        // Browser folder (relative to the asset directory) and registers it. The scene is not changed. 0 on failure.
-        AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
-        // A new variant of a prefab in the Content Browser folder (relative to the asset directory), registered; 0 on failure.
-        AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
-        void SaveScene();
-        void SaveSceneAs();
-        // File > Package Game (GamePackager): the output folder, every scene or the start scene, and the last result.
-        void UI_PackageGame();
-        // The project's C# scripts: built (dotnet) and hot-reloaded on request or after a source changed.
-        ScriptBuilder m_ScriptBuilder;
-        bool m_ShowPackageGame = false;
-        bool m_PackageServer = false; // File > Package Server (the same dialog)
-        char m_PackageOutput[512] = {};
-        bool m_PackageAllScenes = false;
-        bool m_PackagePackFiles = true;
-        bool m_PackagePrecompiledShaders = true;
-        bool m_PackageSelfContainedDotNet = false;
-        std::string m_PackageResult;
 
-        // Undo / redo (EditorHistory): UpdateHistory runs at the end of every ImGui frame, after the panels made their changes.
+        void SaveEditorCameras();
+        bool RestoreEditorCameras();
+        void BuildScriptsIfNeverBuilt();
+        std::string CustomLitSignature() const;
+        void PollCustomLitShaders();
+        void WriteMaterialShaderEditorSettings();
+
         void UpdateHistory();
         void Undo();
         void Redo();
-        // Makes a history state (scene text) the edited scene; the selection is kept by UUID.
         void RestoreHistoryState(const std::string& text);
-        
+        void UnloadUnusedAssets();
+
         void OnScenePlay();
         void OnSceneSimulate();
         void OnSceneStop();
+        void OnScenePause();
 
-        // Multiplayer Play (docs/Networking_Plan_2026-11.md, NET6; Unreal's Play settings -- Net Mode, Number of Players, separate
-        // processes): the editor plays as a listen server or as a client of a dedicated server it starts, and the other players are
-        // NoxRuntime windows it starts on the saved scene and closes with Stop.
         enum class PlayNetMode : uint8_t { Standalone = 0, ListenServer, Client };
         struct PlayNetSettings
         {
             PlayNetMode Mode = PlayNetMode::Standalone;
-            int Players = 2;           // the editor's player included
-            int Emulation = 0;         // 0 off, 1 average, 2 bad (Net::NetEmulation presets), for every player
+            int Players = 2;
+            int Emulation = 0;
             int Port = Net::DefaultPort;
             bool SaveWithoutAsking = false;
-            bool DebugTrace = false;   // the network debug trace in every player's log and the server's (--net-debug)
-            bool PlayerMcp = false;    // MCP5: every other player and the dedicated server get an MCP server (NoxRuntime --mcp)
+            bool DebugTrace = false;
         };
-        // MCP5: the games this Play started with MCP servers -- the dedicated server on the editor's MCP port + 1, player n on + n.
-        struct PlayRuntime
-        {
-            std::string Name;
-            int Player = 0;       // 0: the dedicated server
-            uint16_t McpPort = 0;
-            size_t Process = 0;   // its index in m_PlayProcesses
-            std::shared_ptr<NoxMcp::ServerProbe> Probe; // whether its server really answers (an old NoxRuntime ignores --mcp)
-        };
-        std::vector<PlayRuntime> m_PlayRuntimes;
-        // The edited scene's path under the asset directory and its handle (m_EditorScenePath is absolute after Save As / the file dialog,
-        // relative when opened from the Content Browser: the registry knows relative paths only). Empty / 0: not saved as an asset.
         std::filesystem::path EditorSceneAssetPath() const;
         AssetHandle EditorSceneHandle() const;
-        void DrawPlaySettings();
         void BeginMultiplayerPlay();
-        void StartPlayScene(Scene::NetMode netMode); // the Play copy of the edited scene, started (its replication set first)
+        void StartPlayScene(Scene::NetMode netMode);
         void EndMultiplayerPlay();
         bool LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what);
+        void ShowPlaySettingsOverlay(NoxUI::UIElement* anchor);
+        void ShowSaveAndPlayOverlay();
 
-        // Unloads assets no live scene references anymore (GPU memory freed after in-flight frames).
-        void UnloadUnusedAssets();
-        void OnScenePause();
-        void OnDuplicateEntity();
-        
-        void SerializeScene(Ref<Scene> scene, const std::filesystem::path& path);
-
-        // Focuses an already-open editor for handle, or opens a new one (docs/Animation_Graph_Architecture_Plan_2026.md Step 3).
-        void OpenNodeGraphEditor(AssetHandle handle);
-        void OpenMaterialEditor(AssetHandle handle);
-
-        // Opens whatever editor window is registered for handle's AssetType (m_AssetOpeners); does nothing for
-        // types with none. What double-clicking an asset in the Content Browser or an inspector reference calls.
-        void OpenAsset(AssetHandle handle);
-        // Custom Lit: the project's Material Shaders, watched (their paths, sizes, last writes) and built again when one changes.
-        std::string CustomLitSignature() const;
-        void PollCustomLitShaders();
-        void WriteMaterialShaderEditorSettings(); // slangdconfig.json and .vscode/settings.json: code editors find CustomLit.slang
-
-        // Prefab Mode (docs/Prefab_Architecture_Plan_2026.md P3): the prefab's entities as a scene of their own, edited in
-        // isolation. The level is kept aside and comes back on exit; Save writes the .nprefab, reloads the asset and spawns every
-        // instance in the level again.
-        void OpenPrefabMode(AssetHandle handle);
-        // Snapping (like Unreal's viewport toolbar): one switch, and a step each for location (in cm), rotation (degrees) and scale.
-        // Ctrl inverts it while held. The location step is in cm whatever the world unit is (WorldUnits converts).
-        void UI_ViewportOverlay();
-        // A viewport's lower-left corner (Unreal's axis indicator): the world axes as its camera sees them, X red, Y green, Z blue. In
-        // the active viewport the letters are buttons: a click turns the camera to view from that axis (again: from the opposite
-        // side), around its focal point. Returns whether a letter is under the mouse. And, when the viewport's Camera Position
-        // option is on, where the camera is (world units, as the Inspector shows Translation, and meters).
-        bool DrawAxisIndicator(ImDrawList* draw, ImVec2 min, ImVec2 max, EditorCamera& camera, bool clickable, bool showPosition);
-        // A click in the viewport belongs to a gizmo (the selection's) or the axis indicator, not to picking or box selection.
-        bool GizmoTakesMouse() const;
-        bool m_AxisIndicatorHovered = false;
-        struct ViewTurn // a click on an axis letter: the camera's pitch / yaw eased to the new view
-        {
-            bool Active = false;
-            float FromPitch = 0.0f, FromYaw = 0.0f, ToPitch = 0.0f, ToYaw = 0.0f, Time = 0.0f;
-        } m_ViewTurn;
-        // The world grid on the ground plane (y = 0): cells of the snap step (sparser far from the ground), every tenth line stronger, the
-        // axes coloured, fading out with distance. Thin lines of the 2D overlay pass, so it is depth tested.
-        void DrawWorldGrid();
-        // UE5's "Frame Selected" (F) / double-clicking an entity in the Outliner: re-centres the editor camera on it, sized to
-        // its world bounds (its meshes and everything below it), falling back to its Position alone when it has no mesh.
-        void FocusOnEntity(Entity entity);
-        // 3D physics collider wireframes (thin lines, depth tested), toolbar "Show physics collider". One block per shape kind, so a
-        // future collider kind (a terrain/heightfield) is just another block reading its own component the same way.
-        void DrawPhysicsColliders3D();
-        // Ortho views (Top / Bottom / Front / Back / Left / Right, numpad 7 / 1 / 3, Ctrl for the opposite side, numpad 5 = perspective).
-        // They are raster only: entering one turns DLSS, ray tracing and path tracing off (what they were is put back when leaving).
-        void SetViewMode(EditorViewMode mode);
-        int GridPlaneAxis() const; // the normal of the plane the grid lies on: 1 (the ground) in perspective / Top / Bottom, 2 Front / Back, 0 Left / Right
-        // A 180 cm blocky figure (a size reference, like UE's mannequin) standing at `position`; toolbar "Figure": at the world origin,
-        // or on the surface under the cursor.
-        void DrawReferenceFigure(const glm::dvec3& position);
-        // Drops every selected top entity straight down until its bounds' bottom rests on the surface below (the top of the highest
-        // other mesh whose bounds overlap it from above), or on the ground plane when there is none.
-        void SnapSelectionToFloor();
-        // While a translation snaps: tick marks at every step along the axis being dragged (the current one lit), or a checkerboard of
-        // snap-sized squares on the plane being dragged (the current cell lit), so the steps can be seen. ImGui draw list, inside the
-        // viewport window.
-        void DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current);
-
-        // Measure tool (UE / Godot's ruler): M, click a first point, a line follows the cursor, click the second; it stays until the next click.
-        // Points come from the depth under the cursor (perspective), the ground plane where nothing is drawn; they snap like everything else.
-        bool PickWorldPoint(glm::dvec3& out) const; // in the world (double precision: large world coordinates)
-        void MeasureClick();
-        void UI_MeasureOverlay();
-        // A measuring line in the viewport window: a bar across at both ends, the distance in the middle.
-        void DrawMeasureLine(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& start, const glm::vec3& end, float minimumLength);
-        float LocationSnapWorldUnits() const;
-        glm::dvec3 SnapLocation(const glm::dvec3& point) const; // the point itself while snapping is off
-
-        void SavePrefabMode();
-        void ExitPrefabMode();
-        // Leaves Prefab Mode; with unsaved changes asks first (Save / Don't Save / Cancel) and then runs `afterwards` (opening a scene).
-        void RequestExitPrefabMode(std::function<void()> afterwards = {});
-        std::string CurrentPrefabText();
-        void UpdatePrefabModeDirty();
-        void UI_PrefabExitPrompt();
-
-        // Multi-viewport (docs/Future.md item 5). The viewports dock inside a dockspace of their own ("Viewports", in the middle of the
-        // editor), so a layout preset can rebuild just that area: 1, 2 side by side, 2 stacked, 3, or 4 (2x2). They can still be dragged
-        // anywhere and resized. The active viewport (the last one clicked or scrolled in) is the full render and takes every tool;
-        // the others draw their own camera raster only (Renderer::SubmitExtraView).
-        enum class ViewportLayout : int { One, TwoSideBySide, TwoStacked, Three, Four };
-        void UI_Viewports();
-        void UI_ActiveViewport();
-        void UI_ExtraViewport(int index);
-        void ApplyViewportLayout(ViewportLayout layout, ImGuiID dockSpace, ImVec2 size);
-        // Makes a viewport the active one: its camera becomes m_EditorCamera (the old one goes back into its slot) and the main render
-        // follows it (size, raster-only settings of an ortho view).
-        void ActivateViewport(int index);
+        enum class ViewportLayout { One = 0, TwoSideBySide, TwoStacked, Three, Four };
+        void ApplyViewportLayout(ViewportLayout layout);
         void OpenViewport(int index);
+        void CloseViewport(int index);
+        void ActivateViewport(int index);
+        void SyncViewportTabBars();
         int HoveredViewport() const;
         int OpenViewportCount() const;
-        // The extra views' renders for this frame (Renderer::SubmitExtraView), with their own grid.
         void SubmitExtraViewports(Timestep ts);
-        // The options of a viewport as an extra view (Window > Viewports).
-        void UI_ViewportOptionsMenu(int index);
-        // Ortho views are raster only: entering one turns DLSS, ray tracing and path tracing off, leaving it puts them back.
+        std::vector<NoxUI::UIMenuItem> BuildViewportOptionsItems(int index);
+        void LoadViewportPrefs();
+        void SaveViewportPrefs() const;
+
+        void SetViewMode(EditorViewMode mode);
+        int GridPlaneAxis() const;
         void SyncOrthoRenderSettings(bool wasOrthographic);
+        void OnOverlayRender();
+        void DrawWorldGrid();
+        void DrawReferenceFigure(const glm::dvec3& worldPosition);
+        void DrawPhysicsColliders3D();
+        void RefreshStatusBar();
+        void RefreshToolBar();
+        void RefreshSceneLoadOverlay();
 
-        // Any open node-graph editor window focused or hovered: the scene's shortcuts and picking must ignore input.
-        bool AnyNodeGraphEditorWantsInput() const;
-        bool AnyNodeGraphEditorHovered() const; // mouse only: focus alone must not swallow a click elsewhere
+        void BuildUI(bool loadSavedLayout = true);
 
-    private:
-        Renderer* m_Renderer;
-        Renderer2D* m_Renderer2D;
-        
+        // The layout files live with the project (<Project>/Saved/Layout, like Unreal's Saved/Config): every project keeps its own,
+        // nothing in the engine's folder is written. Reset Layout runs at the start of the next frame (not inside the menu's click).
+        std::filesystem::path LayoutDirectory() const;
+        void SaveLayoutFiles();
+        void ResetLayout();
+        // The Content Browser and the Output Log live in the drawer (Unreal's Content Drawer: slides up over the viewport from the
+        // status bar, Ctrl+Space / `) until "Dock in Layout" docks them as tabs under the viewport.
+        enum class DrawerPage : uint8_t { None = 0, Content, Log };
+        void ShowPage(DrawerPage page);   // the drawer opened on it, or its docked tab brought to the front
+        void ToggleDrawer(DrawerPage page);
+        void OpenDrawer(DrawerPage page);
+        void CloseDrawer();
+        bool IsDrawerOpen() const;
+        void DockPage(DrawerPage page);   // "Dock in Layout"
+        void UndockPage(DrawerPage page); // back into the drawer
+        void ShowOutputLog() { ShowPage(DrawerPage::Log); }
+        bool IsPanelDocked(const std::string& title) const;
+
+        // Entities from the hierarchy as a .nprefab in `relativeFolder` (the dragged one, or the selection it is part of).
+        AssetHandle CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder);
+
+        // Prefab Mode (F1, EditorLayerPrefab.cpp): the prefab's entities as a scene of their own, edited in isolation (double-click a
+        // prefab). The level waits aside -- its history, unsaved state, camera and assets kept -- and comes back on Exit. Save writes
+        // the .nprefab (a variant: its changes to its base), reloads the asset and spawns the level's instances again. Ctrl+S saves
+        // the prefab; Play, Simulate, the level's panels and HLOD builds wait; leaving with changes asks Save / Don't Save / Cancel.
+        void OpenPrefabMode(AssetHandle prefab);
+        bool SavePrefabMode();
+        void ExitPrefabMode();
+        // Leaves Prefab Mode (asking first when it has unsaved changes), then runs `afterwards`; Cancel runs nothing.
+        void RequestExitPrefabMode(std::function<void()> afterwards = {});
+        void UpdatePrefabMode(); // (every frame: the bar's name and unsaved mark, framing the prefab once it has spawned)
+        Ref<NoxUI::UIElement> BuildPrefabBar();
+        // A prefab's Create Variant: "<Base> Variant" next to it.
+        AssetHandle CreateVariant(AssetHandle base, const std::filesystem::path& relativeFolder);
+        // Replace References: asks about unsaved asset editors, rewrites the files, reads the loaded users again, respawns the open
+        // scene's instances of rewritten prefabs and replaces the asset in the open scene (one undo step).
+        void ReplaceReferences(AssetHandle from, AssetHandle to);
+        void ApplyReplaceReferences(AssetHandle from, AssetHandle to);
+        // A toast at the bottom right (above the status bar).
+        void Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message = {});
+
+        Renderer* m_Renderer = nullptr;
+        Renderer2D* m_Renderer2D = nullptr;
+
+        Ref<Scene> m_EditorScene;
         Ref<Scene> m_ActiveScene;
+        std::filesystem::path m_EditorScenePath;
         Scope<SceneLoader> m_SceneLoad;
         AssetHandle m_SceneLoadHandle = 0;
-        Ref<Scene> m_EditorScene;
-        std::filesystem::path m_EditorScenePath;
 
-        PlayNetSettings m_PlayNet;
-        std::unique_ptr<Net::NetSession> m_PlaySession;
-        std::string m_HistoryExternalStep; // an edit from outside the UI (MCP) waiting to become an undo step with this name
-#if NOX_WITH_MCP
-        // The MCP server (docs/MCP_Plan_2026-11.md; off unless Tools > MCP Server is on). All of it lives in src/Mcp: CMake's
-        // NOX_WITH_MCP=OFF leaves that folder and these lines out.
-        std::unique_ptr<Mcp::McpEditor> m_Mcp;
-#endif
-        std::vector<std::unique_ptr<ChildProcess>> m_PlayProcesses;
-        bool m_PlayWaitingForServer = false; // client: Play has begun, the scene starts when the server lets it in
-        bool m_PlaySessionEnded = false;     // the session ended by itself (the server stopped, the connection failed): Play stops
-        bool m_OpenSaveAndPlay = false;
+        EditorCamera m_EditorCamera;
+        SceneState m_SceneState = SceneState::Edit;
 
-        struct PrefabModeState
-        {
-            bool Active = false;
-            AssetHandle Prefab = 0;
-            std::string Name;
-            Ref<Scene> ReturnScene;                // the level being edited before Prefab Mode
-            std::filesystem::path ReturnScenePath;
-            UUID Root = 0;                         // the prefab's root entity in the prefab scene
-            bool Variant = false;                  // a variant: the scene holds an instance of its base carrying the variant's changes
-            // Unsaved changes: the prefab's text once everything in the scene had spawned, against the text now.
-            std::string Snapshot;
-            bool SnapshotTaken = false;
-            bool Dirty = false;
-            int FramesSinceCheck = 0;
-        };
-        PrefabModeState m_PrefabMode;
-
-        bool m_SnapEnabled = false;
-        int m_LocationSnapIndex = 2; // 10 cm
-        int m_RotationSnapIndex = 2; // 15 degrees
-        int m_ScaleSnapIndex = 1;    // 0.25
-        bool m_ShowGrid = true;
-        struct OrthoSavedSettings
-        {
-            bool Valid = false;
-            bool Dlss = false;
-            bool RayTracing = false;
-            bool PathTracing = false;
-        } m_OrthoSaved;
-        bool m_ShowReferenceFigure = false;
-        bool m_ReferenceFigureAtCursor = false;
-        glm::dvec3 m_ReferenceFigurePosition{ 0.0 };
-        bool m_GizmoWasUsing = false;
-        bool m_MeasureTool = false;
-        int m_MeasureStage = 0; // 0 nothing, 1 first point set (line follows the cursor), 2 both set (kept until the next click)
-        glm::dvec3 m_MeasureA{ 0.0 }; // world (double precision)
-        glm::dvec3 m_MeasureB{ 0.0 };
-        glm::mat4 m_GizmoDragStart{ 1.0f }; // the dragged entity's transform when the drag began (in the renderer's space)
-        bool m_ShowPrefabExitPrompt = false;
-        std::function<void()> m_AfterPrefabExit;
-        
-        Entity m_HoveredEntity;
-
-        struct PlacementPreview
-        {
-            AssetHandle Handle = 0;
-            Entity Root;
-            glm::dvec3 InitialTranslation = { 0.0, 0.0, 0.0 };
-            bool Active = false;
-        };
-
-        PlacementPreview m_PlacementPreview;
-        
-        bool m_PrimaryCamera = true;
-        
-        EditorCamera m_EditorCamera; // the active viewport's camera
-        
         static constexpr int kMaxViewports = 4;
         struct ViewportSlot
         {
             const char* Title = "Viewport";
             bool Open = false;
-            bool CameraSet = false;  // the camera was given its starting view (a copy of the active one, in the slot's default view)
-            EditorCamera Camera;     // while the slot is not the active one
-            glm::vec2 Bounds[2] = { glm::vec2(0.0f), glm::vec2(0.0f) };
+            bool CameraSet = false;
+            EditorCamera Camera;
             glm::uvec2 Size = { 0, 0 };
             bool Hovered = false;
-            bool Submitted = false;  // its image was submitted to the renderer this frame (an extra view)
+            bool Submitted = false;
 
-            // How it draws while it is not the active viewport (Window > Viewports > its options; kept in imgui.ini).
-            uint32_t ShowFlags = Renderer::ExtraViewOutline; // Renderer::ExtraViewFlags
+            uint32_t ShowFlags = Renderer::ExtraViewOutline;
             bool ShowGrid = true;
-            int ResolutionIndex = 0;  // full, half, quarter
-            bool Realtime = true;     // off: drawn again only when its camera, its size, the scene or the selection change
-            bool ShowCameraPosition = false; // the camera's position next to the axis indicator (the Viewports menu)
-            // What it was last drawn with (realtime off).
+            int ResolutionIndex = 0;
+            bool Realtime = true;
+            bool ShowCameraPosition = false;
+
             glm::mat4 DrawnViewProjection{ 0.0f };
             glm::uvec2 DrawnSize{ 0, 0 };
             uint32_t DrawnFlags = 0;
@@ -397,100 +271,187 @@ namespace Nox
         };
         std::array<ViewportSlot, kMaxViewports> m_Viewports;
         int m_ActiveViewport = 0;
-        int m_MouseCaptureViewport = -1; // the viewport a mouse button went down in, until every button is up again
-        int m_PendingViewportLayout = -1; // a Window > Viewports preset, applied before the viewport dockspace is drawn
 
-        bool m_ViewportFocused = false, m_ViewportHovered = false;
-        glm::uvec2 m_ViewportSize = { 0.0f, 0.0f };
-        glm::uvec2 lastViewportExtent = {0, 0};
-        glm::vec2 m_ViewportBounds[2];//mouse selection
-        
-        int m_GizmoType = -1;
-        
-        bool m_ShowPhysicsColliders = false;
-        
-        enum class SceneState
+        PlayNetSettings m_PlayNet;
+        std::unique_ptr<Net::NetSession> m_PlaySession;
+        std::vector<std::unique_ptr<ChildProcess>> m_PlayProcesses;
+        bool m_PlayWaitingForServer = false;
+        bool m_PlaySessionEnded = false;
+        bool m_OpenSaveAndPlay = false;
+
+        struct OrthoSavedSettings
         {
-            Edit = 0, Play = 1, Simulate = 2
-        };
-        
-        SceneState m_SceneState = SceneState::Edit;
+            bool Valid = false;
+            bool Dlss = false;
+            bool RayTracing = false;
+            bool PathTracing = false;
+        } m_OrthoSaved;
 
         EditorHistory m_History;
-        EditorHistory m_LevelHistory; // the level's history, put aside while Prefab Mode edits the prefab
-        bool m_HistoryItemWasActive = false;
-        bool m_HistoryGizmoWasUsing = false;
-        bool m_HistoryCheckRequested = false; // an editor shortcut ran (Delete, Ctrl+D, End, ...)
+        bool m_HistoryCheckRequested = false;
+        bool m_TimelinePreviewWasOn = false; // (UpdateHistory: a check when a timeline preview ends)
+        // The scene changed since it was opened or saved: an undo step was taken (or one undone / redone) since then.
+        bool m_SceneDirty = false;
+        bool m_SceneCleanPending = true; // set on open / new / save: the history position then is the clean one
+        size_t m_HistoryPositionSeen = 0;
+        std::string m_WindowTitleShown;
+
+        ScriptBuilder m_ScriptBuilder;
+        Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;
+        // File > Package Game / Server, Create > Streaming Test World (EditorLayerDialogs.cpp).
+        void ShowPackageDialog(bool server);
+        void ShowStreamingTestWorldDialog();
+        void CancelStreamingTestWorld();
+        // The MCP server (EditorLayerMcp.cpp; NoxEditor's tools through Mcp::EditorContext). An MCP edit names the next undo step.
+        std::string m_HistoryExternalStep;
+#if NOX_WITH_MCP
+        void CreateMcpServer();
+        void UpdateMcpServer();
+        void DestroyMcpServer();
+        std::vector<NoxUI::UIMenuItem> BuildMcpMenu();
+        std::unique_ptr<Mcp::McpEditor> m_Mcp;
+#endif
+        PackageSettings m_PackageSettings;
+        std::string m_PackageOutputText;
+        StreamingTestWorldGenerator::Settings m_TestWorldSettings = [] { StreamingTestWorldGenerator::Settings s; s.TargetGigabytes = 2.0f; return s; }();
+        std::optional<glm::dvec3> m_FocusOnOpen;
+
+        bool m_CreateBasicScene = false;
+        bool m_ApplyBasicSceneView = false;
+        bool m_ThumbnailPending = false;
+        float m_ThumbnailTimer = 0.0f;
+
+        float m_CustomLitPollTimer = 0.0f;
+        std::string m_CustomLitSignature;
+
         bool m_UnloadUnusedAssetsRequested = false;
-        std::chrono::steady_clock::time_point m_LastUnloadSweep{}; // the sweep runs at most once a second
-        // The edited scene's references while Play / Simulate runs (it does not change meanwhile): collected once.
+        std::chrono::steady_clock::time_point m_LastUnloadSweep{};
         std::unordered_set<AssetHandle> m_EditorSceneReferences;
         bool m_EditorSceneReferencesValid = false;
-        
-        // Panels
-        SceneHierarchyPanel m_SceneHierarchyPanel;
-        Scope<ContentBrowserPanel> m_ContentBrowserPanel;
-        Scope<RenderGraphPanel> m_RenderGraphPanel;
-        ProfilerPanel m_ProfilerPanel;
-        OutputLogPanel m_OutputLogPanel;
-        WorldPartitionPanel m_WorldPartitionPanel;
-        LevelsPanel m_LevelsPanel;
-        MixerPanel m_MixerPanel;
-        // Build HLODs, while it runs (stepped every frame; Play, another scene, undo cancel it).
-        Scope<HLODBuilder> m_HLODBuild;
-        // Create > Streaming Test World (§5.13.4): its settings dialog, and the generation while it runs (stepped every frame; the
-        // generated scene opens once it is done).
-        StreamingTestWorldGenerator::Settings m_TestWorldSettings;
-        bool m_OpenTestWorldDialog = false;
-        Scope<StreamingTestWorldGenerator> m_TestWorldGeneration;
-        // Where the editor camera looks once the scene being opened is in (the generated world: its old view, if any, is another
-        // scene's, maybe under the new terrain).
-        std::optional<glm::dvec3> m_FocusOnOpen;
-        void UI_StreamingTestWorld();
-        void StartHLODBuild();
-        void CancelHLODBuild(const char* reason);
-        // Acoustic Probe Volumes' Bake (A4c): on the baker's thread; done, each volume's data is written to
-        // Assets/Acoustics/<scene>/, registered and set on the volume, and the scene saved. Play, another scene cancel it.
-        Scope<AcousticBaker> m_AcousticBake;
-        Ref<Scene> m_AcousticBakeScene;
-        void StartAcousticBake(UUID only); // 0: every volume
-        void FinishAcousticBake();
-        void CancelAcousticBake(const char* reason);
-        // A world's cells were loading or unloading last frame: once done, the undo history starts again (loading is not a step).
-        bool m_WorldCellsBusy = false;
-        // Open node-graph editors (docs/Animation_Graph_Architecture_Plan_2026.md Step 3), one per opened graph
-        // asset; OpenNodeGraphEditor focuses an already-open one instead of duplicating it.
-        std::vector<Scope<NodeGraphEditorPanel>> m_NodeGraphEditors;
-        std::vector<Scope<MaterialEditorPanel>> m_MaterialEditors;
-        std::vector<Scope<AnimationClipPanel>> m_AnimationClipPanels;
-        // Sequencer timelines (Future.md item 3, A8), one window per open .ntimeline.
-        std::vector<Scope<TimelinePanel>> m_TimelinePanels;
-        // Puts back what the timeline previews posed (before saving, playing, or another scene).
-        void EndTimelinePreviews();
-        // AssetType -> "open its editor window", so a new asset editor is one entry here rather than new
-        // double-click handling in every panel that shows asset references.
-        std::unordered_map<AssetType, std::function<void(AssetHandle)>> m_AssetOpeners;
 
-        // Editor resources always static
-        Ref<Texture2D> m_IconPlay, m_IconPause, m_IconStep, m_IconStop, m_IconSimulate;
-        
-        Ref<Font> m_Font; 
-        
-        // Multi Select Viewport
-        bool m_IsBoxSelecting = false;
-        glm::vec2 m_BoxSelectStart = { 0.0f, 0.0f };
-        glm::vec2 m_BoxSelectEnd = { 0.0f, 0.0f };
+        float m_StatusRefreshTimer = 0.0f;
+        float m_FpsAccumulator = 0.0f;
+        uint32_t m_FpsFrames = 0;
 
-        // What the status bar shows, taken once per StatusBarRefreshSeconds so the counts stay readable.
-        struct StatusBarCounts
+        std::array<Ref<NoxUI::UIElement>, kMaxViewports> m_ViewportSlotRoots;
+        Ref<NoxUI::UIDockSpace> m_ViewportDockSpace;
+        Ref<NoxUI::UIElement> m_ActiveViewportHost;
+        Ref<NoxUI::UIImage> m_ViewportImage;
+        Ref<ViewportCanvas> m_ViewportCanvas;
+        std::array<Ref<NoxUI::UIElement>, kMaxViewports> m_ExtraViewportHosts;
+        std::array<Ref<NoxUI::UIImage>, kMaxViewports> m_ExtraViewportImages;
+        std::array<Ref<ExtraViewportCanvas>, kMaxViewports> m_ExtraViewportCanvases;
+        ViewportToolState m_ViewportTools;
+        ViewportOverlayToolbar m_ViewportToolbar;
+        Entity m_HoveredEntity;
+
+        Ref<Texture2D> m_IconPlay;
+        Ref<Texture2D> m_IconStop;
+        Ref<Texture2D> m_IconPause;
+        Ref<Texture2D> m_IconSimulate;
+        Ref<Texture2D> m_IconStep;
+
+        Ref<NoxUI::UIStackBox> m_ToolBar;
+        Ref<NoxUI::UIIconButton> m_PlayBtnWrap;
+        Ref<NoxUI::UIIconButton> m_SimulateBtnWrap;
+        Ref<NoxUI::UIIconButton> m_PauseBtnWrap;
+        Ref<NoxUI::UIIconButton> m_StepBtnWrap;
+        Ref<UIVectorIconButton> m_PlaySettingsCogBtn;
+        Ref<NoxUI::UILabel> m_PlayNetStatusLabel;
+        Ref<NoxUI::UIElement> m_PrefabBar;       // the toolbar in Prefab Mode: the prefab's name, Save, Save & Exit, Exit
+        Ref<NoxUI::UILabel> m_PrefabBarLabel;
+
+        struct PrefabModeState
         {
-            size_t Loading = 0;
-            size_t Streaming = 0;
-            double PendingMB = 0.0;
-            size_t BlasBuilds = 0;
+            bool Active = false;
+            AssetHandle Prefab = 0;
+            std::string Name;
+            bool Variant = false;                 // the scene holds an instance of its base carrying the variant's changes
+            UUID Root = 0;                        // the prefab's root entity in the prefab scene
+            std::vector<UUID> PreviewEntities;    // the light it is seen in (the level's sun and sky): never saved
+            int FramePending = 0;                 // frames until the camera frames the prefab (it spawns over a frame or two)
+            // The level, waiting.
+            Ref<Scene> ReturnScene;
+            std::filesystem::path ReturnScenePath;
+            EditorHistory ReturnHistory;
+            bool ReturnDirty = false;
+            size_t ReturnHistoryPositionSeen = 0;
+            EditorCamera ReturnCamera;
         };
-        static constexpr double StatusBarRefreshSeconds = 1.0;
-        StatusBarCounts m_StatusBarCounts;
-        double m_StatusBarRefreshTime = -StatusBarRefreshSeconds;
+        PrefabModeState m_PrefabMode;
+
+        Ref<NoxUI::UIElement> m_SceneLoadBanner;
+        Ref<NoxUI::UILabel> m_SceneLoadTitleLabel;
+        Ref<NoxUI::UILabel> m_SceneLoadStageLabel;
+        Ref<NoxUI::UIElement> m_SceneLoadProgressFill;
+
+        Ref<NoxUI::UILabel> m_FpsLabel;
+        Ref<NoxUI::UIElement> m_StatusBar;
+        Ref<NoxUI::UIElement> m_StatusActivity; // left: Ready / loading / streaming / importing / building
+        Ref<NoxUI::UIElement> m_StatusCounts;   // right: warnings and errors in the log (click: the Output Log)
+        bool m_ResetLayoutRequested = false;
+        bool m_LayoutBuilt = false;
+        uint64_t m_LastScriptBuildNotified = 0;
+        void OpenAsset(AssetHandle handle);
+        // Asset editors (E6): which editor opens which asset type is registered once (RegisterAssetEditors); the manager owns
+        // the open windows, asks before one with unsaved edits closes and ends an editor whose window is gone.
+        void RegisterAssetEditors();
+        AssetEditorManager m_AssetEditors;
+
+        // Window > Renderer Settings (this session's rendering) and Window > Project Settings (what the project keeps); floating
+        // windows, updated while open (R1).
+        RendererSettingsPanel m_RendererSettings;
+        ProjectSettingsPanel m_ProjectSettings;
+        LevelsPanel m_LevelsPanel;          // Window > Levels (L1)
+        WorldPartitionPanel m_WorldPartitionPanel; // Window > World Partition (L1)
+        MixerPanel m_MixerPanel;                   // Window > Mixer (A1)
+        ProfilerPanel m_ProfilerPanel;             // Window > Profiler (P1)
+        RenderGraphPanel m_RenderGraphPanel;       // Window > Render Graph (P1)
+        Scope<HLODBuilder> m_HLODBuild;              // Build HLODs: a step a frame while it runs
+        void StartHLODBuild();
+        void CancelHLODBuild(const char* reason); // (the scene changes, Play / Simulate start)
+        void OpenToolWindow(const std::string& title, const Ref<NoxUI::UIElement>& root, NoxUI::UIVec2 size);
+        void UpdateToolWindows();
+        void ApplyQualityPreset(int quality);
+
+        // What is selected: the editor's, read and changed by every panel, the viewports and the shortcuts (E3).
+        EditorSelection m_Selection;
+        // What the menus and keys run (E4; EditorLayerCommands.cpp).
+        EditorCommandList m_Commands;
+        void RegisterCommands();
+        // A key press: the focused widget first, then the command bound to it. True: dispatched here (the UI layer must not
+        // dispatch it again).
+        bool DispatchCommandKey(KeyPressedEvent& key);
+        bool IsLevelFocus() const;
+        std::filesystem::path KeyBindingsPath() const;
+        void OpenKeyboardShortcuts();
+        void RebuildKeyboardShortcuts();
+        Ref<NoxUI::UIStackBox> m_ShortcutsList;
+        std::string m_CaptureCommand; // the command whose key the Keyboard Shortcuts window waits for
+        bool m_CapturePrimary = true;
+        SceneHierarchyPanel m_SceneHierarchyPanel;
+        InspectorPanel m_InspectorPanel;
+        ContentBrowserPanel m_ContentBrowserPanel;
+        OutputLogPanel m_OutputLogPanel;
+        Ref<NoxUI::UIElement> m_ContentBrowserRoot;
+        Ref<NoxUI::UIElement> m_OutputLogRoot;
+        Ref<NoxUI::UIDrawerHost> m_CenterArea;   // the dock space with the drawer over it
+        Ref<NoxUI::UIElement> m_ContentDockButton, m_LogDockButton;
+        Ref<NoxUI::UIElement> m_ContentDrawerTab, m_LogDrawerTab; // in the status bar
+        DrawerPage m_DrawerPage = DrawerPage::None;
+        float m_DrawerFraction = 0.42f;
+        bool m_ShowSceneHierarchy = true;
+        bool m_ShowInspector = true;
+        bool m_ShowToolBar = true;
+        bool m_ViewportMouseCaptured = false;
+        bool m_CursorHidden = false;
+
+        // Tracked features intentionally deferred until their corresponding V2 panels exist:
+        // - Content Browser: prefab variants, Replace References, the asset preview panel (thumbnails, browser, drag and drop,
+        //   Create Prefab are in)
+        // - Settings & Stats windows (render quality / RT / NRD / post-process / physics collider toggle UI)
+        // - Output Log, Profiler, Render Graph, World Partition (HLOD), Levels, Audio Mixer panels
+        // - Node Graph / Animation Clip / Timeline panels
+        // - Modal dialogs (Package Game/Server, Streaming Test World)
     };
 }

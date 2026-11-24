@@ -8,8 +8,8 @@
 
 namespace Nox
 {
-    StatsOverlayLayer::StatsOverlayLayer(Renderer& renderer, bool imguiWindow)
-        : Layer("StatsOverlayLayer"), m_Renderer(renderer), m_UseWindow(imguiWindow)
+    StatsOverlayLayer::StatsOverlayLayer(Renderer& renderer)
+        : Layer("StatsOverlayLayer"), m_Renderer(renderer)
     {
     }
 
@@ -21,20 +21,12 @@ namespace Nox
 
     void StatsOverlayLayer::OnRender()
     {
-        if (!m_Visible || m_UseWindow)
+        if (!m_Visible)
             return;
 
         // The overlay measures its own CPU cost with this row (GPU cost is part of the "2D Overlay" pass).
         NOX_PROFILE_SCOPE("Stats Overlay");
         m_Overlay.Draw(m_Renderer);
-    }
-
-    void StatsOverlayLayer::OnImGuiRender()
-    {
-        if (!m_Visible || !m_UseWindow)
-            return;
-        NOX_PROFILE_SCOPE("Stats Window");
-        m_Window.Draw(m_Renderer, &m_Visible);
     }
 
     bool StatsOverlayLayer::OnKeyPressed(KeyPressedEvent& event)

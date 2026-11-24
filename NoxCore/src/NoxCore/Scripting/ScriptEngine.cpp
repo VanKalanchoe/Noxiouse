@@ -172,7 +172,7 @@ namespace Nox
     {
         const std::filesystem::path repository = FindRepositoryRoot(s_ExecutableDirectory);
         coreAssembly = Newest({ s_ExecutableDirectory / "Scripts/Core/Nox.ScriptCore.dll",
-                                repository.empty() ? std::filesystem::path() : repository / "NoxScriptCore/bin" / kConfiguration / "net9.0/Nox.ScriptCore.dll" });
+                                repository.empty() ? std::filesystem::path() : repository / "NoxScriptCore/bin" / kConfiguration / "net10.0/Nox.ScriptCore.dll" });
 
         const std::string name = GetProjectAssemblyName();
         if (name.empty())
@@ -251,9 +251,10 @@ namespace Nox
             }
         }
 
-        // A build that does not load brings the scripts that were running back; either way the instances are new (from the
-        // snapshots, so they continue where they were).
-        const bool loaded = s_Backend->LoadModule(build->CoreAssembly, build->GameAssembly);
+        // Atomic hot-reload: if the new build fails to load, the running module and its live instances stay untouched.
+        if (!s_Backend->LoadModule(build->CoreAssembly, build->GameAssembly))
+            return false;
+
         s_Instances.clear();
         if (s_Scene)
         {
@@ -264,11 +265,12 @@ namespace Nox
                 auto snapshot = snapshots.find(scriptEntity.GetUUID());
                 CreateInstances(scriptEntity, snapshot != snapshots.end() ? &snapshot->second : nullptr);
             }
+            BindAllEvents();
             for (const auto& [_, instances] : s_Instances)
                 for (ScriptInstanceHandle instance : instances)
                     s_Backend->Invoke(instance, ScriptCallback::AfterReload);
         }
-        return loaded;
+        return true;
     }
 
     void ScriptEngine::OnRuntimeStart(Scene* scene)
@@ -413,5 +415,63 @@ namespace Nox
     std::vector<ScriptFieldInfo> ScriptEngine::GetExposedFields(std::string_view fullName)
     {
         return s_Backend ? s_Backend->GetExposedFields(fullName) : std::vector<ScriptFieldInfo>{};
+    }
+
+    std::vector<ScriptEventInfo> ScriptEngine::GetExposedEvents(std::string_view fullName)
+    {
+        return s_Backend ? s_Backend->GetExposedEvents(fullName) : std::vector<ScriptEventInfo>{};
+    }
+
+    std::vector<std::string> ScriptEngine::GetCallableMethods(std::string_view fullName)
+    {
+        return s_Backend ? s_Backend->GetCallableMethods(fullName) : std::vector<std::string>{};
+    }
+
+    void ScriptEngine::BindAllEvents()
+    {
+        if (!s_Backend || !s_Scene)
+            return;
+
+        auto findInstance = [](UUID entityID, std::string_view className) -> ScriptInstanceHandle
+        {
+            auto it = s_Instances.find(entityID);
+            if (it == s_Instances.end())
+                return {};
+            for (ScriptInstanceHandle handle : it->second)
+                if (s_Backend->GetInstanceClass(handle) == className)
+                    return handle;
+            return {};
+        };
+
+        auto scripts = s_Scene->GetAllEntitiesWith<ScriptComponent>();
+        for (auto entityHandle : scripts)
+        {
+            Entity entity(entityHandle, s_Scene);
+            const auto& comp = entity.GetComponent<ScriptComponent>();
+            if (comp.EventBindings.empty())
+                continue;
+
+            const UUID sourceID = entity.GetUUID();
+            for (const auto& [className, events] : comp.EventBindings)
+            {
+                const ScriptInstanceHandle sourceInstance = findInstance(sourceID, className);
+                if (!sourceInstance)
+                    continue;
+                for (const auto& [eventName, bindings] : events)
+                {
+                    for (const auto& binding : bindings)
+                    {
+                        if (binding.TargetEntity == 0 || binding.TargetClass.empty() || binding.TargetMethod.empty())
+                            continue;
+                        const ScriptInstanceHandle targetInstance = findInstance(binding.TargetEntity, binding.TargetClass);
+                        if (!targetInstance)
+                            continue;
+                        if (!s_Backend->SubscribeEvent(sourceInstance, eventName, targetInstance, binding.TargetMethod))
+                            NOX_CORE_WARN("Scripts: failed to bind event '{}.{}' -> '{}.{}'",
+                                          className, eventName, binding.TargetClass, binding.TargetMethod);
+                    }
+                }
+            }
+        }
     }
 }

@@ -1,49 +1,63 @@
 #pragma once
+
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "NoxCore/Asset/Asset.h"
 #include "NoxCore/Core/Ref.h"
+#include "NoxCore/Scene/Entity.h"
+#include <NoxUI/Core/UITypes.h>
+
+namespace NoxUI
+{
+        class UIContext;
+        class UIElement;
+        class UIStackBox;
+        class UILabel;
+    }
 
 namespace Nox
 {
     class Scene;
-    class Entity;
 
-    // Unreal's Levels window (Backlog L1): the persistent level (the open scene) and its sub-levels -- other scenes edited together
-    // with it. Per level: current (where new entities go), visible, locked, Always Loaded or streamed (by Level Streaming Volumes or
-    // a script). Add an existing scene, make a new one, remove one, move the selection into the current level. A save writes every
-    // level into its own file. In Play and Simulate: what is loaded, read-only. Window > Levels.
+    // Window > Levels (Unreal's Levels window): the persistent level (the open scene) and its sub-levels -- other scenes edited
+    // together with it. Per level: current (where new entities go), visible, locked, Always Loaded or Streamed, its placement
+    // (offset and yaw). Add an existing scene, make a new one, remove one, move the selection into the current level. In Play and
+    // Simulate: what is loaded, read-only.
     class LevelsPanel
     {
     public:
-        // Saves the scene and its sub-levels (Remove asks to save first).
-        void SetSaveCallback(std::function<void()> save) { m_Save = std::move(save); }
-        // The open scene's own asset (it cannot be its own sub-level); 0 when it was never saved.
-        void SetOpenSceneCallback(std::function<AssetHandle()> openScene) { m_OpenScene = std::move(openScene); }
+        struct Hooks
+        {
+            std::function<Ref<Scene>()> ActiveScene;
+            std::function<bool()> Editing;                       // false in Play / Simulate
+            std::function<AssetHandle()> OpenScene;              // the open scene's own asset (0: never saved)
+            std::function<std::vector<Entity>()> Selection;
+            std::function<void()> Save;                          // the scene and its sub-levels
+            std::function<void()> SceneChanged;                  // a level setting changed (an undo step; the scene is unsaved)
+            std::function<void(const std::string& text, std::function<void()> save, std::function<void()> dontSave)> AskSave;
+        };
 
-        // `scene`: the editor's scene while editing, the running copy in Play / Simulate; `selection`: the selected entities.
-        void OnImGuiRender(const Ref<Scene>& scene, bool editing, const std::vector<Entity>& selection);
-
-        bool IsOpen() const { return m_Open; }
-        void SetOpen(bool open) { m_Open = open; }
-
-    private:
-        void DrawLevels(Scene& scene, bool editing);
-        void DrawActions(Scene& scene, const std::vector<Entity>& selection);
-        void DrawRemovePrompt(Scene& scene);
-        void DrawNewLevelPrompt(Scene& scene);
-        // A new empty scene file named `name` next to the open scene, added as a sub-level and made the current level.
-        bool CreateLevel(Scene& scene, const std::string& name);
+        void SetHooks(Hooks hooks) { m_Hooks = std::move(hooks); }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
+        void Update();
 
     private:
-        bool m_Open = false;
-        std::function<void()> m_Save;
-        std::function<AssetHandle()> m_OpenScene;
-        AssetHandle m_RemoveRequest = 0; // asks: save first, discard, cancel
-        bool m_NewLevelRequest = false;
-        char m_NewLevelName[128] = "NewLevel";
-        std::string m_Message; // the last New Level / Add result, shown in the panel
+        uint64_t Signature() const;
+        void Rebuild();
+        void ShowNewLevelDialog();
+        void ShowPlacement(AssetHandle level, const NoxUI::UIRect& anchor);
+        bool CreateLevel(Scene& scene, const std::string& name, std::string& message);
+        void Changed() const;
+
+        Hooks m_Hooks;
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
+        Ref<NoxUI::UILabel> m_Message;
+        uint64_t m_Signature = 0;
+        bool m_Rebuild = true;
     };
 }

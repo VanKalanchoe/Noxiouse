@@ -1,0 +1,119 @@
+<commandLineArgumentPresets version="1">
+  <argumentList>
+    <folder id="10000000-0000-4000-8000-000000000001" name="Graphics">
+      <argument id="6d23b21e-c96d-4529-8088-1c2dbc05b41b" name="--vk" visibleName="Vulkan" description="Use Vulkan graphics backend" type="FLAG" />
+      <argument id="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b102" name="--dx12" visibleName="DirectX 12" description="Use Direct3D 12 graphics backend" type="FLAG" />
+    </folder>
+    <folder id="68b89d5b-0122-4de1-ad4d-ef2df563ce1f" name="Network">
+      <argument id="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b103" name="--server" visibleName="Dedicated Server" description="Run NoxRuntime as a dedicated headless server" type="FLAG" />
+      <argument id="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b105" name="--listen" visibleName="Listen Server" description="Run NoxRuntime as a listen server (host + play)" type="FLAG" />
+      <argument id="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b104" name="--connect" visibleName="Connect Address" description="Connect client to server host:port" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000001" value="127.0.0.1:7777" />
+        <value id="20000000-0000-4000-8000-000000000002" value="localhost:7777" />
+      </argument>
+      <argument id="d6331377-7f40-460c-bee1-858f71f65702" name="--name" visibleName="Player Name" description="Player display name for multiplayer" type="STRING">
+        <value id="ec83259e-ebc8-4b92-ab19-97c388f7eb82" value="bob" />
+        <value id="ddeb041f-116c-445c-b120-a47b6b6c9487" value="alice" />
+        <value id="20000000-0000-4000-8000-000000000003" value="Player1" />
+        <value id="20000000-0000-4000-8000-000000000004" value="Player2" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000101" name="--port" visibleName="Port" description="Server UDP port" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000005" value="7777" />
+        <value id="20000000-0000-4000-8000-000000000006" value="7778" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000102" name="--server-name" visibleName="Server Name" description="Display name for the server" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000007" value="LocalDevServer" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000103" name="--max-clients" visibleName="Max Clients" description="Maximum connected clients" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000008" value="8" />
+        <value id="20000000-0000-4000-8000-000000000009" value="16" />
+        <value id="20000000-0000-4000-8000-000000000010" value="32" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000104" name="--tickrate" visibleName="Server Tickrate" description="Dedicated server main loop ticks per second" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000011" value="60" />
+        <value id="20000000-0000-4000-8000-000000000012" value="120" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000105" name="--connect-retry" visibleName="Connect Retry (s)" description="Seconds to retry connecting to server" type="FLOAT">
+        <value id="20000000-0000-4000-8000-000000000013" value="5.0" />
+        <value id="20000000-0000-4000-8000-000000000014" value="15.0" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000106" name="--net-emulation" visibleName="Net Emulation Preset" description="Simulated network condition preset" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000015" value="off" />
+        <value id="20000000-0000-4000-8000-000000000016" value="average" />
+        <value id="20000000-0000-4000-8000-000000000017" value="bad" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000107" name="--net-lag" visibleName="Net Lag (ms)" description="Simulated one-way latency in ms" type="FLOAT">
+        <value id="20000000-0000-4000-8000-000000000018" value="50.0" />
+        <value id="20000000-0000-4000-8000-000000000019" value="100.0" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000108" name="--net-jitter" visibleName="Net Jitter (ms)" description="Simulated latency jitter in ms" type="FLOAT">
+        <value id="20000000-0000-4000-8000-000000000020" value="10.0" />
+        <value id="20000000-0000-4000-8000-000000000021" value="25.0" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000109" name="--net-loss" visibleName="Net Packet Loss (%)" description="Simulated packet loss percentage" type="FLOAT">
+        <value id="20000000-0000-4000-8000-000000000022" value="2.0" />
+        <value id="20000000-0000-4000-8000-000000000023" value="5.0" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000110" name="--net-rate" visibleName="Server Send Rate (Hz)" description="Server snapshot replication rate in Hz" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000024" value="20" />
+        <value id="20000000-0000-4000-8000-000000000025" value="30" />
+        <value id="20000000-0000-4000-8000-000000000026" value="60" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000111" name="--net-client-rate" visibleName="Client Send Rate (Hz)" description="Client input send rate in Hz" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000027" value="60" />
+        <value id="20000000-0000-4000-8000-000000000028" value="120" />
+      </argument>
+    </folder>
+    <folder id="10000000-0000-4000-8000-000000000002" name="Window &amp; Launch">
+      <argument id="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b106" name="--windowed" visibleName="Windowed" description="Keep NoxRuntime in a window instead of borderless" type="FLAG" />
+      <argument id="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b107" name="--project-manager" visibleName="Project Manager" description="Open NoxEditor at the Project Manager" type="FLAG" />
+      <argument id="10000000-0000-4000-8000-000000000201" name="--window-size" visibleName="Window Size" description="Window width,height in pixels" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000029" value="1280,720" />
+        <value id="20000000-0000-4000-8000-000000000030" value="1600,900" />
+        <value id="20000000-0000-4000-8000-000000000031" value="1920,1080" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000202" name="--window-pos" visibleName="Window Position" description="Window x,y position in pixels" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000032" value="50,50" />
+        <value id="20000000-0000-4000-8000-000000000033" value="960,50" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000203" name="--project" visibleName="Project File" description="Path to .nproj project file" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000034" value="E:/dev/noxiouse/Facerun/Facerun.nproj" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000204" name="--scene" visibleName="Start Scene" description="Override start scene path under project assets" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000035" value="Scenes/NetDemo.nox" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000205" name="--exec" visibleName="Exec Console Commands" description="Console commands to run after startup" type="STRING">
+        <value id="20000000-0000-4000-8000-000000000036" value="net.DebugTrace 1" />
+      </argument>
+    </folder>
+    <folder id="10000000-0000-4000-8000-000000000003" name="MCP">
+      <argument id="10000000-0000-4000-8000-000000000301" name="--mcp" visibleName="Enable MCP Server" description="Start NoxRuntime with MCP server enabled" type="FLAG" />
+      <argument id="10000000-0000-4000-8000-000000000302" name="--mcp-port" visibleName="MCP Port" description="MCP server localhost port" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000037" value="8765" />
+        <value id="20000000-0000-4000-8000-000000000038" value="8766" />
+      </argument>
+      <argument id="10000000-0000-4000-8000-000000000303" name="--mcp-access" visibleName="MCP Access Level" description="0=read, 1=read+edit, 2=read+edit+execute" type="INTEGER">
+        <value id="20000000-0000-4000-8000-000000000039" value="0" />
+        <value id="20000000-0000-4000-8000-000000000040" value="1" />
+        <value id="20000000-0000-4000-8000-000000000041" value="2" />
+      </argument>
+    </folder>
+  </argumentList>
+  <preset id="6dd9d7c9-3111-4e8c-90fd-ddce4d1f6f8b" name="Default" />
+  <preset id="bb6c8794-d7b6-4cc8-94f3-a40513c12c41" name="Vulkan">
+    <value argumentId="6d23b21e-c96d-4529-8088-1c2dbc05b41b" />
+  </preset>
+  <preset id="30000000-0000-4000-8000-000000000001" name="DirectX12">
+    <value argumentId="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b102" />
+  </preset>
+  <preset id="30000000-0000-4000-8000-000000000002" name="Server">
+    <value argumentId="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b103" />
+    <value argumentId="10000000-0000-4000-8000-000000000101" valueId="20000000-0000-4000-8000-000000000005" />
+  </preset>
+  <preset id="30000000-0000-4000-8000-000000000003" name="Client">
+    <value argumentId="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b104" valueId="20000000-0000-4000-8000-000000000001" />
+    <value argumentId="d6331377-7f40-460c-bee1-858f71f65702" valueId="ec83259e-ebc8-4b92-ab19-97c388f7eb82" />
+    <value argumentId="9f4c2a10-5b8e-4d3a-9c71-2a8e1f04b106" />
+    <value argumentId="10000000-0000-4000-8000-000000000201" valueId="20000000-0000-4000-8000-000000000029" />
+  </preset>
+</commandLineArgumentPresets>

@@ -1,562 +1,415 @@
 #include "EditorLayer.h"
-#include "NoxCore/Audio/AudioMixer.h"
+#include <NoxUI/Rendering/UIFont.h>
+#if NOX_WITH_MCP
+#include "McpEditor.h"
+#endif
+#include "Panels/AssetPreviewRenderer.h"
+#include "Panels/InspectorWidgets.h"
+#include "Panels/AnimationClipEditor.h"
+#include "Panels/TimelineEditor.h"
+#include "Panels/MaterialEditor.h"
+#include "Panels/MaterialEdits.h"
 
 #include <algorithm>
-#include <cstring>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <sstream>
-#include <iterator>
+#include <system_error>
 #include <unordered_set>
-#include <functional>
-#include <iostream>
 
-#include <imgui.h>
-#include <imgui_internal.h>// For Docking
-#include <ImGuizmo.h>
+#include <SDL3/SDL_events.h>
 #include <SDL3/SDL_filesystem.h>
-#include <SDL3/SDL_misc.h>
-#include "json.hpp" // nlohmann/json (tinygltf's copy): .vscode/settings.json for Material Shaders
-#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_video.h>
-#include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#include <glm/gtc/type_ptr.hpp>  // for pointer to matrix or vector
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#ifndef GLM_ENABLE_EXPERIMENTAL
+#define GLM_ENABLE_EXPERIMENTAL
+#endif
+#include <glm/gtx/quaternion.hpp>
+#include <stb_image_write.h>
+#include "json.hpp"
 
 #include "NoxCore/Asset/AssetManager.h"
-#include "NoxCore/Network/NetReplication.h"
-#include "NoxCore/Network/NetSession.h"
-#include "NoxCore/Console/Console.h"
-#if NOX_WITH_MCP
-#include "Mcp/McpEditor.h"
-#include <NoxMcp/McpClient.h>
-#include "McpProjectFiles.h"
-#endif
-#include "NoxCore/Asset/MeshSerializer.h"
+#include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/SceneImporter.h"
+#include "NoxCore/Asset/TextureImporter.h"
+#include "NoxCore/Audio/AudioMixer.h"
+#include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Input.h"
-#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Core/Window.h"
-#include "NoxCore/Scene/EntityBounds.h"
-#include "NoxCore/Physics/MeshColliderGeometry.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Events/InputEvents.h"
-#include "NoxCore/ImGui/ImGuiLayer.h"
+#include "NoxCore/Network/NetReplication.h"
+#include "NoxCore/Network/NetSession.h"
+#include "NoxCore/Physics/MeshColliderGeometry.h"
 #include "NoxCore/Profiling/Profiler.h"
-#include "NoxCore/Profiling/StatsOverlayLayer.h"
-#include "NoxCore/Profiling/StatsReport.h"
 #include "NoxCore/Project/Project.h"
-#include "NoxCore/Asset/PrefabImporter.h"
-#include "NoxCore/Scene/PrefabInstance.h"
+#include "NoxCore/Renderer/CustomLitShaders.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/Renderer/Renderer.h"
+#include "NoxCore/Scene/Components.h"
+#include "NoxCore/Scene/HLODBuilder.h"
+#include "NoxCore/Scene/Entity.h"
+#include "NoxCore/Scene/EntityBounds.h"
+#include "NoxCore/Scene/ModelInstance.h"
+#include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/SceneSerializer.h"
 #include "NoxCore/Scripting/ScriptEngine.h"
+#include <NoxUI/Layout/UIDrawerHost.h>
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Core/UIContext.h>
+#include "NoxCore/UI/Core/UILayer.h"
+#include <NoxUI/Core/UIViewportManager.h>
+#include <NoxUI/Layout/UIDockSpace.h>
+#include <NoxUI/Layout/UITabPanel.h>
+#include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
+#include <NoxUI/Widgets/UIButton.h>
+#include <NoxUI/Widgets/UICheckBox.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIModal.h>
+#include <NoxUI/Widgets/UIScrollView.h>
+#include <NoxUI/Widgets/UISlider.h>
+#include <NoxUI/Widgets/UITextInput.h>
 #include "NoxCore/Utils/Utils.h"
-#include "Panels/AssetPreviewRenderer.h"
-#include "Panels/PostProcessSettingsUI.h"
-#include "GamePackager.h"
-#include "ProjectManager/ProjectLibrary.h"
-#include "ProjectManager/ProjectManagerLayer.h"
 #include "ProjectManager/ProcessLauncher.h"
-#include <stb_image_write.h>
+#include "ProjectManager/ProjectLibrary.h"
 
 namespace Nox
 {
-
     namespace
     {
-        // Unreal's snap steps: location in cm, rotation in degrees, scale as a factor.
-        constexpr float kLocationSnapsCm[] = { 1.0f, 5.0f, 10.0f, 50.0f, 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f };
-        constexpr float kRotationSnaps[] = { 5.0f, 10.0f, 15.0f, 30.0f, 45.0f, 60.0f, 90.0f, 120.0f };
-        constexpr float kScaleSnaps[] = { 0.1f, 0.25f, 0.5f, 1.0f };
-    }
+        void ActivateDockedTab(NoxUI::UIDockSpace& dock, const std::string& title); // (below)
 
-    namespace
-    {
-        constexpr const char* kViewModeNames[] = { "Perspective", "Top", "Bottom", "Front", "Back", "Left", "Right" };
+        // In <Project>/Saved/Layout (EditorLayer::LayoutDirectory).
+        // ("2": the layouts saved before the drawer had the Content Browser and the Output Log docked; they start fresh once.)
+        constexpr const char* kLayoutFile = "Editor.2.nlayout";
+        constexpr const char* kViewportDockLayoutFile = "EditorViewportDock.nlayout";
+        constexpr const char* kViewportPrefsFile = "EditorViewports.txt";
+        constexpr float kStatusBarHeight = 28.0f;
 
-        // Which viewports were open and their views, kept in imgui.ini next to the layout they dock into ("[NoxViewports][State]").
-        // Static, not the layer's: ImGui writes the file once more when its context goes away, after the layer.
-        struct ViewportIniState
+        // The status bar's left side: a dot (green: nothing is running; amber, pulsing: something loads, streams, imports or
+        // builds) and what it is.
+        class StatusActivityElement final : public NoxUI::UIElement
         {
-            bool Loaded = false;
-            bool Open[4] = { true, false, false, false };
-            int View[4] = { 0, 1, 3, 6 };
-            // Each viewport's options as an extra view (ViewportSlot): show flags, grid, resolution, realtime.
-            uint32_t Flags[4] = { Renderer::ExtraViewOutline, Renderer::ExtraViewOutline, Renderer::ExtraViewOutline, Renderer::ExtraViewOutline };
-            int Grid[4] = { 1, 1, 1, 1 };
-            int Resolution[4] = { 0, 0, 0, 0 };
-            int Realtime[4] = { 1, 1, 1, 1 };
-            int CameraPosition[4] = { 0, 0, 0, 0 };
-        };
-        ViewportIniState s_ViewportIni;
+        public:
+            std::string Text = "Ready";
+            bool Busy = false;
 
-        void RegisterViewportIniHandler()
-        {
-            ImGuiSettingsHandler handler;
-            handler.TypeName = "NoxViewports";
-            handler.TypeHash = ImHashStr("NoxViewports");
-            handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char*) -> void* { return &s_ViewportIni; };
-            handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void*, const char* line)
+        protected:
+            NoxUI::UIVec2 ComputeDesiredSize() override
             {
-                int index = 0, open = 0, view = 0, grid = 1, resolution = 0, realtime = 1, cameraPosition = 0;
-                unsigned flags = Renderer::ExtraViewOutline;
-                const int read = sscanf(line, "Viewport%d=%d,%d,%u,%d,%d,%d,%d", &index, &open, &view, &flags, &grid, &resolution, &realtime, &cameraPosition);
-                if (read >= 3 && index >= 0 && index < 4 && view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
+                return { 26.0f + NoxUI::UILabel::MeasureText(Text, nullptr, kFont).x + 8.0f, kStatusBarHeight - 4.0f };
+            }
+
+            void OnUpdate(float dt) override { m_Time += dt; }
+
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
+            {
+                const NoxUI::UIRect& b = GetBounds();
+                const NoxUI::UIVec2 dot{ b.Min.x + 12.0f, b.Center().y };
+                const NoxUI::UIColor ready = NoxUI::ThemeColor("StatusGood", { 0.36f, 0.80f, 0.46f, 1.0f });
+                const NoxUI::UIColor busy = NoxUI::ThemeColor("StatusBusy", { 0.96f, 0.70f, 0.26f, 1.0f });
+                if (Busy)
                 {
-                    s_ViewportIni.Open[index] = index == 0 || open != 0;
-                    s_ViewportIni.View[index] = view;
-                    if (read >= 7) // the options (older files have the view only)
-                    {
-                        s_ViewportIni.Flags[index] = flags;
-                        s_ViewportIni.Grid[index] = grid;
-                        s_ViewportIni.Resolution[index] = std::clamp(resolution, 0, 2);
-                        s_ViewportIni.Realtime[index] = realtime;
-                        s_ViewportIni.CameraPosition[index] = read == 8 ? cameraPosition : 0;
-                    }
-                    s_ViewportIni.Loaded = true;
+                    const float pulse = 0.5f + 0.5f * std::sin(m_Time * 5.0f);
+                    d.AddRoundedRect(dot - NoxUI::UIVec2{ 7.0f }, dot + NoxUI::UIVec2{ 7.0f }, { busy.r, busy.g, busy.b, 0.25f * pulse }, glm::vec4(7.0f));
                 }
-            };
-            handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* self, ImGuiTextBuffer* buffer)
+                d.AddRoundedRect(dot - NoxUI::UIVec2{ 4.0f }, dot + NoxUI::UIVec2{ 4.0f }, Busy ? busy : ready, glm::vec4(4.0f));
+                const NoxUI::UIColor text = Busy ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f }) : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const std::string shown = NoxUI::UILabel::ElideText(Text, nullptr, kFont, std::max(0.0f, b.Width() - 30.0f));
+                const NoxUI::UIVec2 size = NoxUI::UILabel::MeasureText(shown, nullptr, kFont);
+                d.AddText(shown, nullptr, { b.Min.x + 24.0f, b.Center().y - size.y * 0.5f }, kFont, text);
+            }
+
+        private:
+            static constexpr float kFont = 15.0f;
+            float m_Time = 0.0f;
+        };
+
+        // A tab of the status bar's left end ("Content Drawer", "Output Log"): flat text, lit while its page is shown.
+        class StatusTabButton final : public NoxUI::UIElement
+        {
+        public:
+            StatusTabButton(std::string label, std::function<void()> onClick)
+                : m_Label(std::move(label)), m_OnClick(std::move(onClick))
             {
-                buffer->appendf("[%s][State]\n", self->TypeName);
-                for (int index = 0; index < 4; ++index)
-                    buffer->appendf("Viewport%d=%d,%d,%u,%d,%d,%d,%d\n", index, s_ViewportIni.Open[index] ? 1 : 0, s_ViewportIni.View[index],
-                                    s_ViewportIni.Flags[index], s_ViewportIni.Grid[index], s_ViewportIni.Resolution[index], s_ViewportIni.Realtime[index],
-                                    s_ViewportIni.CameraPosition[index]);
-                buffer->append("\n");
-            };
-            ImGui::AddSettingsHandler(&handler);
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                VAlign = NoxUI::UIAlignment::Center;
+            }
+
+            bool Active = false;
+
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                if (m_OnClick)
+                    m_OnClick();
+                return true;
+            }
+            bool OnPointerEnter(const NoxUI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_Hovered = false; return false; }
+
+        protected:
+            NoxUI::UIVec2 ComputeDesiredSize() override
+            {
+                return { NoxUI::UILabel::MeasureText(m_Label, nullptr, kFont).x + 24.0f, kStatusBarHeight - 4.0f };
+            }
+
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
+            {
+                const NoxUI::UIRect& b = GetBounds();
+                const NoxUI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                if (Active || m_Hovered)
+                    d.AddRoundedRect(b.Min, b.Max, Active ? NoxUI::UIColor{ accent.r, accent.g, accent.b, 0.22f } : NoxUI::ThemeColor("StatusTabFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
+                if (Active)
+                    d.AddRoundedRect({ b.Min.x + 6.0f, b.Max.y - 2.0f }, { b.Max.x - 6.0f, b.Max.y }, accent, glm::vec4(1.0f));
+                const NoxUI::UIColor text = (Active || m_Hovered) ? theme.GetToken("Text", { 0.92f, 0.93f, 0.95f, 1.0f })
+                                                               : theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const NoxUI::UIVec2 size = NoxUI::UILabel::MeasureText(m_Label, nullptr, kFont);
+                d.AddText(m_Label, nullptr, { b.Center().x - size.x * 0.5f, b.Center().y - size.y * 0.5f }, kFont, text);
+            }
+
+        private:
+            static constexpr float kFont = 14.0f;
+            std::string m_Label;
+            std::function<void()> m_OnClick;
+            bool m_Hovered = false;
+        };
+
+        // The status bar's right side: the log's warnings and errors since its last Clear; a click opens the Output Log.
+        class StatusCountsElement final : public NoxUI::UIElement
+        {
+        public:
+            StatusCountsElement(const OutputLogPanel& log, std::function<void()> onClick)
+                : m_Log(log), m_OnClick(std::move(onClick))
+            {
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                Tooltip = "Warnings and errors in the Output Log since its last Clear -- click to open it";
+            }
+
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                if (m_OnClick)
+                    m_OnClick();
+                return true;
+            }
+            bool OnPointerEnter(const NoxUI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_Hovered = false; return false; }
+
+        protected:
+            NoxUI::UIVec2 ComputeDesiredSize() override { return { 150.0f, kStatusBarHeight - 4.0f }; }
+
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
+            {
+                const NoxUI::UIRect& b = GetBounds();
+                if (m_Hovered)
+                    d.AddRoundedRect(b.Min, b.Max, NoxUI::ThemeColor("StatusCountsFill", { 1.0f, 1.0f, 1.0f, 0.06f }), glm::vec4(4.0f));
+                const NoxUI::UIColor muted = theme.GetToken("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+                const size_t warnings = m_Log.GetWarningCount(), errors = m_Log.GetErrorCount();
+                const NoxUI::UIColor warnColor = warnings > 0 ? NoxUI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f }) : muted;
+                const NoxUI::UIColor errorColor = errors > 0 ? NoxUI::ThemeColor("StatusError", { 0.95f, 0.38f, 0.38f, 1.0f }) : muted;
+                const std::string errorText = std::to_string(errors);
+                const std::string warnText = std::to_string(warnings);
+                const float errorW = NoxUI::UILabel::MeasureText(errorText, nullptr, kFont).x;
+                const float warnW = NoxUI::UILabel::MeasureText(warnText, nullptr, kFont).x;
+                const float cy = b.Center().y;
+
+                // Right to left: errors, then warnings.
+                float x = b.Max.x - 10.0f - errorW;
+                d.AddText(errorText, nullptr, { x, cy - NoxUI::UILabel::MeasureText(errorText, nullptr, kFont).y * 0.5f }, kFont, errorColor);
+                const NoxUI::UIVec2 disc{ x - 11.0f, cy };
+                d.AddRoundedRect(disc - NoxUI::UIVec2{ 6.5f }, disc + NoxUI::UIVec2{ 6.5f }, { errorColor.r, errorColor.g, errorColor.b, 0.22f }, glm::vec4(6.5f), 1.5f, errorColor);
+                NoxUI::Icons::DrawSegment(d, disc + NoxUI::UIVec2{ -2.6f, -2.6f }, disc + NoxUI::UIVec2{ 2.6f, 2.6f }, 1.6f, errorColor);
+                NoxUI::Icons::DrawSegment(d, disc + NoxUI::UIVec2{ -2.6f, 2.6f }, disc + NoxUI::UIVec2{ 2.6f, -2.6f }, 1.6f, errorColor);
+
+                x = disc.x - 18.0f - warnW;
+                d.AddText(warnText, nullptr, { x, cy - NoxUI::UILabel::MeasureText(warnText, nullptr, kFont).y * 0.5f }, kFont, warnColor);
+                const NoxUI::UIVec2 tri{ x - 11.0f, cy + 0.5f };
+                NoxUI::Icons::DrawSegment(d, { tri.x - 6.5f, tri.y + 5.5f }, { tri.x, tri.y - 6.0f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x, tri.y - 6.0f }, { tri.x + 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x + 6.5f, tri.y + 5.5f }, { tri.x - 6.5f, tri.y + 5.5f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x, tri.y - 2.2f }, { tri.x, tri.y + 1.6f }, 1.6f, warnColor);
+                NoxUI::Icons::DrawSegment(d, { tri.x, tri.y + 3.4f }, { tri.x, tri.y + 3.6f }, 1.8f, warnColor);
+            }
+
+        private:
+            static constexpr float kFont = 14.0f;
+            const OutputLogPanel& m_Log;
+            std::function<void()> m_OnClick;
+            bool m_Hovered = false;
+        };
+        constexpr const char* kViewportTitles[4] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
+        constexpr int kDefaultSlotViewModes[4] = { 0, 0, 0, 0 };
+
+        std::filesystem::path EditorCamerasFile()
+        {
+            return Project::GetProjectDirectory() / "Cache" / "EditorCameras.txt";
+        }
+
+        std::vector<std::string> ReadEditorCameraLines()
+        {
+            std::vector<std::string> lines;
+            std::ifstream in(EditorCamerasFile());
+            for (std::string line; std::getline(in, line);)
+            {
+                if (!line.empty())
+                    lines.push_back(line);
+            }
+            return lines;
         }
     }
 
-    EditorLayer::EditorLayer(std::filesystem::path projectFile, bool createBasicScene) : Layer("EditorLayer")
+    EditorLayer::EditorLayer(std::filesystem::path projectFile, bool createBasicScene)
+        : Layer("EditorLayer")
+        , m_EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f)
+        , m_CreateBasicScene(createBasicScene)
     {
-        m_CreateBasicScene = createBasicScene;
-        NOX_INFO("EditorLayer Start");
-
-        auto& app = Application::Get();
+        Application& app = Application::Get();
         m_Renderer = app.GetRenderer();
-        m_RenderGraphPanel = CreateScope<RenderGraphPanel>(m_Renderer);
-        m_WorldPartitionPanel.SetSaveCallback([this]() { SaveScene(); });
-        m_LevelsPanel.SetSaveCallback([this]() { SaveScene(); });
-        m_LevelsPanel.SetOpenSceneCallback([this]() -> AssetHandle
-        {
-            return EditorSceneHandle();
-        });
-        m_WorldPartitionPanel.SetBuildHLODsCallback([this]() { StartHLODBuild(); }, [this]() { return m_HLODBuild.get(); });
-        m_Renderer2D = m_Renderer->getRenderer2D();
+        m_Renderer2D = m_Renderer ? m_Renderer->getRenderer2D() : nullptr;
 
-        m_AssetOpeners[AssetType::AnimationGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
-        m_AssetOpeners[AssetType::AudioGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
-        m_AssetOpeners[AssetType::MaterialGraph] = [this](AssetHandle handle) { OpenNodeGraphEditor(handle); };
-        m_AssetOpeners[AssetType::AudioMixer] = [this](AssetHandle handle)
+        for (int i = 0; i < kMaxViewports; ++i)
         {
-            // The panel edits the project's mixer (Project > Audio Mixer path); another .nmixer is not what plays.
-            const std::filesystem::path path = Project::GetActiveAssetDirectory() / Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle).FilePath;
-            if (!AudioMixer::GetPath().empty() && std::filesystem::weakly_canonical(path) != std::filesystem::weakly_canonical(AudioMixer::GetPath()))
-                NOX_CORE_WARN("{} is not the project's mixer ({}); the Mixer panel shows the project's", path.filename().string(), AudioMixer::GetPath().filename().string());
-            m_MixerPanel.Focus();
-        };
-        m_AssetOpeners[AssetType::Prefab] = [this](AssetHandle handle) { OpenPrefabMode(handle); };
-        // A scene (from a Level Streaming Volume's list, say): opened for editing, as a double click in the Content Browser does.
-        m_AssetOpeners[AssetType::Scene] = [this](AssetHandle handle) { OpenScene(handle); };
-        m_AssetOpeners[AssetType::Material] = [this](AssetHandle handle) { OpenMaterialEditor(handle); };
-        m_AssetOpeners[AssetType::AnimationSequence] = [this](AssetHandle handle)
-        {
-            for (auto& panel : m_AnimationClipPanels)
-            {
-                if (panel->GetClip() == handle)
-                {
-                    ImGui::SetWindowFocus(panel->GetTitle().c_str());
-                    return;
-                }
-            }
-            m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(handle));
-        };
-        // A skinned mesh opens the window of a clip made for it (cooked from the same model, else one in its folder), previewing on it.
-        m_AssetOpeners[AssetType::Mesh] = [this](AssetHandle handle)
-        {
-            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
-            const AssetMetadata& mesh = AssetManager::GetMetadata(handle);
-            // Skinned: a skeleton next to it (the rule its import links it by; the skeleton has its own .nskel path, not the model's).
-            const bool skinned = Project::GetActive()->GetEditorAssetManager()->FindSkeletonOf(handle) != 0;
-            AssetHandle sameSource = 0, sameFolder = 0;
-            for (const auto& [candidate, metadata] : registry)
-            {
-                if (metadata.Type != AssetType::AnimationSequence)
-                    continue;
-                if (!mesh.SourceFilePath.empty() && metadata.SourceFilePath == mesh.SourceFilePath && sameSource == 0)
-                    sameSource = candidate;
-                if (metadata.FilePath.parent_path() == mesh.FilePath.parent_path() && sameFolder == 0)
-                    sameFolder = candidate;
-            }
-            const AssetHandle clip = sameSource != 0 ? sameSource : sameFolder;
-            if (!skinned || clip == 0)
-            {
-                NOX_CORE_INFO("'{}': {}", mesh.FilePath.filename().string(), !skinned ? "not a skinned mesh, nothing to preview" : "no animation clip found for it");
-                return;
-            }
-            for (auto& panel : m_AnimationClipPanels)
-            {
-                if (panel->GetClip() == clip)
-                {
-                    ImGui::SetWindowFocus(panel->GetTitle().c_str());
-                    return;
-                }
-            }
-            m_AnimationClipPanels.push_back(CreateScope<AnimationClipPanel>(clip, handle));
-        };
-        // The Material Editor's Material Graph section opens its graph here.
-        MaterialEditorPanel::OpenAssetCallback = [this](AssetHandle asset) { OpenAsset(asset); };
-        // A Material Shader (Custom Lit): opened in the program the system opens .slang files with (a code editor); saving it there
-        // builds it again (PollCustomLitShaders).
-        m_AssetOpeners[AssetType::MaterialShader] = [](AssetHandle handle)
-        {
-            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-            const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / metadata.FilePath).generic_string();
-            if (!SDL_OpenURL(url.c_str()))
-                NOX_CORE_ERROR("Could not open {} ({}): open it in your code editor from the folder", metadata.FilePath.generic_string(), SDL_GetError());
-        };
-        m_AssetOpeners[AssetType::Timeline] = [this](AssetHandle handle)
-        {
-            for (auto& panel : m_TimelinePanels)
-            {
-                if (panel->GetTimeline() == handle)
-                {
-                    ImGui::SetWindowFocus(panel->GetTitle().c_str());
-                    return;
-                }
-            }
-            m_TimelinePanels.push_back(CreateScope<TimelinePanel>(handle));
-        };
-        m_SceneHierarchyPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
-        m_SceneHierarchyPanel.SetAcousticBakeCallbacks([this](UUID only) { StartAcousticBake(only); }, [this]() { CancelAcousticBake("cancelled"); },
-                                                       [this]() -> SceneHierarchyPanel::AcousticBakeStatus
-                                                       {
-                                                           if (!m_AcousticBake)
-                                                               return {};
-                                                           return { true, m_AcousticBake->GetProgress(), m_AcousticBake->GetStatus() };
-                                                       });
-        m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
-        m_SceneHierarchyPanel.SetPlaceAssetsCallback([this](const std::vector<AssetHandle>& handles, const std::string& folder)
-        {
-            // No viewport point for a drop on the hierarchy: at the point the editor camera orbits (in front of it).
-            PlaceAssets(handles, m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance()), folder);
-        });
-        m_SceneHierarchyPanel.SetCreateShapeCallback([this](PrimitiveShape shape, const std::string& folder) { CreateShape(shape, folder); });
+            m_Viewports[i].Title = kViewportTitles[i];
+            m_Viewports[i].Camera = m_EditorCamera;
+            m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
+        }
+        m_Viewports[0].Open = true;
 
-        m_Font = Font::GetDefault();
-
-        // These editor icon .ktx2 files carry a KTXorientation tag claiming bottom-up (Y=up)
-        // storage even though their actual pixel data is top-down like everything else in this
-        // project - flip=true cancels out TextureImporter's automatic orientation correction so
-        // they render the same as before that correction was added.
-        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", {.flip = true, .generateMips = false});
-        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", {.flip = true, .generateMips = false});
-        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", {.flip = true, .generateMips = false});
-        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", {.flip = true, .generateMips = false});
-        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", {.flip = true, .generateMips = false});
+        m_IconPlay = TextureImporter::LoadTexture2D("assets/Icons/PlayButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconStop = TextureImporter::LoadTexture2D("assets/Icons/StopButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconPause = TextureImporter::LoadTexture2D("assets/Icons/PauseButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconSimulate = TextureImporter::LoadTexture2D("assets/Icons/SimulateButton.ktx2", { .flip = true, .generateMips = false });
+        m_IconStep = TextureImporter::LoadTexture2D("assets/Icons/StepButton.ktx2", { .flip = true, .generateMips = false });
 
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
+        m_SceneHierarchyPanel.SetFocusEntityCallback([this](Entity entity) { FocusOnEntity(entity); });
+        m_SceneHierarchyPanel.SetCreateShapeCallback([this](PrimitiveShape shape, const std::string& folder) { CreateShape(shape, folder); });
+        m_SceneHierarchyPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
+        m_SceneHierarchyPanel.SetSelection(&m_Selection);
+        m_InspectorPanel.SetSelection(&m_Selection);
 
-        // The project from the command line or the Project Manager (Main.cpp decides which). One that does not open, or none: the
-        // choice of opening or making one (the editor needs a project for every frame).
+        m_InspectorPanel.SetSceneMutatedCallback([this]() { m_HistoryCheckRequested = true; });
+        m_InspectorPanel.SetTagChangedCallback([this]() { m_SceneHierarchyPanel.MarkDirty(); });
+        m_InspectorPanel.SetOpenAssetCallback([this](AssetHandle h) { OpenAsset(h); });
+        m_InspectorPanel.SetSelectEntityCallback([this](Entity entity)
+        {
+            if (entity)
+                m_Selection.Select(entity);
+            else
+                m_Selection.Clear();
+        });
+        SetSceneContext(m_ActiveScene);
+
+        m_SceneHierarchyPanel.SetCreatePrefabCallback([this](UUID entity)
+        {
+            // Into the folder the Content Browser shows, like entities dragged into it.
+            const AssetHandle created = CreatePrefab(entity, m_ContentBrowserPanel.CurrentFolder());
+            if (created == 0)
+            {
+                Notify(NoxUI::UINotificationSeverity::Error, "Prefab not created", "See the Output Log for why.");
+                return;
+            }
+            Notify(NoxUI::UINotificationSeverity::Success, "Prefab created", "In " + (m_ContentBrowserPanel.CurrentFolder().empty() ? std::string("Assets") : m_ContentBrowserPanel.CurrentFolder().generic_string()));
+            m_ContentBrowserPanel.ShowNewAsset(created);
+        });
+        m_ContentBrowserPanel.SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
+        m_ContentBrowserPanel.SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
+        m_ContentBrowserPanel.SetReplaceReferencesCallback([this](AssetHandle from, AssetHandle to) { ReplaceReferences(from, to); });
+        m_ContentBrowserPanel.SetCreatePrefabCallback([this](uint64_t dragId, const std::filesystem::path& folder)
+        {
+            // The hierarchy's drag id of an entity row is the entity's UUID (SceneHierarchyPanel::NodeIdForEntity).
+            return CreatePrefab(UUID(dragId), folder);
+        });
+        m_ContentBrowserPanel.SetSceneReferencesCallback([this](std::unordered_set<AssetHandle>& handles)
+        {
+            if (m_EditorScene)
+                m_EditorScene->CollectAssetReferences(handles);
+            if (m_ActiveScene && m_ActiveScene != m_EditorScene)
+                m_ActiveScene->CollectAssetReferences(handles);
+        });
+        m_ContentBrowserPanel.SetNotifyCallback([this](NoxUI::UINotification note)
+        {
+            Notify(note.Severity, std::move(note.Title), std::move(note.Message));
+        });
+
+        // The Content Browser's pictures: meshes, prefabs and material spheres drawn by the renderer's thumbnail view.
+        AssetPreviewRenderer::SetRenderer(m_Renderer);
+        AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
+
         if (!projectFile.empty())
             NOX_CORE_INFO("Loading project {}", projectFile.generic_string());
         if ((projectFile.empty() || !OpenProject(projectFile)) && !OpenStartupProject(projectFile))
         {
-            // The user chose to quit without a project: the editor closes before its first frame (every frame needs one).
-            SDL_Event event;
+            SDL_Event event{};
             event.type = SDL_EVENT_QUIT;
             SDL_PushEvent(&event);
         }
 
-        m_EditorCamera = EditorCamera(30.0f, 1.778f, 0.01f, 1000.0f);
         if (m_ApplyBasicSceneView)
             ApplyBasicSceneView();
-        constexpr const char* kViewportTitles[kMaxViewports] = { "Viewport", "Viewport 2", "Viewport 3", "Viewport 4" };
-        for (int index = 0; index < kMaxViewports; ++index)
-            m_Viewports[index].Title = kViewportTitles[index];
-        m_Viewports[0].Open = true;
-        m_Viewports[0].CameraSet = true;
-        // Before ImGui's first frame, which reads imgui.ini.
-        RegisterViewportIniHandler();
-        // After the Project Manager, ImGui's first frames are behind and it kept imgui.ini closed: the editor's layout and viewports
-        // are read now, with every handler in place.
-        if (const char* iniFilename = ProjectManagerLayer::TakeIniFilename())
-        {
-            ImGui::GetIO().IniFilename = iniFilename;
-            ImGui::LoadIniSettingsFromDisk(iniFilename);
-        }
-        // Material thumbnails and the Material Editor's preview show on the Sphere shape.
-        AssetPreviewRenderer::SetRenderer(m_Renderer);
-        AssetPreviewRenderer::Get().SetSphereProvider([this]() { return GetShapeAsset(PrimitiveShape::Sphere); });
 
         if (!ScriptEngine::Initialize(SDL_GetBasePath(), true) && !ScriptEngine::IsInitialized())
             NOX_CORE_ERROR("Failed to initialize the .NET scripting backend");
         BuildScriptsIfNeverBuilt();
 
-        // The engine console: its variables exist before anything uses them; --exec="cmd; cmd" runs commands at start-up.
         Net::RegisterConsoleVariables();
-#if NOX_WITH_MCP
-        {
-            // What MCP's tools may ask of the editor (the only way they reach it).
-            Mcp::EditorContext context;
-            context.ActiveScene = [this]() { return m_ActiveScene; };
-            context.Mode = [this]() { return std::string(m_SceneState == SceneState::Play ? "play" : m_SceneState == SceneState::Simulate ? "simulate" : "edit"); };
-            context.ScenePath = [this]() { return EditorSceneAssetPath().generic_string(); };
-            context.Selection = [this]() { return m_SceneHierarchyPanel.GetSelectedEntities(); };
-            context.NetStatus = [this]() { return m_PlaySession ? m_PlaySession->Describe() : std::string(); };
-            context.FramesPerSecond = []() { return ImGui::GetIO().Framerate; };
-            context.CaptureViewport = [this](std::function<void(std::vector<uint8_t>, uint32_t, uint32_t, bool)> done)
-            {
-                Ref<Texture2D> image = m_Renderer ? m_Renderer->GetSceneResourceRef() : nullptr;
-                if (!image)
-                {
-                    done({}, 0, 0, false);
-                    return;
-                }
-                const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
-                m_Renderer->ReadbackTexture(std::move(image), [done, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
-                {
-                    done(std::move(pixels), width, height, bgra);
-                });
-            };
-            // MCP2, editing: each change becomes one undo step (several in a frame: one step together).
-            context.RecordEdit = [this](const std::string& step)
-            {
-                m_HistoryExternalStep = m_HistoryExternalStep.empty() ? step : std::string("MCP: several edits");
-            };
-            context.Select = [this](const std::vector<Entity>& entities)
-            {
-                m_SceneHierarchyPanel.ClearSelection();
-                for (Entity entity : entities)
-                    m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
-            };
-            context.ShapeMesh = [this](const std::string& shapeName) -> AssetHandle
-            {
-                for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
-                {
-                    std::string name = PrimitiveShapes::GetName(static_cast<PrimitiveShape>(index));
-                    if (name.size() == shapeName.size() &&
-                        std::equal(name.begin(), name.end(), shapeName.begin(), [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); }))
-                        return GetShapeAsset(static_cast<PrimitiveShape>(index));
-                }
-                return 0;
-            };
-            context.ShapeNames = []()
-            {
-                std::vector<std::string> names;
-                for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
-                    names.push_back(PrimitiveShapes::GetName(static_cast<PrimitiveShape>(index)));
-                return names;
-            };
-            context.SaveScene = [this](std::string& error)
-            {
-                if (m_PrefabMode.Active)
-                {
-                    error = "the editor is in Prefab Mode (Ctrl+S there saves the prefab): leave it first";
-                    return false;
-                }
-                if (m_EditorScenePath.empty())
-                {
-                    error = "the scene was never saved: the user names it once (File > Save Scene As)";
-                    return false;
-                }
-                SaveScene();
-                return true;
-            };
-            context.Undo = [this]()
-            {
-                const size_t before = m_History.GetPosition();
-                const std::string name = m_History.CanUndo() ? m_History.GetUndoName() : std::string();
-                Undo();
-                return m_History.GetPosition() != before ? name : std::string();
-            };
-            context.Redo = [this]()
-            {
-                const size_t before = m_History.GetPosition();
-                const std::string name = m_History.CanRedo() ? m_History.GetRedoName() : std::string();
-                Redo();
-                return m_History.GetPosition() != before ? name : std::string();
-            };
-            context.SnapshotScene = [this]()
-            {
-                if (!m_EditorScene)
-                    return std::string();
-                SceneSerializer serializer(m_EditorScene);
-                return serializer.SerializeToText();
-            };
-            context.RestoreScene = [this](const std::string& text) { RestoreHistoryState(text); };
-            // MCP3, play and verify: what the Play / Simulate / Stop / Pause buttons do.
-            context.Play = [this](const Mcp::PlayOptions& options, std::string& error)
-            {
-                if (m_PrefabMode.Active)
-                {
-                    error = "the editor is in Prefab Mode: leave it first";
-                    return false;
-                }
-                if (m_SceneState == SceneState::Play)
-                {
-                    error = "already in Play";
-                    return false;
-                }
-                // The call's choices for this Play only: the user's Play settings stay as they were.
-                const PlayNetSettings userSettings = m_PlayNet;
-                m_PlayNet.Mode = options.NetMode == "listen_server" ? PlayNetMode::ListenServer
-                               : options.NetMode == "client"        ? PlayNetMode::Client
-                                                                    : PlayNetMode::Standalone;
-                m_PlayNet.Players = std::clamp(options.Players, 1, 8);
-                m_PlayNet.Emulation = options.Emulation == "bad" ? 2 : options.Emulation == "average" ? 1 : 0;
-                m_PlayNet.DebugTrace = options.DebugLog;
-                if (options.PlayerMcp)
-                    m_PlayNet.PlayerMcp = *options.PlayerMcp;
-                if (m_PlayNet.Mode != PlayNetMode::Standalone)
-                {
-                    if (m_EditorScenePath.empty())
-                    {
-                        m_PlayNet = userSettings;
-                        error = "multiplayer Play starts the other players on the saved scene, and this scene was never saved: the user names "
-                                "it once (File > Save Scene As)";
-                        return false;
-                    }
-                    m_PlayNet.SaveWithoutAsking = true; // (asking for multiplayer Play is asking for the save it needs; no dialog)
-                }
-                OnScenePlay();
-                m_PlayNet = userSettings;
-                if (m_SceneState != SceneState::Play)
-                {
-                    error = "Play did not start (read_log tells why)";
-                    return false;
-                }
-                return true;
-            };
-            context.Simulate = [this](std::string& error)
-            {
-                if (m_PrefabMode.Active)
-                {
-                    error = "the editor is in Prefab Mode: leave it first";
-                    return false;
-                }
-                if (m_SceneState == SceneState::Simulate)
-                {
-                    error = "already simulating";
-                    return false;
-                }
-                OnSceneSimulate();
-                return true;
-            };
-            context.Stop = [this](std::string& error)
-            {
-                if (m_SceneState == SceneState::Edit)
-                {
-                    error = "not in Play or Simulate";
-                    return false;
-                }
-                OnSceneStop();
-                return true;
-            };
-            context.PlayRunning = [this]() { return m_SceneState == SceneState::Play && !m_PlayWaitingForServer; };
-            context.Pause = [this](bool paused, int stepFrames, std::string& error)
-            {
-                if (m_SceneState == SceneState::Edit || !m_ActiveScene)
-                {
-                    error = "not in Play or Simulate";
-                    return false;
-                }
-                m_ActiveScene->SetPaused(paused);
-                if (paused && stepFrames > 0)
-                    m_ActiveScene->Step(stepFrames);
-                return true;
-            };
-            context.Paused = [this]() { return m_SceneState != SceneState::Edit && m_ActiveScene && m_ActiveScene->IsPaused(); };
-            context.FocusEntity = [this](Entity entity) { FocusOnEntity(entity); };
-            context.GetCamera = [this]()
-            {
-                Mcp::ViewportCamera camera;
-                camera.Position = m_EditorCamera.GetPosition();
-                camera.FocalPoint = m_EditorCamera.GetFocalPoint();
-                camera.Distance = m_EditorCamera.GetDistance();
-                camera.Pitch = m_EditorCamera.GetPitch();
-                camera.Yaw = m_EditorCamera.GetYaw();
-                camera.Forward = m_EditorCamera.GetForwardDirection();
-                camera.Orthographic = m_EditorCamera.IsOrthographic();
-                return camera;
-            };
-            context.SetCamera = [this](const glm::dvec3& focalPoint, double distance, float pitch, float yaw)
-            {
-                SetViewMode(EditorViewMode::Perspective); // (an orthographic view's direction is fixed)
-                m_EditorCamera.SetFocalPoint(focalPoint);
-                m_EditorCamera.SetDistance(static_cast<float>(distance));
-                m_EditorCamera.SetOrientation(pitch, yaw); // (places the camera)
-            };
-            // MCP4, scripts and assets.
-            context.ScriptBuild = [this]()
-            {
-                Mcp::ScriptBuildInfo info;
-                info.HasProject = !ScriptEngine::GetProjectScriptsProject().empty();
-                info.Building = m_ScriptBuilder.IsBuilding();
-                info.Pending = m_ScriptBuilder.IsBuildPending();
-                info.Status = m_ScriptBuilder.GetStatus();
-                const ScriptBuilder::BuildResult& last = m_ScriptBuilder.GetLastResult();
-                info.Number = last.Number;
-                info.Succeeded = last.Succeeded;
-                info.Reloaded = last.Reloaded;
-                info.Seconds = last.Seconds;
-                info.Diagnostics = last.Diagnostics;
-                info.Log = last.Log.generic_string();
-                return info;
-            };
-            context.RequestScriptBuild = [this]() { m_ScriptBuilder.RequestBuild(); };
-            context.MaterialChanged = [](AssetHandle material)
-            {
-                Renderer::MarkMaterialChanged(material); // (as the Material Editor does)
-                AssetPreviewRenderer::Get().Invalidate(material);
-            };
-            context.AssetsChanged = [this]()
-            {
-                if (m_ContentBrowserPanel)
-                    m_ContentBrowserPanel->Refresh();
-            };
-            // MCP4 part 2: graphs through their editor window, packaging as the dialog does.
-            context.ApplyGraph = [this](AssetHandle graph, NodeGraph replacement) -> std::string
-            {
-                OpenNodeGraphEditor(graph);
-                for (auto& panel : m_NodeGraphEditors)
-                    if (panel->GetGraphAsset() == graph)
-                        return panel->ApplyExternalEdit(std::move(replacement)) ? std::string() : std::string("the graph could not be saved (read_log)");
-                return "the graph editor could not be opened";
-            };
-            context.Package = [this](const PackageSettings& settings)
-            {
-                EndTimelinePreviews();
-                SaveScene(); // the scene as edited is what ships (the Package dialog does the same)
-                return PackageGame(settings);
-            };
-            context.Runtimes = [this]()
-            {
-                std::vector<Mcp::RuntimeEndpoint> runtimes;
-                for (const PlayRuntime& runtime : m_PlayRuntimes)
-                {
-                    Mcp::RuntimeEndpoint endpoint;
-                    endpoint.Name = runtime.Name;
-                    endpoint.Player = runtime.Player;
-                    endpoint.Port = runtime.McpPort;
-                    endpoint.Running = runtime.Process < m_PlayProcesses.size() && m_PlayProcesses[runtime.Process]->IsRunning();
-                    endpoint.McpState = runtime.Probe ? NoxMcp::ToString(runtime.Probe->Get()) : "starting";
-                    runtimes.push_back(std::move(endpoint));
-                }
-                return runtimes;
-            };
-            m_Mcp = std::make_unique<Mcp::McpEditor>(std::move(context));
-        }
-#endif
         if (const char* exec = app.GetSpecification().CommandLineArgs.Value("--exec"))
             Console::Get().Execute(exec);
+
+        RegisterCommands();
+        RegisterAssetEditors();
+#if NOX_WITH_MCP
+        CreateMcpServer();
+#endif
+        LoadViewportPrefs(); // the project's (Saved/Layout)
+        BuildUI(true);
+    }
+
+    EditorLayer::~EditorLayer()
+    {
+        if (m_CursorHidden)
+        {
+            SDL_ShowCursor();
+            m_CursorHidden = false;
+        }
+#if NOX_WITH_MCP
+        DestroyMcpServer(); // (first: its calls reach into the editor)
+#endif
+        EndMultiplayerPlay();
+        SaveEditorCameras();
+        ScriptEngine::Shutdown();
+
+        if (UILayer* uiLayer = Application::Get().GetUILayer())
+        {
+            if (const auto& dock = uiLayer->GetDockSpaceRef())
+            {
+                dock->CanClosePanel = nullptr; // (it asks this layer)
+            }
+        }
+        ExitPrefabMode(); // (asked about before; the level comes back so the editor closes on it)
+        m_AssetEditors.CloseAll(); // (while the project's assets are still loaded; their windows are not saved in the layout)
+        SaveLayoutFiles();
+        AssetPreviewRenderer::Get().Clear();
+        AssetPreviewRenderer::SetRenderer(nullptr);
+        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
+            Project::GetActive()->GetEditorAssetManager()->Shutdown();
     }
 
     void EditorLayer::BuildScriptsIfNeverBuilt()
@@ -568,3053 +421,8 @@ namespace Nox
             m_ScriptBuilder.RequestBuild();
     }
 
-    EditorLayer::~EditorLayer()
-    {
-        NOX_CORE_INFO("EditorLayer Shutdown");
-
-        EndMultiplayerPlay(); // (the players' windows and the dedicated server close with the editor)
-        SaveEditorCameras();
-        ScriptEngine::Shutdown();
-        AssetPreviewRenderer::Get().Clear();
-        AssetPreviewRenderer::SetRenderer(nullptr);
-
-        m_Font->ReleaseDefault(); // Since Editor Layer since static dies After renderer not needed for components
-
-        //idk what hapens if i have clientproject is this a good place here 
-        if (Project::GetActive() && Project::GetActive()->GetEditorAssetManager())
-        {
-            std::static_pointer_cast<EditorAssetManager>(Project::GetActive()->GetEditorAssetManager())->Shutdown();
-        }
-    }
-
-    void EditorLayer::OnEvent(Event& event)
-    {
-        //std::println("{}", event.ToString());
-        if (!Project::GetActive())
-            return; // closing: no project was opened
-
-        // A click or a scroll in another viewport makes it the active one first, so its camera and the tools get the input. Not while
-        // a button is held: a drag that began in the active viewport keeps it.
-        bool activatedViewport = false;
-        if ((event.GetEventType() == EventType::MouseButtonPressed || event.GetEventType() == EventType::MouseScrolled) && m_MouseCaptureViewport < 0)
-        {
-            const int hovered = HoveredViewport();
-            if (hovered >= 0 && hovered != m_ActiveViewport)
-            {
-                ActivateViewport(hovered);
-                activatedViewport = true;
-            }
-        }
-
-        if (m_SceneState == SceneState::Edit && m_ViewportHovered)
-        {
-            const ImVec2 mouse = ImGui::GetMousePos();
-            m_EditorCamera.SetCursorPosition({ mouse.x - m_ViewportBounds[0].x, mouse.y - m_ViewportBounds[0].y });
-            m_EditorCamera.OnEvent(event);
-        }
-
-        EventDispatcher dispatcher(event);
-        dispatcher.Dispatch<ExternalFileDropEvent>([this](ExternalFileDropEvent& drop)
-        {
-            if (m_ContentBrowserPanel)
-                m_ContentBrowserPanel->OnExternalFileDrop(drop.GetPath());
-            return false;
-        });
-        dispatcher.Dispatch<KeyPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
-        // The click that activated a viewport only does that (its picking under the cursor is not there yet).
-        if (!activatedViewport)
-            dispatcher.Dispatch<MouseButtonPressedEvent>(Nox_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
-    }
-
-    void EditorLayer::OnUpdate(Timestep ts)
-    {
-        if (!Project::GetActive())
-            return; // closing: no project was opened
-#if NOX_WITH_MCP
-        if (m_Mcp)
-            m_Mcp->Update(); // (MCP tool calls that came in run here, between frames)
-#endif
-        // A project without a picture for the Project Manager: the view a few seconds after it opened (the scene has drawn by then).
-        if (m_ThumbnailPending && m_SceneState == SceneState::Edit && !m_SceneLoad)
-        {
-            m_ThumbnailTimer += ts;
-            if (m_ThumbnailTimer > 4.0f)
-            {
-                m_ThumbnailPending = false;
-                CaptureProjectThumbnail();
-            }
-        }
-        // A scene being opened: a slice of its entities each frame (8 ms), swapped in once complete.
-        if (m_SceneLoad && m_SceneLoad->Step(8.0))
-            FinishSceneLoad();
-        // A Material Shader saved, added or removed (Custom Lit): the renderer's Custom Lit pipelines built again (twice a second).
-        m_CustomLitPollTimer += ts;
-        if (m_CustomLitPollTimer > 0.5f)
-        {
-            m_CustomLitPollTimer = 0.0f;
-            PollCustomLitShaders();
-        }
-        // The streaming test world: a step a frame; done, its scene opens.
-        if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
-        {
-            const AssetHandle scene = m_TestWorldGeneration->Failed() ? AssetHandle(0) : m_TestWorldGeneration->GetScene();
-            const glm::dvec3 middle = m_TestWorldGeneration->GetMiddle();
-            m_TestWorldGeneration.reset();
-            if (scene != 0)
-            {
-                m_FocusOnOpen = middle;
-                OpenScene(scene);
-            }
-        }
-        // Build HLODs: a step a frame; done, the scene is saved (its index names the new HLOD cells).
-        if (m_HLODBuild && m_HLODBuild->Step())
-        {
-            const bool failed = m_HLODBuild->Failed();
-            const size_t built = m_HLODBuild->GetBuiltCount();
-            m_HLODBuild.reset();
-            if (!failed)
-                SaveScene();
-            NOX_CORE_INFO("Build HLODs: {} ({} HLODs)", failed ? "failed (see above)" : "done", built);
-        }
-        if (m_AcousticBake && !m_AcousticBake->IsRunning())
-            FinishAcousticBake();
-        UpdatePrefabModeDirty();
-        m_ScriptBuilder.Update();
-
-        // Game scripts read the mouse only over the viewport and the keys only while it is the target: a click in the hierarchy
-        // or a key typed in a text field is not the game's.
-        Input::SetGameInputEnabled(m_ViewportFocused || m_ViewportHovered, m_ViewportHovered);
-
-        // Deleting entities, switching scenes, or leaving Play can leave meshes/textures unreferenced.
-        // Sweep at the start of the next frame, before anything re-requests them this frame.
-        if (m_EditorScene && m_EditorScene->ConsumeAssetReferencesChanged())
-        {
-            m_UnloadUnusedAssetsRequested = true;
-            m_EditorSceneReferencesValid = false;
-        }
-        if (m_ActiveScene && m_ActiveScene != m_EditorScene && m_ActiveScene->ConsumeAssetReferencesChanged())
-            m_UnloadUnusedAssetsRequested = true;
-        // Loads still streaming in during the last sweep have finished: what nothing uses any more goes too.
-        if (Project::GetActive()->GetEditorAssetManager()->ConsumeLoadsSettledAfterSweep())
-            m_UnloadUnusedAssetsRequested = true;
-        // The sweep walks every scene's references: at most once a second (Unreal collects garbage on an interval too). A streamed
-        // world asks for it with nearly every cell that goes and every load that lands -- every frame, 1-7 ms with 65k entities.
-        if (m_UnloadUnusedAssetsRequested && std::chrono::steady_clock::now() - m_LastUnloadSweep >= std::chrono::seconds(1))
-        {
-            NOX_PROFILE_SCOPE("Unload Unused Assets");
-            m_UnloadUnusedAssetsRequested = false;
-            m_LastUnloadSweep = std::chrono::steady_clock::now();
-            UnloadUnusedAssets();
-        }
-
-
-        // Import Into Level requests whose assets finished cooking: their scene goes into the level being edited.
-        for (const ModelInstance::LevelDescription& level : Project::GetActive()->GetEditorAssetManager()->ConsumeLevelImports())
-        {
-            if (m_EditorScene)
-            {
-                Entity imported = ModelInstance::SpawnLevel(*m_EditorScene, level);
-                if (m_ActiveScene == m_EditorScene)
-                    m_SceneHierarchyPanel.SetSelectedEntity(imported);
-            }
-        }
-        m_ActiveScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
-
-        // zero sized framebuffer is invalid
-        if (m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
-        {
-            // Verify if the viewport has a new size and resize the RenderTarget accordingly.
-            // Whole pixels: the panel's size is a float (docking and DPI scaling make it fractional), and comparing it with
-            // the renderer's integer size was never equal, so the viewport "changed" every frame and the renderer rebuilt
-            // its targets, dropped every history and flushed the GPU again and again (every ~120 ms), which showed up as
-            // jitter while the camera moved -- timings looked fine because the profiler stats reset with each rebuild.
-            const nri::Extent2D wantedSize{ static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y) };
-            nri::Extent2D viewportSize = m_Renderer->getViewPortSize();
-            if (wantedSize.width != viewportSize.width || wantedSize.height != viewportSize.height)
-            {
-                m_Renderer->onViewportSizeChange(wantedSize);
-                m_EditorCamera.SetViewportSize(static_cast<float>(wantedSize.width), static_cast<float>(wantedSize.height));
-            }
-        }
-
-        m_ActiveScene->SetRenderer(m_Renderer);
-        m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
-
-        {
-            NOX_PROFILE_SCOPE("Scene Update");
-            switch (m_SceneState)
-            {
-            case SceneState::Edit:
-                {
-                    if (m_ViewportFocused)
-                    {
-                        /*m_CameraController.OnUpdate(ts);*/
-                    }
-
-                    m_EditorCamera.OnUpdate(ts, m_MouseCaptureViewport == m_ActiveViewport);
-
-                    m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
-                    break;
-                }
-            case SceneState::Simulate:
-                {
-                    m_EditorCamera.OnUpdate(ts, m_MouseCaptureViewport == m_ActiveViewport);
-
-                    m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
-                    break;
-                }
-            case SceneState::Play:
-                {
-                    // Multiplayer Play: receive (a client's join starts the scene here), the scene, then the snapshots and send.
-                    if (m_PlaySession)
-                        m_PlaySession->Receive(static_cast<float>(ts));
-                    if (m_PlaySessionEnded)
-                    {
-                        OnSceneStop(); // (the server stopped, or it could not be reached: back to editing)
-                        break;
-                    }
-                    if (!m_PlayWaitingForServer)
-                        m_ActiveScene->OnUpdateRuntime(ts);
-                    if (m_PlaySession)
-                    {
-                        m_PlaySession->AfterScene(static_cast<float>(ts));
-                        m_PlaySession->Send();
-                    }
-                    break;
-                }
-            }
-        }
-
-        // Mouse Selection
-        auto [mx, my] = ImGui::GetMousePos();
-        mx -= m_ViewportBounds[0].x;
-        my -= m_ViewportBounds[0].y;
-
-        glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
-        //my = viewportSize.y - my;
-        int mouseX = (int)mx;
-        int mouseY = (int)my;
-
-        if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSize.x && mouseY < (int)viewportSize.y)
-        {
-            /*ScopeTimer timer("MousePicking");*/
-            // Retrieve the pixel data (ID) from the calculated index
-            // reading only 1 pixel right now but if multi select maybe i need full viewport ? 
-            /*int pixelData = Renderer::ReadPixel(mouseX, mouseY);
-
-            m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
-            */
-            int32_t pixelData = m_Renderer->getPickedEntityID();
-
-            m_HoveredEntity = pixelData == -1 ? Entity() : Entity((entt::entity)pixelData, m_ActiveScene.get());
-
-            // If not dragging a box, keep requesting 1x1 pixel under cursor for hover detection
-            if (!m_IsBoxSelecting)
-            {
-                m_Renderer->setPickRequest(mouseX, mouseY, true);
-            }
-            
-            // When actively dragging the box, request the full rectangle from the GPU entity texture
-            if (m_IsBoxSelecting)
-            {
-                glm::vec2 boxMin = {
-                    std::min(m_BoxSelectStart.x, m_BoxSelectEnd.x) - m_ViewportBounds[0].x,
-                    std::min(m_BoxSelectStart.y, m_BoxSelectEnd.y) - m_ViewportBounds[0].y
-                };
-                glm::vec2 boxMax = {
-                    std::max(m_BoxSelectStart.x, m_BoxSelectEnd.x) - m_ViewportBounds[0].x,
-                    std::max(m_BoxSelectStart.y, m_BoxSelectEnd.y) - m_ViewportBounds[0].y
-                };
-
-                int startX = std::max(0, (int)boxMin.x);
-                int startY = std::max(0, (int)boxMin.y);
-                int width = std::max(1, (int)(boxMax.x - boxMin.x));
-                int height = std::max(1, (int)(boxMax.y - boxMin.y));
-
-                m_Renderer->setBoxPickRequest(startX, startY, (uint32_t)width, (uint32_t)height);
-            }
-        }
-
-        OnOverlayRender();
-        // The other viewports' cameras, drawn after the main view this frame; the asset thumbnail in progress.
-        SubmitExtraViewports(ts);
-        AssetPreviewRenderer::Get().Update();
-
-        {
-            NOX_PROFILE_SCOPE("Asset Manager Update");
-            Project::GetActive()->GetEditorAssetManager()->Update();
-        }
-    }
-
-    void EditorLayer::OnRender()
-    {
-        if (!Project::GetActive())
-            return; // closing: no project was opened
-    }
-
-    void EditorLayer::OnImGuiRender()
-    {
-        if (!Project::GetActive())
-            return; // closing: no project was opened
-
-        // Through ImGui's own cursor state instead of raw SDL calls (Input::SetCursorVisible): those fought
-        // ImGui_ImplSDL3_NewFrame's own per-frame cursor update and lost unpredictably (flicker). Telling ImGui itself
-        // "no cursor" for this frame is the way the backend expects to be told, so there is nothing left to race against.
-        // ShouldHideCursor(), not just "is flying": UE5 doesn't hide it on the click alone, only once the mouse actually moves.
-        if (m_EditorCamera.ShouldHideCursor() || (m_SceneState != SceneState::Edit && Input::IsRelativeMouseMode()))
-            ImGui::SetMouseCursor(ImGuiMouseCursor_None); // (or a script locked it: Input.CursorLocked)
-
-        /*--
-        * IMGUI Docking
-        * Create a dockspace and dock the viewport and settings window.
-        * The central node is named "Viewport", which can be used later with Begin("Viewport")
-        * to render the final image.
-        -*/
-
-        const ImGuiDockNodeFlags dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingInCentralNode;
-
-        // Before the dockspace, which fits above it.
-        UI_StatusBar();
-        UI_PrefabExitPrompt();
-        UI_SceneLoadProgress();
-        UI_PackageGame();
-
-        // 1. Grab the style and save the default minimum size
-        ImGuiStyle& style = ImGui::GetStyle();
-        float minWinSizeX = style.WindowMinSize.x;
-        float minWinSizeY = style.WindowMinSize.y;
-
-        // 2. Enforce the new minimum size globally for the DockSpace
-        style.WindowMinSize.x = 370.0f;
-
-        // 3. Submit the DockSpace (It will inherit the 370x350 constraint)
-        ImGuiID dockID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockFlags);
-
-        // 4. Restore the original minimum size for standard floating windows
-        style.WindowMinSize.x = minWinSizeX;
-        style.WindowMinSize.y = minWinSizeY;
-
-        // Docking layout, must be done only if it doesn't exist
-        if (!ImGui::DockBuilderGetNode(dockID)->IsSplitNode() && !ImGui::FindWindowByName("Viewports"))
-        {
-            ImGui::DockBuilderDockWindow("Viewports", dockID); // Dock the viewport area (UI_Viewports) to the central node
-            ImGui::DockBuilderGetCentralNode(dockID)->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; // Remove "Tab" from the central node
-            ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, 0.2f, nullptr, &dockID); // Split the central node
-            ImGui::DockBuilderDockWindow("Settings", leftID); // Dock "Settings" to the left node
-        }
-        // A layout saved before the viewport area existed (the one "Viewport" window sat in the central node): the area takes that
-        // place, and UI_Viewports moves the viewport into it (the one-viewport layout, applied while the area's dockspace is new).
-        else if (!ImGui::FindWindowByName("Viewports") && !ImGui::FindWindowSettingsByID(ImHashStr("Viewports")))
-        {
-            if (ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockID))
-                ImGui::DockBuilderDockWindow("Viewports", central->ID);
-        }
-
-        // [optional] Show the menu bar
-        if (ImGui::BeginMainMenuBar())
-        {
-            if (ImGui::BeginMenu("File"))
-            {
-                if (ImGui::MenuItem("New Project..."))
-                {
-                    NewProject();
-                }
-                if (ImGui::MenuItem("Open Project...", "Ctrl+O"))
-                {
-                    OpenProject();
-                }
-                if (ImGui::MenuItem("Project Manager..."))
-                    OpenProjectManager();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Close this project and show the Project Manager (save the scene first: like Exit, this does not ask).");
-
-                ImGui::Separator();
-
-                if (ImGui::MenuItem("New Scene", "Ctrl+N"))
-                {
-                    NewScene();
-                }
-
-                if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
-                {
-                    SaveScene();
-                }
-
-                if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S"))
-                {
-                    SaveSceneAs();
-                }
-
-                ImGui::Separator();
-
-                for (const bool server : { false, true })
-                {
-                    if (!ImGui::MenuItem(server ? "Package Server..." : "Package Game..."))
-                        continue;
-                    // Each its own folder by default (Build/<Project>, Build/<Project>Server).
-                    if (Project::GetActive() && (m_PackageOutput[0] == '\0' || server != m_PackageServer))
-                    {
-                        const std::string name = Project::GetActive()->GetConfig().Name + (server ? "Server" : "");
-                        const std::filesystem::path defaultOutput = Project::GetProjectDirectory() / "Build" / name;
-                        snprintf(m_PackageOutput, sizeof(m_PackageOutput), "%s", defaultOutput.generic_string().c_str());
-                    }
-                    m_PackageServer = server;
-                    m_PackageResult.clear();
-                    m_ShowPackageGame = true;
-                }
-
-                ImGui::Separator();
-
-                if (ImGui::MenuItem("Exit"))
-                    Application::Shutdown();
-
-                ImGui::EndMenu();
-            }
-
-            if (ImGui::BeginMenu("Edit"))
-            {
-                const bool editing = m_SceneState == SceneState::Edit;
-                const std::string undoLabel = m_History.CanUndo() ? "Undo " + m_History.GetUndoName() : std::string("Undo");
-                const std::string redoLabel = m_History.CanRedo() ? "Redo " + m_History.GetRedoName() : std::string("Redo");
-                if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, editing && m_History.CanUndo()))
-                    Undo();
-                if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false, editing && m_History.CanRedo()))
-                    Redo();
-                ImGui::Separator();
-                ImGui::TextDisabled("History: %zu steps, %.1f MB", m_History.GetStateCount() > 0 ? m_History.GetStateCount() - 1 : 0,
-                                    static_cast<double>(m_History.GetMemoryBytes()) / (1024.0 * 1024.0));
-                ImGui::EndMenu();
-            }
-
-            if (ImGui::BeginMenu("Create"))
-            {
-                if (ImGui::MenuItem("Empty Entity") && m_ActiveScene)
-                    m_ActiveScene->CreateEntity("Empty Entity");
-                if (ImGui::BeginMenu("Shapes"))
-                {
-                    for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
-                    {
-                        const PrimitiveShape shape = static_cast<PrimitiveShape>(index);
-                        if (ImGui::MenuItem(PrimitiveShapes::GetName(shape)))
-                            CreateShape(shape, std::string());
-                    }
-                    ImGui::EndMenu();
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Streaming Test World...", nullptr, false, !m_TestWorldGeneration && m_SceneState == SceneState::Edit))
-                    m_OpenTestWorldDialog = true;
-                ImGui::SetItemTooltip("A world partition larger than RAM and VRAM (every cell its own terrain mesh and texture), to fly through and\n"
-                                      "see streaming keep up: written into the project, then opened.");
-                ImGui::EndMenu();
-            }
-
-#if NOX_WITH_MCP
-            if (ImGui::BeginMenu("Tools"))
-            {
-                if (m_Mcp)
-                    m_Mcp->DrawMenu();
-                ImGui::EndMenu();
-            }
-#endif
-            if (ImGui::BeginMenu("Window"))
-            {
-                bool renderGraphOpen = m_RenderGraphPanel->IsOpen();
-                if (ImGui::MenuItem("Render Graph", nullptr, &renderGraphOpen))
-                    m_RenderGraphPanel->SetOpen(renderGraphOpen);
-                bool outputLogOpen = m_OutputLogPanel.IsOpen();
-                if (ImGui::MenuItem("Output Log", nullptr, &outputLogOpen))
-                    m_OutputLogPanel.SetOpen(outputLogOpen);
-                bool profilerOpen = m_ProfilerPanel.IsOpen();
-                if (ImGui::MenuItem("Profiler", nullptr, &profilerOpen))
-                    m_ProfilerPanel.SetOpen(profilerOpen);
-                bool worldPartitionOpen = m_WorldPartitionPanel.IsOpen();
-                if (ImGui::MenuItem("World Partition", nullptr, &worldPartitionOpen))
-                    m_WorldPartitionPanel.SetOpen(worldPartitionOpen);
-                bool levelsOpen = m_LevelsPanel.IsOpen();
-                if (ImGui::MenuItem("Levels", nullptr, &levelsOpen))
-                    m_LevelsPanel.SetOpen(levelsOpen);
-                bool mixerOpen = m_MixerPanel.IsOpen();
-                if (ImGui::MenuItem("Mixer", nullptr, &mixerOpen))
-                    m_MixerPanel.SetOpen(mixerOpen);
-
-                // Up to four viewports, each with its own camera (docs/Future.md item 5). A layout snaps them into place; a
-                // viewport's tab can then be dragged anywhere and the splitters resized.
-                if (ImGui::BeginMenu("Viewports"))
-                {
-                    if (ImGui::MenuItem("1 Viewport"))
-                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::One);
-                    if (ImGui::MenuItem("2 Side by Side"))
-                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::TwoSideBySide);
-                    if (ImGui::MenuItem("2 Stacked"))
-                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::TwoStacked);
-                    if (ImGui::MenuItem("3 Viewports"))
-                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::Three);
-                    if (ImGui::MenuItem("4 Viewports (2 x 2)"))
-                        m_PendingViewportLayout = static_cast<int>(ViewportLayout::Four);
-                    ImGui::Separator();
-                    for (int index = 1; index < kMaxViewports; ++index)
-                    {
-                        bool open = m_Viewports[index].Open;
-                        if (ImGui::MenuItem(m_Viewports[index].Title, nullptr, &open))
-                        {
-                            if (open)
-                                OpenViewport(index);
-                            else
-                                m_Viewports[index].Open = false;
-                        }
-                    }
-                    ImGui::Separator();
-                    for (int index = 0; index < kMaxViewports; ++index)
-                        UI_ViewportOptionsMenu(index);
-                    ImGui::Separator();
-                    ImGui::TextDisabled("Click a viewport to use it; drag its tab to move it");
-                    ImGui::EndMenu();
-                }
-
-                // Temporary entry point (docs/Animation_Graph_Architecture_Plan_2026.md Step 3); Step 4 replaces
-                // this with double-clicking a graph asset reference.
-                if (ImGui::BeginMenu("Animation Graphs"))
-                {
-                    auto assetManager = Project::GetActive()->GetEditorAssetManager();
-                    const auto& registry = assetManager->GetAssetRegistry();
-                    bool any = false;
-                    for (const auto& [handle, metadata] : registry)
-                    {
-                        if (metadata.Type != AssetType::AnimationGraph)
-                            continue;
-                        any = true;
-                        if (ImGui::MenuItem(metadata.FilePath.stem().string().c_str()))
-                            OpenNodeGraphEditor(handle);
-                    }
-                    if (!any)
-                        ImGui::TextDisabled("No .nanimgraph assets found");
-                    ImGui::EndMenu();
-                }
-
-                ImGui::EndMenu();
-            }
-
-            if (ImGui::BeginMenu("Script"))
-            {
-                if (ImGui::MenuItem("Build and Reload", "Ctrl+B", false, !m_ScriptBuilder.IsBuilding()))
-                    m_ScriptBuilder.RequestBuild();
-                if (ImGui::MenuItem("Reload assembly", "Ctrl+R"))
-                {
-                    ScriptEngine::ReloadAssembly();
-                }
-                ImGui::MenuItem("Build on Save", nullptr, &m_ScriptBuilder.AutoBuild);
-                bool waitForDebugger = ScriptEngine::GetWaitForDebugger();
-                if (ImGui::MenuItem("Wait for Debugger on Play", nullptr, &waitForDebugger))
-                    ScriptEngine::SetWaitForDebugger(waitForDebugger);
-                ImGui::SetItemTooltip("Play waits (up to 60 s) until a .NET debugger attaches to the editor, then breaks once.\n"
-                                      "Visual Studio: Debug > Attach to Process, NoxEditor, code type Managed (.NET Core).\n"
-                                      "Rider: Run > Attach to Process. Breakpoints in the scripts then hit (the .pdb is loaded with them).");
-                ImGui::SetItemTooltip("Saving a .cs file of the project builds its scripts and reloads them a moment later.");
-                if (!m_ScriptBuilder.GetStatus().empty())
-                    ImGui::TextDisabled("%s", m_ScriptBuilder.GetStatus().c_str());
-
-                ImGui::EndMenu();
-            }
-
-            bool currentVSync = m_Renderer->getVSync();
-            if (ImGui::MenuItem("vSync", "", &currentVSync))
-                m_Renderer->setVSync(currentVSync); // Recreate the swapchain with the new vSync setting
-
-            // Adding overlay text on the upper left corner
-            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-
-            ImGui::EndMainMenuBar();
-        }
-
-        /* END Docking */
-
-        UI_Viewports();
-
-        // Extra ImGui windows can be added in OnImGuiRender() layer, like the demo window.
-        // ImGui::ShowDemoWindow();
-
-        m_SceneHierarchyPanel.OnImGuiRender();
-        m_ContentBrowserPanel->OnImGuiRender();
-        m_OutputLogPanel.OnImGuiRender(); // (after the Content Browser: its first appearance docks beside it)
-        m_RenderGraphPanel->OnImGuiRender();
-        m_ProfilerPanel.OnImGuiRender();
-        m_MixerPanel.OnImGuiRender();
-        {
-            // The camera the cells stream around: the primary camera in Play, the editor camera in Simulate; editing, what the editor
-            // camera looks at (where a world opens its cells).
-            glm::dvec3 streamingSource = m_SceneState == SceneState::Edit ? m_EditorCamera.GetFocalPoint() : m_EditorCamera.GetPosition();
-            if (m_SceneState == SceneState::Play && m_ActiveScene)
-            {
-                if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
-                    streamingSource = camera.GetComponent<WorldTransformComponent>().GetPosition();
-            }
-            m_WorldPartitionPanel.OnImGuiRender(m_ActiveScene, streamingSource, m_SceneState == SceneState::Edit && !m_PrefabMode.Active);
-            m_LevelsPanel.OnImGuiRender(m_ActiveScene, m_SceneState == SceneState::Edit && !m_PrefabMode.Active, m_SceneHierarchyPanel.GetSelectedEntities());
-        }
-
-        for (auto& panel : m_NodeGraphEditors)
-            panel->OnImGuiRender();
-        std::erase_if(m_NodeGraphEditors, [](const Scope<NodeGraphEditorPanel>& panel) { return !panel->IsOpen(); });
-        for (auto& panel : m_MaterialEditors)
-            panel->OnImGuiRender();
-        std::erase_if(m_MaterialEditors, [](const Scope<MaterialEditorPanel>& panel) { return !panel->IsOpen(); });
-        for (auto& panel : m_AnimationClipPanels)
-            panel->OnImGuiRender();
-        std::erase_if(m_AnimationClipPanels, [](const Scope<AnimationClipPanel>& panel) { return !panel->IsOpen(); });
-        for (auto& panel : m_TimelinePanels)
-            panel->OnImGuiRender(m_ActiveScene, m_SceneHierarchyPanel.GetSelectedEntity(), m_SceneState == SceneState::Edit);
-        std::erase_if(m_TimelinePanels, [](const Scope<TimelinePanel>& panel)
-        {
-            if (panel->IsOpen())
-                return false;
-            panel->EndPreview(); // what the targets had comes back
-            return true;
-        });
-
-        // "Right" Window
-        ImGui::Begin("Stats");
-
-        std::string name = "None";
-        if (m_HoveredEntity && m_HoveredEntity.HasComponent<TagComponent>())
-        {
-            name = m_HoveredEntity.GetComponent<TagComponent>().Tag;
-        }
-        ImGui::Text("Hovered Entity: %s", name.c_str());
-
-        ImGui::Spacing();
-
-        ImGui::Text("ImGui ActiveID: %u", Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID());
-        ImGui::End(); // End "right" Window
-
-        ImGui::Begin("Settings");
-
-#if NOX_PROFILE_STATS
-        if (StatsOverlayLayer* statsLayer = Application::Get().GetLayer<StatsOverlayLayer>())
-        {
-            bool statsVisible = statsLayer->IsVisible();
-            if (ImGui::Checkbox("Nox Stats Window (F3)", &statsVisible))
-                statsLayer->SetVisible(statsVisible);
-            ImGui::SetItemTooltip("Nox Stats in a window of its own (docks and scrolls): frame times, memory, then Audio, GPU passes,\n"
-                                  "CPU scopes, Memory and Counters as sections you open.");
-
-            ImGui::SameLine();
-            if (ImGui::Button("Reset Stats"))
-                Profiler::Get().ResetStats();
-
-            ImGui::SameLine();
-            if (ImGui::Button("Save Report (Ctrl+F3)"))
-                SaveStatsReport(*m_Renderer);
-
-            ImGui::Separator();
-        }
-#endif
-
-        // The scene the project opens with and a packaged game starts in (Unreal's Editor Startup Map / Game Default Map). A project
-        // without one takes the first scene saved.
-        {
-            ProjectConfig& config = Project::GetActive()->GetConfig();
-            const auto& registry = Project::GetActive()->GetEditorAssetManager()->GetAssetRegistry();
-            std::string current = "(none: an empty scene)";
-            if (config.StartScene != 0)
-            {
-                const auto found = registry.find(config.StartScene);
-                current = found != registry.end() ? found->second.FilePath.generic_string() : std::string("(missing scene)");
-            }
-            ImGui::SetNextItemWidth(260.0f);
-            if (ImGui::BeginCombo("Start Scene", current.c_str()))
-            {
-                std::vector<std::pair<std::string, AssetHandle>> scenes;
-                for (const auto& [handle, metadata] : registry)
-                    if (metadata.Type == AssetType::Scene)
-                        scenes.emplace_back(metadata.FilePath.generic_string(), handle);
-                std::sort(scenes.begin(), scenes.end());
-                if (scenes.empty())
-                    ImGui::TextDisabled("No scenes yet: save one (File > Save Scene As...)");
-                for (const auto& [name, handle] : scenes)
-                    if (ImGui::Selectable(name.c_str(), handle == config.StartScene))
-                    {
-                        config.StartScene = handle;
-                        Project::SaveActive();
-                    }
-                ImGui::EndCombo();
-            }
-            ImGui::SetItemTooltip("The scene the editor opens this project with, and the packaged game starts in.");
-        }
-
-        // Render quality presets (docs/Hybrid_Renderer_Plan_2026-10.md §2), saved in the project file.
-        {
-            ProjectConfig& config = Project::GetActive()->GetConfig();
-            const Renderer::RenderQuality recommended = m_Renderer->GetRecommendedQuality();
-            const Renderer::RenderQuality current = m_Renderer->GetCurrentQuality();
-            const bool automatic = config.RenderQuality == "Auto";
-            char preview[64];
-            if (automatic && current == recommended)
-                snprintf(preview, sizeof(preview), "Auto (%s)", Renderer::GetQualityName(recommended));
-            else
-                snprintf(preview, sizeof(preview), "%s", Renderer::GetQualityName(current));
-
-            auto applyQuality = [this](Renderer::RenderQuality quality)
-            {
-                m_Renderer->ApplyQualityPreset(quality);
-                // An ortho view stays raster only; the preset comes back when it is left.
-                if (m_EditorCamera.IsOrthographic())
-                {
-                    m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
-                    m_Renderer->setDLSSEnabled(false);
-                    m_Renderer->setRayTracingEnabled(false);
-                    m_Renderer->setPathTracingEnabled(false);
-                }
-            };
-
-            ImGui::SetNextItemWidth(160.0f);
-            if (ImGui::BeginCombo("Render Quality", preview))
-            {
-                char autoLabel[64];
-                snprintf(autoLabel, sizeof(autoLabel), "Auto (%s for this GPU)", Renderer::GetQualityName(recommended));
-                if (ImGui::Selectable(autoLabel, automatic))
-                {
-                    config.RenderQuality = "Auto";
-                    applyQuality(recommended);
-                    Project::SaveActive();
-                }
-                for (Renderer::RenderQuality quality : { Renderer::RenderQuality::Low, Renderer::RenderQuality::Medium, Renderer::RenderQuality::High,
-                                                         Renderer::RenderQuality::RayTracedAll, Renderer::RenderQuality::RasterAll })
-                {
-                    if (ImGui::Selectable(Renderer::GetQualityName(quality), !automatic && config.RenderQuality == Renderer::GetQualityName(quality)))
-                    {
-                        config.RenderQuality = Renderer::GetQualityName(quality);
-                        applyQuality(quality);
-                        Project::SaveActive();
-                    }
-                }
-                if (ImGui::Selectable("Custom (keep these settings, no preset at start)", config.RenderQuality == "Custom"))
-                {
-                    config.RenderQuality = "Custom";
-                    Project::SaveActive();
-                }
-                ImGui::EndCombo();
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Each preset sets every feature on or off:\n"
-                                  "  Low: RT shadows of the sun, screen-probe GI (24 px probes), SSAO, DLSS Performance (the fallback for smaller RT GPUs)\n"
-                                  "  Medium: + RT reflections, screen-probe GI (16 px), DLSS Balanced\n"
-                                  "  High: + RTAO, RT glass, DLSS Quality (the closest to the path tracer)\n"
-                                  "  Ray Traced (All): High with every light shadowed, DLSS Ray Reconstruction, Auto Exposure, OIT\n"
-                                  "  Raster (All): raster except reflections -- shadow maps + contact shadows, GTAO, raster probe volume GI + SSGI,\n"
-                                  "    RT reflections (NRD; SSR changes with what is on screen), DLSS Quality without Ray Reconstruction, Auto Exposure, OIT\n"
-                                  "The two '(All)' ones are for comparing ray traced against raster. Volumetric fog and post effects are left as they are.\n"
-                                  "The project opens with it (saved in the .nproj). Changing a setting below makes it Custom for this session.");
-
-            // Saved on top of the preset (the .nproj's Renderer map): the game starts with them too.
-            if (ImGui::TreeNode("Project Settings (saved, on top of the preset)"))
-            {
-                ProjectRendererSettings& saved = config.Renderer;
-                bool changed = false;
-                auto choice = [&](const char* label, int32_t& value, std::initializer_list<std::pair<int32_t, const char*>> options)
-                {
-                    const char* current = "Preset's";
-                    for (const auto& [optionValue, name] : options)
-                        if (optionValue == value) current = name;
-                    ImGui::SetNextItemWidth(180.0f);
-                    if (ImGui::BeginCombo(label, current))
-                    {
-                        if (ImGui::Selectable("Preset's", value < 0)) { value = -1; changed = true; }
-                        for (const auto& [optionValue, name] : options)
-                            if (ImGui::Selectable(name, value == optionValue)) { value = optionValue; changed = true; }
-                        ImGui::EndCombo();
-                    }
-                };
-                choice("Ray Tracing Resolution##Project", saved.RayTracingResolution, { { 1, "Full" }, { 2, "Half" } });
-                choice("Diffuse GI##Project", saved.DiffuseGI, { { 0, "Environment (IBL)" }, { 1, "DDGI" }, { 2, "ReSTIR GI" }, { 3, "Screen Probes" }, { 4, "Raster Probe Volume" } });
-                choice("Shadowed Lights##Project", saved.ShadowedLights, { { 0, "All" }, { 1, "1" }, { 2, "2" }, { 4, "4" }, { 8, "8" } });
-                choice("Shadows##Project", saved.Shadows, { { 0, "Off" }, { 1, "On" } });
-                choice("Sun Shadows##Project", saved.SunShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
-                choice("Local Light Shadows##Project", saved.LocalShadows, { { 0, "Ray Traced" }, { 1, "Shadow Maps" } });
-                choice("Contact Shadows##Project", saved.ContactShadows, { { 0, "Off" }, { 1, "On" } });
-                choice("Screen-Space AO##Project", saved.SSAOMethod, { { 0, "Classic SSAO" }, { 1, "GTAO" } });
-                choice("Screen-Space Reflections##Project", saved.SSR, { { 0, "Off" }, { 1, "On" } });
-                choice("Screen-Space GI##Project", saved.SSGI, { { 0, "Off" }, { 1, "On" } });
-                choice("Volumetric Fog##Project", saved.VolumetricFog, { { 0, "Off" }, { 1, "On" } });
-                choice("Bloom##Project", saved.Bloom, { { 0, "Off" }, { 1, "On" } });
-                choice("Depth of Field##Project", saved.DepthOfField, { { 0, "Off" }, { 1, "On" } });
-                choice("Motion Blur##Project", saved.MotionBlur, { { 0, "Off" }, { 1, "On" } });
-                choice("Order-Independent Transparency##Project", saved.OIT, { { 0, "Off" }, { 1, "Weighted Blended" }, { 2, "AVBOIT" } });
-                choice("Temporal Anti-Aliasing##Project", saved.TAA, { { 0, "Off" }, { 1, "On" } });
-
-                const char* windowModes[] = { "Windowed", "Borderless", "Fullscreen" };
-                int windowMode = static_cast<int>(ParseWindowMode(config.WindowMode));
-                ImGui::SetNextItemWidth(180.0f);
-                if (ImGui::Combo("Game Window", &windowMode, windowModes, IM_ARRAYSIZE(windowModes)))
-                {
-                    config.WindowMode = windowModes[windowMode];
-                    Project::SaveActive();
-                }
-                ImGui::SetItemTooltip("How the packaged game opens (NoxRuntime): Borderless covers the screen at the desktop's resolution,\n"
-                                      "Fullscreen switches the display (exclusive). Alt+Enter toggles a window in the game.");
-                if (changed)
-                {
-                    m_Renderer->ApplyProjectRendererSettings(saved);
-                    Project::SaveActive();
-                }
-                ImGui::TreePop();
-            }
-
-            // Unreal's Physical Surface types (Project Settings > Physics): what materials and bodies can be underfoot.
-            if (ImGui::TreeNode("Physical Surfaces"))
-            {
-                ImGui::TextDisabled("Materials (Material editor) and bodies (Rigidbody 3D) pick one; footstep notifies play a sound per surface.");
-                std::vector<std::string>& surfaces = config.PhysicalSurfaces;
-                int remove = -1;
-                bool surfacesChanged = false;
-                for (int i = 0; i < static_cast<int>(surfaces.size()); ++i)
-                {
-                    ImGui::PushID(i);
-                    if (i == 0)
-                        ImGui::TextUnformatted("Default  (a surface without one; always there)");
-                    else
-                    {
-                        static std::string editing;
-                        static int editingIndex = -1;
-                        if (editingIndex != i)
-                            editing = surfaces[i];
-                        char buffer[64] = {};
-                        strncpy_s(buffer, editing.c_str(), sizeof(buffer) - 1);
-                        ImGui::SetNextItemWidth(180.0f);
-                        if (ImGui::InputText("##surface", buffer, sizeof(buffer)))
-                        {
-                            editing = buffer;
-                            editingIndex = i;
-                        }
-                        // Renamed when the edit ends, if the name is free (materials keep the old name: pick the new one there).
-                        if (ImGui::IsItemDeactivatedAfterEdit() && editingIndex == i)
-                        {
-                            if (!editing.empty() && std::find(surfaces.begin(), surfaces.end(), editing) == surfaces.end())
-                            {
-                                surfaces[i] = editing;
-                                surfacesChanged = true;
-                            }
-                            editingIndex = -1;
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("Remove"))
-                            remove = i;
-                    }
-                    ImGui::PopID();
-                }
-                if (remove > 0)
-                {
-                    surfaces.erase(surfaces.begin() + remove);
-                    surfacesChanged = true;
-                }
-                if (ImGui::SmallButton("Add Surface"))
-                {
-                    std::string name = "New Surface";
-                    for (int suffix = 2; std::find(surfaces.begin(), surfaces.end(), name) != surfaces.end(); ++suffix)
-                        name = "New Surface " + std::to_string(suffix);
-                    surfaces.push_back(name);
-                    surfacesChanged = true;
-                }
-                if (surfacesChanged)
-                    Project::SaveActive();
-                ImGui::TreePop();
-            }
-            ImGui::Separator();
-        }
-
-        if (ImGui::Button("Dump Frame Graph"))
-        {
-            // Next to Nox.log (opened relative to the working directory); open the .dot files with GraphViz.
-            const std::filesystem::path directory = std::filesystem::current_path();
-            if (m_ActiveScene && m_ActiveScene->DumpSystemGraphs(directory))
-                NOX_CORE_INFO("Frame graph written: {}", (directory / "SceneUpdate.dot").string());
-        }
-        ImGui::Separator();
-        
-        static const char* debugModeNames[] = {
-            "0: Full PBR Lit",
-            "1: Base Color (Sascha 1:1)",
-            "2: Normal Texture (Sascha 1:1)",
-            "3: Occlusion (Sascha 1:1)",
-            "4: Emissive (Sascha 1:1)",
-            "5: Metallic (Sascha 1:1)",
-            "6: Roughness (Sascha 1:1)",
-            "7: Shading Normal (World)",
-            "8: Direct Lights Only",
-            "9: IBL Ambient Only",
-            "10: World Position",
-            "11: Entity ID",
-            "12: Depth Buffer",
-            "13: RT Shadow Mask",
-            "14: RT Reflections",
-            "15: Motion Vectors (Velocity Buffer)",
-            "16: Indirect Diffuse GI Only (Screen Probes / DDGI / ReSTIR GI)",
-            "17: DDGI Probe Grid Spheres",
-            "18: Path Tracer (1-SPP Raw)",
-            "19: Path Tracer (Progressive Ground Truth)",
-            "20: Texture Streaming Mips (red: needs more, green: as needed, blue: more than needed)",
-            "21: Cluster LOD Level (green: original, then yellow, orange, red, magenta, blue)",
-            "22: Ambient Occlusion (SSAO/RTAO, white = unoccluded)",
-            "23: Geometry Streaming Pages (gray: not streamed, blue: root page, green: streamed page, cyan: original geometry)",
-            "24: Reflection Source (green: RT / SSR found it, yellow: probe volume's room light, red: sky; darker = rougher)",
-            "25: Reflections Only (what each surface reflects)"
-        };
-        int currentMode = static_cast<int>(m_Renderer->getDebugMode());
-        if (ImGui::Combo("PBR Debug View", &currentMode, debugModeNames, IM_ARRAYSIZE(debugModeNames)))
-        {
-            m_Renderer->setDebugMode(static_cast<uint32_t>(currentMode));
-        }
-
-        // Texture streaming (§5.12): what the streamed textures hold and want, and a smaller pool to force mip reduction.
-        if (ImGui::CollapsingHeader("Texture Streaming"))
-        {
-            TextureStreamer& streamer = Project::GetActive()->GetEditorAssetManager()->GetTextureStreamer();
-            const TextureStreamer::Stats& stats = streamer.GetStats();
-            constexpr double MB = 1024.0 * 1024.0;
-            ImGui::Text("Streamed textures: %zu", stats.Textures);
-            ImGui::Text("Resident %.0f MB | wanted %.0f MB | pool %.0f MB", stats.ResidentBytes / MB, stats.WantedBytes / MB,
-                        stats.PoolBytes == UINT64_MAX ? 0.0 : stats.PoolBytes / MB);
-            int poolOverrideMB = static_cast<int>(streamer.GetPoolOverride() / (1024 * 1024));
-            if (ImGui::SliderInt("Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
-                streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
-        }
-
-        // Geometry streaming (§5.7.2): cluster pages of the static meshes, loaded by the LOD's feedback and evicted least recently
-        // wanted first when the pool is full; a smaller pool forces coarser geometry where it is wanted least.
-        if (ImGui::CollapsingHeader("Geometry Streaming"))
-        {
-            GeometryStreamer& streamer = m_Renderer->GetGeometryStreamer();
-            const GeometryStreamer::Stats& stats = streamer.GetStats();
-            constexpr double MB = 1024.0 * 1024.0;
-            bool enabled = streamer.IsEnabled();
-            if (ImGui::Checkbox("Stream Geometry Pages", &enabled))
-                streamer.SetEnabled(enabled);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Meshes loaded from now on read only their root pages, the rest as the LOD asks for it.\n"
-                                  "Off: meshes loaded from now on read every page (reload the scene to apply to loaded ones).");
-            ImGui::Text("Streamed meshes: %u | pages %u of %u resident, %u loading", stats.Meshes, stats.ResidentPages, stats.Pages, stats.LoadingPages);
-            ImGui::Text("Resident %.1f MB | wanted %.1f MB | root pages %.1f MB | pool %.0f MB", stats.ResidentBytes / MB, stats.WantedBytes / MB,
-                        stats.RootBytes / MB, stats.PoolBytes / MB);
-            ImGui::Text("Requests %u (dropped %u) | waiting for room %u | loaded %llu, evicted %llu", stats.Requests, stats.DroppedRequests,
-                        stats.WantedNotResident, static_cast<unsigned long long>(stats.PageLoads), static_cast<unsigned long long>(stats.PageEvictions));
-            // Unreal's "Nanite streaming pool too small": what the view wants does not fit, so coarser levels stand in near the camera
-            // -- thin geometry (leaf cards, curtain folds) simplifies away in them and disappears.
-            if (stats.WantedBytes > stats.PoolBytes)
-                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Pool too small: %.0f MB wanted, %.0f MB pool (coarser geometry near the camera)",
-                                   stats.WantedBytes / MB, stats.PoolBytes / MB);
-            int poolOverrideMB = static_cast<int>(streamer.GetPoolOverride() / (1024 * 1024));
-            if (ImGui::SliderInt("Geometry Pool Override (MB, 0 = budget)", &poolOverrideMB, 0, 4096))
-                streamer.SetPoolOverride(static_cast<uint64_t>(poolOverrideMB) * 1024 * 1024);
-        }
-
-        // Streaming virtual textures (§5.12.2): textures cooked as virtual hold only the 128x128 tiles the pixels sample, in one pool
-        // per format; a missing tile shows the finest resident tile above it.
-        if (ImGui::CollapsingHeader("Virtual Texturing"))
-        {
-            VirtualTextureStreamer& streamer = m_Renderer->GetVirtualTextures();
-            const VirtualTextureStreamer::Stats& stats = streamer.GetStats();
-            constexpr double MB = 1024.0 * 1024.0;
-            bool enabled = streamer.IsEnabled();
-            if (ImGui::Checkbox("Stream Virtual Textures", &enabled))
-                streamer.SetEnabled(enabled);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Textures cooked as virtual (VirtualTexture: Auto from 4096x4096, or On) loaded from now on stream by tile.\n"
-                                  "Off: they load mip streamed like any texture (reload the scene to apply to loaded ones).");
-            ImGui::Text("Virtual textures: %u | tiles %u of %u resident, %u loading, %u wanted", stats.Textures, stats.ResidentTiles, stats.Tiles,
-                        stats.LoadingTiles, stats.WantedTiles);
-            ImGui::Text("Pools: %u, %u tiles, %.0f MB", stats.Pools, stats.PoolTiles, stats.PoolBytes / MB);
-            ImGui::Text("Requests %u (dropped %u) | waiting for room %u | loaded %llu, evicted %llu", stats.Requests, stats.DroppedRequests,
-                        stats.WantedNotResident, static_cast<unsigned long long>(stats.TileLoads), static_cast<unsigned long long>(stats.TileEvictions));
-            if (stats.WantedNotResident > 0)
-                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Pool too small: %u tiles wanted have no room (coarser mips stand in)",
-                                   stats.WantedNotResident);
-            // Applied when the slider is let go: every change makes the pools again (after the GPU is idle), not every step of a drag.
-            static int s_PoolTilesPerSide = 0;
-            static bool s_PoolTilesDragging = false;
-            if (!s_PoolTilesDragging)
-                s_PoolTilesPerSide = static_cast<int>(streamer.GetPoolTilesPerSide());
-            ImGui::SliderInt("Pool Tiles Per Side", &s_PoolTilesPerSide, 4, static_cast<int>(VirtualTextureStreamer::MaxPoolTilesPerSide));
-            s_PoolTilesDragging = ImGui::IsItemActive();
-            if (ImGui::IsItemDeactivatedAfterEdit())
-                streamer.SetPoolTilesPerSide(static_cast<uint32_t>(s_PoolTilesPerSide));
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Each format's pool holds this many tiles squared (136x136 texels each). Changing it makes the pools again:\n"
-                                  "every tile streams in again.");
-        }
-
-        static const char* tonemapModeNames[] = {
-            "0: None (Clamped Linear)",
-            "1: ACES (Narkowicz)",
-            "2: ACES (Hill)",
-            "3: ACES (Hill + Exposure Boost)",
-            "4: Khronos PBR Neutral",
-            "5: Reinhard",
-            "6: Reinhard Modified",
-            "7: Heji Hable ALU",
-            "8: Hable UC2 (RTXPT Standard)",
-            "9: ACES (RTXPT Standard)"
-        };
-        int currentTonemap = static_cast<int>(m_Renderer->getTonemapMode());
-        if (ImGui::Combo("Tonemapping Mode", &currentTonemap, tonemapModeNames, IM_ARRAYSIZE(tonemapModeNames)))
-        {
-            m_Renderer->setTonemapMode(static_cast<uint32_t>(currentTonemap));
-        }
-        
-        float exposureStops = m_Renderer->getViewportExposureCompensation();
-        if (ImGui::SliderFloat("Exposure Compensation", &exposureStops, -10.0f, 10.0f, "%+.1f EV"))
-            m_Renderer->setViewportExposureCompensation(exposureStops);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Brighter or darker by stops, on top of the scene camera's exposure (its Manual EV100, or Auto Exposure).");
-        bool autoExposure = m_Renderer->getViewportAutoExposure();
-        if (ImGui::Checkbox("Auto Exposure", &autoExposure))
-            m_Renderer->setViewportAutoExposure(autoExposure);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Adapts the exposure to the image, like the eye: needed to see a night lit by the moon or lamps\n"
-                              "(they are ~10 stops darker than daylight). On whatever the scene camera's Auto Exposure says.");
-
-        float gamma = m_Renderer->getGamma();
-        if (ImGui::SliderFloat("Gamma", &gamma, 0.5f, 3.5f, "%.2f"))
-        {
-            m_Renderer->setGamma(gamma);
-        }
-
-        // There was no way to change this without editing the hardcoded constructor value in
-        // EditorLayer's OnAttach and recompiling - this is that missing control.
-        // The slider is horizontal FOV (Unreal's convention -- its CameraComponent FOV is horizontal): at a wide aspect ratio,
-        // the same *vertical* FOV number covers a much wider horizontal angle, which is what made 120 look so extreme (that was
-        // ~144 degrees horizontal on a 16:9 view, an actual fisheye, not a bug). EditorCamera itself still works in vertical FOV
-        // throughout (the projection matrix, DLSS, the gizmo) -- only this slider converts, through the current aspect ratio.
-        const float aspect = std::max(m_EditorCamera.GetAspectRatio(), 0.01f);
-        float horizontalFov = glm::degrees(2.0f * std::atan(std::tan(glm::radians(m_EditorCamera.GetFOV()) * 0.5f) * aspect));
-        if (ImGui::SliderFloat("Camera FOV", &horizontalFov, 10.0f, 120.0f, "%.1f"))
-        {
-            const float verticalFov = glm::degrees(2.0f * std::atan(std::tan(glm::radians(horizontalFov) * 0.5f) / aspect));
-            m_EditorCamera.SetFOV(verticalFov);
-        }
-
-        float iblAmbient = m_Renderer->getScaleIBLAmbient();
-        if (ImGui::SliderFloat("IBL Ambient Scale", &iblAmbient, 0.0f, 5.0f, "%.2f"))
-        {
-            m_Renderer->setScaleIBLAmbient(iblAmbient);
-        }
-
-        // What the current mode makes these settings: the path tracer shades glass, blending and anti-aliasing itself; DLSS
-        // anti-aliases (TAA and the jitter switch then do nothing). Settings that cannot apply are shown locked, with why.
-        const bool pathTracing = m_Renderer->isPathTracingEnabled();
-        const bool dlssActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() && m_Renderer->getUpscaleMode() != NRI_UPSCALER_MODE_OFF;
-        auto lockedReason = [](const char* reason)
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(%s)", reason);
-        };
-
-        ImGui::BeginDisabled(pathTracing);
-        bool refraction = m_Renderer->getRefractionEnabled();
-        if (ImGui::Checkbox("Glass Refraction", &refraction))
-            m_Renderer->setRefractionEnabled(refraction);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Transmissive materials (glass) show the scene behind them bent by their IOR and thickness and blurred\n"
-                              "by their roughness (a copy of the lit scene with blur mips, only while glass is in view).\n"
-                              "Off: transmission only makes them see-through.");
-        ImGui::BeginDisabled(!refraction);
-        ImGui::Indent();
-        bool rtRefraction = m_Renderer->getRTRefractionEnabled();
-        if (ImGui::Checkbox("Ray Traced Glass", &rtRefraction))
-            m_Renderer->setRTRefractionEnabled(rtRefraction);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Smooth glass traces what is behind it like the path tracer: bent in at the surface and out at the\n"
-                              "mesh's far side (glass with a volume thickness), then through the scene, so objects off screen or\n"
-                              "hidden behind others show too. Rough glass keeps the blurred screen-space refraction. Needs ray tracing.");
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
-        if (pathTracing)
-            lockedReason("the path tracer refracts itself");
-
-        const bool rayTracing = m_Renderer->getRayTracingEnabled();
-        ImGui::BeginDisabled(pathTracing || rayTracing);
-        bool oit = m_Renderer->getOITEnabled();
-        if (ImGui::Checkbox("Order-Independent Transparency", &oit))
-            m_Renderer->setOITEnabled(oit);
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Raster transparency only: transparent surfaces and alpha-blended particles blend in any order, so\n"
-                              "overlapping layers (smoke, foliage cards, glass behind glass) stop popping as the camera moves.\n"
-                              "Raster pipeline only: not used with ray tracing (hybrid sorts glass and traces through it) or by\n"
-                              "the path tracer.");
-        ImGui::Indent();
-        ImGui::BeginDisabled(!oit);
-        const char* oitMethods[] = { "Weighted Blended", "AVBOIT" };
-        int oitMethod = static_cast<int>(m_Renderer->getOITMethod());
-        ImGui::SetNextItemWidth(180.0f);
-        if (ImGui::Combo("Method##OIT", &oitMethod, oitMethods, IM_ARRAYSIZE(oitMethods)))
-            m_Renderer->setOITMethod(static_cast<Renderer::OITMethod>(oitMethod));
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Weighted Blended (McGuire and Bavoil 2013): each layer weighted by a fixed curve of its distance.\n"
-                              "Cheap, but overlapping layers average out: glass in front of glass, thick smoke look see-through,\n"
-                              "and the order of near layers is guessed from distance alone.\n"
-                              "AVBOIT (Adaptive Voxel-Based OIT, Activision / SIGGRAPH 2025, Unreal's AVBOIT): first builds a\n"
-                              "low-resolution volume of how much light gets through every depth (render size / 8, the slices\n"
-                              "below), then weights each layer by what is really in front of it. Near layers hide far ones as\n"
-                              "when sorted, and per color channel: tinted glass tints what is behind it. Costs two extra cheap\n"
-                              "passes over the transparent surfaces at 1/64 of the pixels.");
-        if (m_Renderer->getOITMethod() == Renderer::OITMethod::AVBOIT)
-        {
-            int slices = static_cast<int>(m_Renderer->getAVBOITSlices());
-            ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::SliderInt("Depth Slices##AVBOIT", &slices, 16, 256))
-                m_Renderer->setAVBOITSlices(static_cast<uint32_t>(slices));
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("The transmittance volume's depth resolution. Only depths with transparent surfaces in them\n"
-                                  "take slices (adaptive): 64 separates most scenes. More: layers close together are told apart\n"
-                                  "(more memory: width/8 x height/8 x slices x 4 bytes, twice).");
-            float distance = m_Renderer->getAVBOITDistanceMeters();
-            ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::DragFloat("Max Distance (m)##AVBOIT", &distance, 5.0f, 10.0f, 10000.0f, "%.0f"))
-                m_Renderer->setAVBOITDistanceMeters(distance);
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("How far the volume reaches (logarithmic slices: finer close by). Transparent surfaces farther\n"
-                                  "away share its last slice.");
-        }
-        ImGui::EndDisabled();
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-        if (pathTracing)
-            lockedReason("path tracer");
-        else if (rayTracing)
-            lockedReason("raster only: ray tracing is on");
-
-        ImGui::BeginDisabled(dlssActive || pathTracing);
-        bool taa = m_Renderer->getTAAEnabled();
-        if (ImGui::Checkbox("Temporal Anti-Aliasing", &taa))
-            m_Renderer->setTAAEnabled(taa);
-        ImGui::EndDisabled();
-        if (dlssActive)
-            lockedReason("DLSS anti-aliases");
-        else if (pathTracing)
-            lockedReason("path tracer accumulates");
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Smooth edges without DLSS: the camera shifts by a fraction of a pixel each frame and the frames are\n"
-                              "blended along the motion vectors. Used while DLSS is off or not supported (DLSS / DLAA does this\n"
-                              "itself) and not with the path tracer, which accumulates on its own.");
-        if (taa && m_Renderer->isTAAActive())
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(active)");
-        }
-
-        // DLSS and TAA jitter the camera themselves (always on while they run): the switch only matters without them.
-        const bool jitterForced = dlssActive || m_Renderer->isTAAActive();
-        ImGui::BeginDisabled(jitterForced);
-        bool jitter = jitterForced || m_Renderer->getCameraJitterEnabled();
-        if (ImGui::Checkbox("Camera Subpixel Jitter (R2)", &jitter))
-        {
-            m_Renderer->setCameraJitterEnabled(jitter);
-        }
-        ImGui::EndDisabled();
-        if (jitterForced)
-            lockedReason(dlssActive ? "on: DLSS needs it" : "on: TAA needs it");
-        if (jitter)
-        {
-            glm::vec2 j = m_Renderer->getCurrentJitter(); // or expose m_currentJitter
-            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Jitter Offset: (%.3f, %.3f) px", j.x, j.y);
-        }
-
-        ImGui::Separator();
-        ImGui::Text("Post Effects");
-        {
-            // PP1 and the outlines (PostProcessSettings): the editor's own, used while no Post Process Volume in the scene applies -- a
-            // volume's settings are what is saved with the scene and ships (Unreal's Post Process Volume).
-            if (m_Renderer->HasScenePostProcess())
-                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "A Post Process Volume in the scene applies now:\nedit its settings in the Inspector.");
-            ImGui::BeginDisabled(m_Renderer->HasScenePostProcess());
-            DrawPostProcessSettings(m_Renderer->getPostEffects());
-            ImGui::EndDisabled();
-            if (!m_Renderer->HasScenePostProcess())
-                ImGui::TextDisabled("Not saved: add a Post Process Volume to the scene to keep these and ship them with the game.");
-        }
-
-        ImGui::Separator();
-        ImGui::Text("DLSS / Upscaling");
-
-        if (!m_Renderer->isDLSSSupported())
-        {
-            ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.4f, 1.0f), "Not supported (Streamline/NGX unavailable on this GPU or driver)");
-        }
-        else
-        {
-            bool dlssEnabled = m_Renderer->isDLSSEnabled();
-            if (ImGui::Checkbox("Enable DLSS", &dlssEnabled))
-            {
-                m_Renderer->setDLSSEnabled(dlssEnabled);
-            }
-
-            if (dlssEnabled)
-            {
-                static const char* upscaleModeNames[] = {
-                    "Off",
-                    "DLAA (no upscale, best quality)",
-                    "Quality",
-                    "Balanced",
-                    "Performance",
-                    "Ultra Performance"
-                };
-                int currentUpscaleMode = static_cast<int>(m_Renderer->getUpscaleMode());
-                if (ImGui::Combo("Mode", &currentUpscaleMode, upscaleModeNames, IM_ARRAYSIZE(upscaleModeNames)))
-                {
-                    m_Renderer->setUpscaleMode(static_cast<nri::UpscalerMode>(currentUpscaleMode));
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Also the ray tracing resolution: every ray traced effect (shadows, reflections, GI, AO, glass)\n"
-                                      "runs at the render resolution and DLSS upscales the result. Per axis: DLAA 100%%, Quality 67%%,\n"
-                                      "Balanced 58%%, Performance 50%%, Ultra Performance 33%% -- Performance traces a quarter of DLAA's rays.");
-
-                bool stableDepth = m_Renderer->getStableEditorDepth();
-                if (ImGui::Checkbox("Stable Overlays", &stableDepth))
-                    m_Renderer->setStableEditorDepth(stableDepth);
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Draws the scene's depth and entity IDs again without the camera jitter, so the grid, gizmo lines,\n"
-                                      "collider wireframes and picking hold still while DLSS is on (a depth-only pass of the scene).\n"
-                                      "Off: they come from the jittered render and crawl along edges.");
-                
-                if (m_Renderer->isDLSSRayReconstructionSupported())
-                {
-                    bool rrEnabled = m_Renderer->isDLSSRayReconstructionEnabled();
-                    if (ImGui::Checkbox("Ray Reconstruction (DLSS 3.5 Denoising)", &rrEnabled))
-                    {
-                        m_Renderer->setDLSSRayReconstructionEnabled(rrEnabled);
-                    }
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("AI Neural Reconstruction for reflections & indirect lighting (hybrid mode), or the whole\nimage (Path Tracing mode). Replaces downstream NRD denoisers -- automatically disables\nany active NRD REBLUR/RELAX. NRD SIGMA shadows remain compatible and independent.");
-                    }
-                    if (rrEnabled)
-                    {
-                        ImGui::SameLine();
-                        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "(Active)");
-                    }
-                }
-
-                nri::Extent2D renderSize = m_Renderer->getRenderSize();
-                nri::Extent2D outputSize = m_Renderer->getViewPortSize();
-                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Rendering %ux%u -> %ux%u",
-                    renderSize.width, renderSize.height, outputSize.width, outputSize.height);
-            }
-        }
-
-        // Shadows: on / off for every light and method (raster and hybrid alike), then each light's method -- ray traced (while Ray
-        // Tracing Shadows run) or shadow maps, which a Ray Traced light falls back to otherwise (as in Unreal).
-        ImGui::Separator();
-        ImGui::Text("Shadows");
-        {
-            bool shadows = m_Renderer->getShadowsEnabled();
-            if (ImGui::Checkbox("Shadows", &shadows))
-                m_Renderer->setShadowsEnabled(shadows);
-            ImGui::SetItemTooltip("Every shadow, whatever renders it: the sun's and the other lights' shadow maps, ray traced shadow\n"
-                                  "rays and contact shadows (Unreal's Show > Shadows). Off: lights shine everywhere they reach.\n"
-                                  "The path tracer always traces its shadows.");
-            ImGui::BeginDisabled(!shadows);
-            // Ray traced shadows run only with ray tracing on and its Ray Tracing Shadows ticked; a light set to Ray Traced otherwise
-            // gets shadow maps.
-            const bool rayTracedAvailable = m_Renderer->getRayTracingEnabled() && m_Renderer->getRayTracingShadows();
-            auto fallbackNote = [&](bool rayTracedChosen)
-            {
-                if (!rayTracedChosen || rayTracedAvailable)
-                    return;
-                ImGui::SameLine();
-                ImGui::TextDisabled("(shadow maps: %s)", m_Renderer->getRayTracingEnabled() ? "Ray Tracing Shadows off" : "ray tracing off");
-            };
-
-            const char* sunShadowModes[] = { "Ray Traced", "Shadow Maps" };
-            int sunShadowMode = static_cast<int>(m_Renderer->getSunShadowMode());
-            ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::Combo("Sun Shadows", &sunShadowMode, sunShadowModes, IM_ARRAYSIZE(sunShadowModes)))
-                m_Renderer->setSunShadowMode(static_cast<Renderer::SunShadowMode>(sunShadowMode));
-            ImGui::SetItemTooltip("Ray Traced: the sun's soft shadow from one ray a pixel towards its disc, denoised by NRD SIGMA,\n"
-                                  "while ray tracing and its Ray Tracing Shadows are on -- otherwise shadow maps. Shadow Maps:\n"
-                                  "cascaded shadow maps (UE5's directional light without virtual shadow maps), raster, with or\n"
-                                  "without ray tracing. Both write the same shadow mask, so they compare directly.");
-            fallbackNote(m_Renderer->getSunShadowMode() == Renderer::SunShadowMode::RayTraced);
-            if (m_Renderer->getSunShadowMode() == Renderer::SunShadowMode::ShadowMaps || !rayTracedAvailable)
-            {
-                ImGui::Indent();
-                const uint32_t resolutions[] = { 1024, 2048, 4096 };
-                const char* resolutionNames[] = { "1024", "2048", "4096" };
-                int resolution = 1;
-                for (int i = 0; i < 3; ++i)
-                    if (resolutions[i] == m_Renderer->getShadowMapResolution()) resolution = i;
-                ImGui::SetNextItemWidth(180.0f);
-                if (ImGui::Combo("Resolution##SunShadows", &resolution, resolutionNames, IM_ARRAYSIZE(resolutionNames)))
-                    m_Renderer->setShadowMapResolution(resolutions[resolution]);
-                ImGui::SetItemTooltip("Texels per side of each cascade.");
-
-                int cascades = static_cast<int>(m_Renderer->getShadowCascadeCount());
-                if (ImGui::SliderInt("Cascades##SunShadows", &cascades, 1, static_cast<int>(shaderio::MaxShadowCascades)))
-                    m_Renderer->setShadowCascadeCount(static_cast<uint32_t>(cascades));
-
-                float distanceMeters = WorldUnits::ToMeters(m_Renderer->getShadowDistance());
-                if (ImGui::DragFloat("Distance (m)##SunShadows", &distanceMeters, 1.0f, 1.0f, 2000.0f, "%.0f"))
-                    m_Renderer->setShadowDistance(WorldUnits::FromMeters(distanceMeters));
-                ImGui::SetItemTooltip("How far from the camera the cascades reach; past it the sun is unshadowed.");
-
-                float exponent = m_Renderer->getShadowCascadeExponent();
-                if (ImGui::SliderFloat("Distribution Exponent##SunShadows", &exponent, 1.0f, 6.0f, "%.1f"))
-                    m_Renderer->setShadowCascadeExponent(exponent);
-                ImGui::SetItemTooltip("UE's Cascade Distribution Exponent: each cascade this many times longer than the one before\n"
-                                      "(3: 1/40, 4/40, 13/40, 40/40 of the distance with 4 cascades); 1 splits it evenly.");
-
-                float blend = m_Renderer->getShadowCascadeBlend();
-                if (ImGui::SliderFloat("Transition##SunShadows", &blend, 0.0f, 0.5f, "%.2f"))
-                    m_Renderer->setShadowCascadeBlend(blend);
-                ImGui::SetItemTooltip("The last part of each cascade that dithers into the next one (the last fades out).");
-
-                bool caching = m_Renderer->getShadowCascadeCaching();
-                if (ImGui::Checkbox("Cache Cascades##SunShadows", &caching))
-                    m_Renderer->setShadowCascadeCaching(caching);
-                ImGui::SetItemTooltip("UE's cached shadow maps: a cascade is drawn again only when its view or the sun moved, or\n"
-                                      "something inside it moved, changed or streamed in; the nearest at once, the farther ones in\n"
-                                      "turn (one a frame). A still camera and scene draw no cascade. Off: every cascade every frame.");
-
-                const char* filters[] = { "PCF", "PCSS (Contact Hardening)" };
-                int filter = static_cast<int>(m_Renderer->getShadowFilter());
-                ImGui::SetNextItemWidth(180.0f);
-                if (ImGui::Combo("Filter##SunShadows", &filter, filters, IM_ARRAYSIZE(filters)))
-                    m_Renderer->setShadowFilter(static_cast<uint32_t>(filter));
-                ImGui::SetItemTooltip("PCF: a fixed kernel. PCSS: the penumbra grows with the distance to the caster by the sun's\n"
-                                      "angular radius (Source Radius), hard where things touch -- the RT shadows' look.");
-
-                float filterTexels = m_Renderer->getShadowFilterTexels();
-                if (ImGui::SliderFloat("Filter Radius (texels)##SunShadows", &filterTexels, 0.0f, 8.0f, "%.1f"))
-                    m_Renderer->setShadowFilterTexels(filterTexels);
-                if (filter == 1)
-                {
-                    float maxTexels = m_Renderer->getShadowMaxFilterTexels();
-                    if (ImGui::SliderFloat("Max Penumbra (texels)##SunShadows", &maxTexels, 1.0f, 64.0f, "%.0f"))
-                        m_Renderer->setShadowMaxFilterTexels(maxTexels);
-                    ImGui::SetItemTooltip("The widest penumbra PCSS searches and filters, in texels of each cascade.");
-                }
-
-                float depthBias = m_Renderer->getShadowDepthBias();
-                if (ImGui::SliderFloat("Depth Bias##SunShadows", &depthBias, 0.0f, 4.0f, "%.2f"))
-                    m_Renderer->setShadowDepthBias(depthBias);
-                float normalBias = m_Renderer->getShadowNormalBias();
-                if (ImGui::SliderFloat("Normal Bias##SunShadows", &normalBias, 0.0f, 4.0f, "%.2f"))
-                    m_Renderer->setShadowNormalBias(normalBias);
-                float slopeBias = m_Renderer->getShadowSlopeBias();
-                if (ImGui::SliderFloat("Slope Bias##SunShadows", &slopeBias, 0.0f, 8.0f, "%.2f"))
-                    m_Renderer->setShadowSlopeBias(slopeBias);
-                ImGui::SetItemTooltip("Against shadow acne, in texels of each cascade: the shaded point moves towards the sun (Depth)\n"
-                                      "and along its normal (Normal); the casters' depth moves away by their slope (Slope).\n"
-                                      "Too much detaches shadows from their casters (peter panning).");
-                ImGui::Unindent();
-            }
-
-            // Spot, point, rect and disc lights: their RT shadow rays or an atlas of shadow maps (RS1b).
-            const char* localShadowModes[] = { "Ray Traced", "Shadow Maps" };
-            int localShadowMode = static_cast<int>(m_Renderer->getLocalShadowMode());
-            ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::Combo("Local Light Shadows", &localShadowMode, localShadowModes, IM_ARRAYSIZE(localShadowModes)))
-                m_Renderer->setLocalShadowMode(static_cast<Renderer::LocalShadowMode>(localShadowMode));
-            ImGui::SetItemTooltip("Spot, point, rect and disc lights. Ray Traced: shadow rays in the lighting (Shadowed Lights per\n"
-                                  "Pixel), while ray tracing and its Ray Tracing Shadows are on -- otherwise shadow maps. Shadow\n"
-                                  "Maps: the most important lights get shadow maps in one atlas (a spot light one view, the others\n"
-                                  "a cube of six), sized by how big they are on screen; the rest keep their rays when ray traced\n"
-                                  "shadows run, else are unshadowed. Filter and bias are the sun's settings above.");
-            fallbackNote(m_Renderer->getLocalShadowMode() == Renderer::LocalShadowMode::RayTraced);
-            if (m_Renderer->getLocalShadowMode() == Renderer::LocalShadowMode::ShadowMaps || !rayTracedAvailable)
-            {
-                ImGui::Indent();
-                int maxLights = static_cast<int>(m_Renderer->getLocalShadowMaxLights());
-                if (ImGui::SliderInt("Shadowed Lights##LocalShadows", &maxLights, 1, static_cast<int>(Renderer::MaxLocalShadowLights)))
-                    m_Renderer->setLocalShadowMaxLights(static_cast<uint32_t>(maxLights));
-                const uint32_t atlasSizes[] = { 2048, 4096, 8192 };
-                const char* atlasNames[] = { "2048", "4096", "8192" };
-                int atlas = 1;
-                for (int i = 0; i < 3; ++i)
-                    if (atlasSizes[i] == m_Renderer->getLocalShadowAtlasSize()) atlas = i;
-                ImGui::SetNextItemWidth(180.0f);
-                if (ImGui::Combo("Atlas Size##LocalShadows", &atlas, atlasNames, IM_ARRAYSIZE(atlasNames)))
-                    m_Renderer->setLocalShadowAtlasSize(atlasSizes[atlas]);
-                const uint32_t tileSizes[] = { 256, 512, 1024, 2048 };
-                const char* tileNames[] = { "256", "512", "1024", "2048" };
-                int tileSize = 2;
-                for (int i = 0; i < 4; ++i)
-                    if (tileSizes[i] == m_Renderer->getLocalShadowMaxResolution()) tileSize = i;
-                ImGui::SetNextItemWidth(180.0f);
-                if (ImGui::Combo("Max Resolution##LocalShadows", &tileSize, tileNames, IM_ARRAYSIZE(tileNames)))
-                    m_Renderer->setLocalShadowMaxResolution(tileSizes[tileSize]);
-                ImGui::SetItemTooltip("Texels per side of a light's view at the most (a light filling the screen); smaller on screen,\n"
-                                      "fewer (at least 128). Halved for all when the atlas is full.");
-                ImGui::Text("This frame: %u lights, %u views", m_Renderer->getLocalShadowLightCount(), m_Renderer->getLocalShadowViewCount());
-                ImGui::Unindent();
-            }
-
-            // RS2: the detail shadow maps miss, marched through the depth buffer.
-            bool contactShadows = m_Renderer->getContactShadowsEnabled();
-            if (ImGui::Checkbox("Contact Shadows", &contactShadows))
-                m_Renderer->setContactShadowsEnabled(contactShadows);
-            ImGui::SetItemTooltip("A short ray towards the light per pixel, marched through the depth buffer (UE's contact shadows):\n"
-                                  "small shadows a shadow map's texels miss (things standing on the ground, creases, grass). Only on\n"
-                                  "lights shadowed by shadow maps (Sun / Local Light Shadows: Shadow Maps) -- RT shadows have the\n"
-                                  "detail already. What is off screen casts nothing here.");
-            if (contactShadows)
-            {
-                ImGui::Indent();
-                float lengthMeters = WorldUnits::ToMeters(m_Renderer->getContactShadowLength());
-                if (ImGui::SliderFloat("Length (m)##ContactShadows", &lengthMeters, 0.01f, 2.0f, "%.2f"))
-                    m_Renderer->setContactShadowLength(WorldUnits::FromMeters(lengthMeters));
-                int samples = static_cast<int>(m_Renderer->getContactShadowSamples());
-                if (ImGui::SliderInt("Steps##ContactShadows", &samples, 4, 32))
-                    m_Renderer->setContactShadowSamples(static_cast<uint32_t>(samples));
-                ImGui::Unindent();
-            }
-            ImGui::EndDisabled();
-        }
-
-        ImGui::Separator();
-        ImGui::Text("Ray Tracing");
-
-        bool ptEnabled = m_Renderer->isPathTracingEnabled();
-        if (ImGui::Checkbox("Enable Path Tracing (Unified Light Transport)", &ptEnabled))
-        {
-            m_Renderer->setPathTracingEnabled(ptEnabled);
-        }
-
-        if (ptEnabled)
-        {
-            ImGui::Indent();
-
-            bool restirPTEnabled = m_Renderer->getReSTIRPTEnabled();
-            if (ImGui::Checkbox("ReSTIR PT (RTXDI Screen-Space Path Resampling) [v1]", &restirPTEnabled))
-            {
-                m_Renderer->setReSTIRPTEnabled(restirPTEnabled);
-            }
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("Replaces the plain path tracer's own accumulation loop with RTXDI's ReSTIR PT reservoir\nresampling (1 candidate combined via RIS, no temporal/spatial reuse yet -- that's next).\nExpect a noisier but unbiased single-frame result versus multi-frame progressive accumulation;\nthis is the same image every frame (no ground-truth convergence) until temporal reuse lands.");
-            }
-
-            if (restirPTEnabled)
-            {
-                ImGui::Indent();
-                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR PT v1: None resampling mode (initial sample + RIS only)");
-
-                bool ptTemporalEnabled = m_Renderer->getReSTIRPTTemporalEnabled();
-                if (ImGui::Checkbox("Temporal Resampling (Experimental)", &ptTemporalEnabled))
-                {
-                    m_Renderer->setReSTIRPTTemporalEnabled(ptTemporalEnabled);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Reuses last frame's resampled path via hybrid-shift reconnection instead of drawing a fresh\ncandidate every frame -- known issue: currently produces a visible lighting-rotation artifact\neven with a static camera. Off by default until this is debugged; leave off for the clean v1 look.");
-                }
-                if (ptTemporalEnabled)
-                {
-                    ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "Known bug: lighting rotates/swirls -- for testing only");
-                }
-
-                uint32_t& ptInitialSamples = m_Renderer->getReSTIRPTNumInitialSamples();
-                int ptInitialSamplesInt = static_cast<int>(ptInitialSamples);
-                if (ImGui::SliderInt("Initial Samples", &ptInitialSamplesInt, 1, 16))
-                {
-                    ptInitialSamples = static_cast<uint32_t>(ptInitialSamplesInt);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("How many full candidate paths are traced per pixel and RIS-combined into one reservoir\n(RTXPT's equivalent: \"Samples per pixel\"). Higher = less noise, higher cost -- scales roughly\nlinearly since each sample re-traces bounces from scratch (no reuse across samples yet).");
-                }
-
-                uint32_t& ptMaxBounces = m_Renderer->getReSTIRPTMaxBounceDepth();
-                int ptMaxBouncesInt = static_cast<int>(ptMaxBounces);
-                if (ImGui::SliderInt("Max Bounces", &ptMaxBouncesInt, 1, 16))
-                {
-                    ptMaxBounces = static_cast<uint32_t>(ptMaxBouncesInt);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Max indirect bounce depth traced per candidate path (RTXPT's equivalent: \"Max bounces\").\nDoes not include the primary surface's own direct lighting, which is always evaluated\nseparately regardless of this setting. Higher = more light transport (longer indirect\nlight chains, e.g. light bouncing around corners), higher cost.");
-                }
-
-                uint32_t& ptNeeSamples = m_Renderer->getReSTIRPTNumNeeSamples();
-                int ptNeeSamplesInt = static_cast<int>(ptNeeSamples);
-                if (ImGui::SliderInt("NEE Light Samples", &ptNeeSamplesInt, 0, 8))
-                {
-                    ptNeeSamples = static_cast<uint32_t>(ptNeeSamplesInt);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Next-event-estimation light samples drawn per bounce surface (and for the primary\nsurface's own direct lighting). Higher = less noise on direct lighting/shadows with many\nlights, higher cost. 0 disables NEE entirely (emissive-hit sampling only).");
-                }
-
-                ImGui::Unindent();
-            }
-
-            bool ptUsesRTXDI = m_Renderer->getPathTracerUsesRTXDI();
-            if (ImGui::Checkbox("Use ReSTIR DI/GI With Path Tracer", &ptUsesRTXDI))
-            {
-                m_Renderer->setPathTracerUsesRTXDI(ptUsesRTXDI);
-            }
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("RTXPT-style hybrid path tracing: run RTXDI ReSTIR DI/GI before the plain path tracer\nand let the path tracer consume those primary-surface lighting buffers. This is separate\nfrom ReSTIR PT path resampling.");
-            }
-            if (ptUsesRTXDI)
-            {
-                ImGui::Indent();
-
-                static const char* ptGiModeNames[] = {
-                    "Off (Path Tracer Only)",
-                    "ReSTIR GI (Primary Diffuse Indirect)"
-                };
-                int currentPTGIMode = m_Renderer->getDiffuseGIMode() == 2 ? 1 : 0;
-                if (ImGui::Combo("PT Diffuse GI", &currentPTGIMode, ptGiModeNames, IM_ARRAYSIZE(ptGiModeNames)))
-                {
-                    m_Renderer->setDiffuseGIMode(currentPTGIMode == 1 ? 2u : 0u);
-                    m_Renderer->setDDGIEnabled(false);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("ReSTIR GI is consumed as primary diffuse indirect lighting. The path tracer still traces\nspecular/reflection paths, while diffuse continuation from the primary surface is replaced\nto avoid double counting.");
-                }
-
-                static const char* ptDirectLightingModeNames[] = {
-                    "Path Tracer NEE",
-                    "ReSTIR DI (Primary Direct)"
-                };
-                int currentPTDirectMode = static_cast<int>(m_Renderer->getDirectLightingMode());
-                if (ImGui::Combo("PT Direct Lighting", &currentPTDirectMode, ptDirectLightingModeNames, IM_ARRAYSIZE(ptDirectLightingModeNames)))
-                {
-                    m_Renderer->setDirectLightingMode(static_cast<uint32_t>(currentPTDirectMode));
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("ReSTIR DI replaces the path tracer's primary-bounce direct light loop. Deeper bounce\nsurfaces still use the path tracer's own next-event estimation.");
-                }
-
-                ImGui::Unindent();
-            }
-
-            bool ptAccum = m_Renderer->isPathTracingAccumulation();
-            if (ImGui::Checkbox("Progressive Ground Truth (Accumulate when static)", &ptAccum))
-            {
-                m_Renderer->setPathTracingAccumulation(ptAccum);
-            }
-            if (restirPTEnabled && ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("Not used by ReSTIR PT (it has no accumulation buffer yet) -- only affects the plain path tracer path.");
-            }
-
-            bool ptDlssRR = m_Renderer->isDLSSRayReconstructionEnabled();
-            if (ptDlssRR)
-            {
-                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Denoiser: DLSS Ray Reconstruction (Active)");
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("DLSS Ray Reconstruction is active and denoises the whole path-traced image.\nSelect NRD REBLUR or RELAX below to switch to cross-vendor non-AI denoising (auto-disables DLSS-RR).");
-                }
-            }
-
-            static const char* ptDenoiserNames[] = {
-                "Off (Raw 1-SPP / Progressive Accumulation)",
-                "NRD REBLUR (Variance Guided)",
-                "NRD RELAX (A-Trous Wavelet)"
-            };
-            int currentPTDenoiser = static_cast<int>(m_Renderer->getNRDPTDenoiser());
-            if (ImGui::Combo("PT Denoiser", &currentPTDenoiser, ptDenoiserNames, IM_ARRAYSIZE(ptDenoiserNames)))
-            {
-                m_Renderer->setNRDPTDenoiser(static_cast<Nox::NRDDiffuseDenoiser>(currentPTDenoiser));
-            }
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("Cross-vendor non-AI fallback for hardware/preference without DLSS Ray Reconstruction.\nEnabling REBLUR or RELAX automatically disables DLSS-RR and switches off progressive\naccumulation (the denoiser handles temporal stability instead, via motion vectors).");
-            }
-            ImGui::Unindent();
-        }
-        else
-        {
-            // Ambient Occlusion: SSAO (raster-only) and RTAO (needs Hybrid Ray Tracing, below) both only ever feed
-            // the same occlusion term -- see the comment on Renderer::m_ssaoEnabled -- so this is one set of controls
-            // for whichever is active, not two separate sections to keep in sync.
-            ImGui::SeparatorText("Ambient Occlusion");
-            bool ssaoEnabled = m_Renderer->getSSAOEnabled();
-            if (ImGui::Checkbox("SSAO", &ssaoEnabled))
-                m_Renderer->setSSAOEnabled(ssaoEnabled);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Screen-space contact/ambient occlusion. Mutually exclusive with RTAO (below, under Hybrid Ray Tracing).");
-            if (m_Renderer->getSSAOEnabled())
-            {
-                ImGui::SameLine();
-                const char* aoMethods[] = { "Classic SSAO", "GTAO" };
-                int aoMethod = static_cast<int>(m_Renderer->getSSAOMethod());
-                ImGui::SetNextItemWidth(130.0f);
-                if (ImGui::Combo("##SSAOMethod", &aoMethod, aoMethods, IM_ARRAYSIZE(aoMethods)))
-                    m_Renderer->setSSAOMethod(static_cast<Renderer::SSAOMethod>(aoMethod));
-                ImGui::SetItemTooltip("Classic SSAO: random points in a hemisphere tested against the depth buffer. GTAO (ground-truth AO,\n"
-                                      "UE5's and Godot's): the horizon on both sides of a few slices per pixel, the visible arc\n"
-                                      "integrated around the normal -- closer to RTAO for the same radius.");
-            }
-            if (m_Renderer->getSSAOEnabled() || m_Renderer->getRTAOEnabled())
-            {
-                ImGui::Indent();
-                if (m_Renderer->getSSAOEnabled() && m_Renderer->getSSAOMethod() == Renderer::SSAOMethod::GTAO)
-                {
-                    int slices = static_cast<int>(m_Renderer->getGTAOSlices());
-                    ImGui::SetNextItemWidth(160.0f);
-                    if (ImGui::SliderInt("Slices", &slices, 1, 4))
-                        m_Renderer->setGTAOSlices(static_cast<uint32_t>(slices));
-                    int steps = static_cast<int>(m_Renderer->getGTAOSteps());
-                    ImGui::SetNextItemWidth(160.0f);
-                    if (ImGui::SliderInt("Steps per Side", &steps, 2, 12))
-                        m_Renderer->setGTAOSteps(static_cast<uint32_t>(steps));
-                }
-                float aoRadius = WorldUnits::ToCentimeters(m_Renderer->getSSAORadius());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Radius (cm)", &aoRadius, 1.0f, 200.0f, "%.1f"))
-                    m_Renderer->setSSAORadius(WorldUnits::FromCentimeters(aoRadius));
-                float aoPower = m_Renderer->getSSAOPower();
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Power", &aoPower, 0.5f, 4.0f, "%.2f"))
-                    m_Renderer->setSSAOPower(aoPower);
-                ImGui::Unindent();
-            }
-            ImGui::Separator();
-
-            // Screen-space reflections (RS4): the raster version of the RT reflections (which take precedence when on).
-            ImGui::SeparatorText("Screen-Space Reflections");
-            bool ssrEnabled = m_Renderer->getSSREnabled();
-            if (ImGui::Checkbox("Screen-Space Reflections (SSR)", &ssrEnabled))
-                m_Renderer->setSSREnabled(ssrEnabled);
-            ImGui::SetItemTooltip("The mirror reflection marched through the depth buffer; what it hits is taken from the lit image\n"
-                                  "(blurred for rough surfaces). Where it finds nothing on screen (off screen, behind objects,\n"
-                                  "towards the camera) the reflection probes / probe volume / environment show. Glass and other\n"
-                                  "transparent surfaces get it too. Runs wherever ray traced reflections do not (ray tracing off, or\n"
-                                  "Ray Tracing Reflections off), as in Unreal; with them on, they take precedence.");
-            if (ssrEnabled && m_Renderer->getRayTracingEnabled() && m_Renderer->getRayTracingReflections())
-            {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(not used: ray traced reflections run)");
-            }
-            if (ssrEnabled)
-            {
-                ImGui::Indent();
-                float distanceMeters = WorldUnits::ToMeters(m_Renderer->getSSRMaxDistance());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::DragFloat("Max Distance (m)##SSR", &distanceMeters, 0.5f, 0.5f, 1000.0f, "%.1f"))
-                    m_Renderer->setSSRMaxDistance(WorldUnits::FromMeters(distanceMeters));
-                float thicknessMeters = WorldUnits::ToMeters(m_Renderer->getSSRThickness());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Thickness (m)##SSR", &thicknessMeters, 0.01f, 2.0f, "%.2f"))
-                    m_Renderer->setSSRThickness(WorldUnits::FromMeters(thicknessMeters));
-                ImGui::SetItemTooltip("How far behind a surface on screen the ray may pass and still count as hitting it.");
-                int steps = static_cast<int>(m_Renderer->getSSRMaxSteps());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Max Iterations##SSR", &steps, 8, 256))
-                    m_Renderer->setSSRMaxSteps(static_cast<uint32_t>(steps));
-                ImGui::SetItemTooltip("Steps of the Hi-Z trace (tile edge to tile edge of the depth pyramid, coarser over empty space):\n"
-                                      "a ray that has not found its surface by then gets none. 128 reaches across the screen.");
-                float maxRoughness = m_Renderer->getSSRMaxRoughness();
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Max Roughness##SSR", &maxRoughness, 0.05f, 1.0f, "%.2f"))
-                    m_Renderer->setSSRMaxRoughness(maxRoughness);
-                ImGui::SetItemTooltip("Surfaces up to this roughness get SSR (fading out over the last 0.15); rougher ones keep the\n"
-                                      "reflection probes. Higher: rough cloth and plaster reflect what is on screen too, but grainy, and\n"
-                                      "their reflections fade visibly where what they reflect leaves the screen.");
-                ImGui::Unindent();
-            }
-            // RS5a: the diffuse GI without rays (also in the Diffuse Global Illumination list under Hybrid Ray Tracing).
-            ImGui::SeparatorText("Raster GI");
-            bool rasterProbeGI = m_Renderer->getDiffuseGIMode() == 4;
-            if (ImGui::Checkbox("Raster Probe Volume (Diffuse GI)", &rasterProbeGI))
-            {
-                m_Renderer->setDiffuseGIMode(rasterProbeGI ? 4u : 0u);
-                m_Renderer->setDDGIEnabled(false);
-            }
-            ImGui::SetItemTooltip("Diffuse light from around without ray tracing: probes, each capturing what surrounds it once (a small\n"
-                                  "G-buffer), lit again every frame from that (sun, lights, sky, bounces) -- time of day and moving lights\n"
-                                  "cost no capture; a probe is captured again only when the scene near it changes. Works on its own:\n"
-                                  "without an Irradiance Volume entity the probes cover the whole scene (coarse in big scenes). Place an\n"
-                                  "Irradiance Volume (Add Component) over an area for closer probes there.");
-            if (rasterProbeGI)
-            {
-                ImGui::Indent();
-                int perFrame = static_cast<int>(m_Renderer->getIrradianceProbesPerFrame());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Captures per Frame##RasterGI", &perFrame, 1, static_cast<int>(shaderio::MaxIrradianceProbesPerFrame)))
-                    m_Renderer->setIrradianceProbesPerFrame(static_cast<uint32_t>(perFrame));
-                ImGui::SetItemTooltip("Probes captured at most a frame (the first fill, and probes near a change in the scene).");
-                int relights = static_cast<int>(m_Renderer->getIrradianceRelightsPerFrame());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Relights per Frame##RasterGI", &relights, 16, static_cast<int>(shaderio::MaxIrradianceRelightsPerFrame)))
-                    m_Renderer->setIrradianceRelightsPerFrame(static_cast<uint32_t>(relights));
-                ImGui::SetItemTooltip("Probes lit again a frame, in turn: how fast the volume follows a change of light (all of them in\n"
-                                      "probes / this frames), and each relight adds a bounce.");
-                if (ImGui::Button("Recapture##RasterGI"))
-                    m_Renderer->recaptureIrradianceVolume();
-                ImGui::SetItemTooltip("Capture every probe again, in turn (changes in the scene are found on their own).");
-                if (m_Renderer->getIrradianceProbeCount() > 0)
-                    ImGui::TextDisabled("%s: %u probes, %u captured, %u waiting", m_Renderer->isIrradianceVolumeAutomatic() ? "Automatic (whole scene)" : "Irradiance Volume entity",
-                                        m_Renderer->getIrradianceProbeCount(), m_Renderer->getIrradianceProbesCaptured(), m_Renderer->getIrradianceProbesQueued());
-                ImGui::Unindent();
-            }
-
-            bool ssgi = m_Renderer->getSSGIEnabled();
-            if (ImGui::Checkbox("Screen-Space GI (SSGI)", &ssgi))
-                m_Renderer->setSSGIEnabled(ssgi);
-            ImGui::SetItemTooltip("A few rays per pixel marched through the depth buffer: the light bouncing off what is on screen\n"
-                                  "(last frame's image at their hits), denoised over frames. Adds to the environment or the Raster\n"
-                                  "Probe Volume for what the rays find; not used with the RT GI modes (they have it).");
-            if (ssgi)
-            {
-                ImGui::Indent();
-                int rays = static_cast<int>(m_Renderer->getSSGIRays());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Rays per Pixel##SSGI", &rays, 1, 8))
-                    m_Renderer->setSSGIRays(static_cast<uint32_t>(rays));
-                int steps = static_cast<int>(m_Renderer->getSSGISteps());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Steps per Ray##SSGI", &steps, 4, 64))
-                    m_Renderer->setSSGISteps(static_cast<uint32_t>(steps));
-                float distance = WorldUnits::ToMeters(m_Renderer->getSSGIDistance());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Distance (m)##SSGI", &distance, 0.1f, 50.0f, "%.1f"))
-                    m_Renderer->setSSGIDistance(WorldUnits::FromMeters(distance));
-                ImGui::Unindent();
-            }
-
-            // RS6: the height fog in froxels, lit with shadows (light shafts).
-            ImGui::SeparatorText("Volumetric Fog");
-            bool volumetricFog = m_Renderer->getVolumetricFogEnabled();
-            if (ImGui::Checkbox("Volumetric Fog", &volumetricFog))
-                m_Renderer->setVolumetricFogEnabled(volumetricFog);
-            ImGui::SetItemTooltip("The Environment Light's Height Fog as a volume (UE's volumetric fog): lit by the sun and point / spot\n"
-                                  "lights with their shadows -- light shafts through windows and trees -- and by the sky. Needs the\n"
-                                  "Height Fog on; beyond its distance the height fog goes on as before. Shadows from the shadow maps\n"
-                                  "(Sun / Local Light Shadows: Shadow Maps) or, for the sun, a ray when RT shadows are on.");
-            if (volumetricFog)
-            {
-                ImGui::Indent();
-                float distance = WorldUnits::ToMeters(m_Renderer->getVolumetricFogDistance());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::DragFloat("Distance (m)##VolumetricFog", &distance, 1.0f, 1.0f, 1000.0f, "%.0f"))
-                    m_Renderer->setVolumetricFogDistance(WorldUnits::FromMeters(distance));
-                int slices = static_cast<int>(m_Renderer->getVolumetricFogSlices());
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderInt("Slices##VolumetricFog", &slices, 16, 128))
-                    m_Renderer->setVolumetricFogSlices(static_cast<uint32_t>(slices));
-                float anisotropy = m_Renderer->getVolumetricFogAnisotropy();
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Scattering Distribution##VolumetricFog", &anisotropy, -0.9f, 0.9f, "%.2f"))
-                    m_Renderer->setVolumetricFogAnisotropy(anisotropy);
-                ImGui::SetItemTooltip("Henyey-Greenstein g: above 0 the fog glows most looking towards a light (haze), 0 the same every way.");
-                float extinction = m_Renderer->getVolumetricFogExtinctionScale();
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("Extinction Scale##VolumetricFog", &extinction, 0.0f, 10.0f, "%.2f"))
-                    m_Renderer->setVolumetricFogExtinctionScale(extinction);
-                glm::vec3 albedo = m_Renderer->getVolumetricFogAlbedo();
-                if (ImGui::ColorEdit3("Albedo##VolumetricFog", glm::value_ptr(albedo)))
-                    m_Renderer->setVolumetricFogAlbedo(albedo);
-                bool localLights = m_Renderer->getVolumetricFogLocalLights();
-                if (ImGui::Checkbox("Point / Spot Lights##VolumetricFog", &localLights))
-                    m_Renderer->setVolumetricFogLocalLights(localLights);
-                ImGui::Unindent();
-            }
-
-            bool reflectionProbes = m_Renderer->getReflectionProbesEnabled();
-            if (ImGui::Checkbox("Reflection Probes", &reflectionProbes))
-                m_Renderer->setReflectionProbesEnabled(reflectionProbes);
-            ImGui::SetItemTooltip("Placed probes (Add Component > Reflection Probe): inside their boxes the environment reflection\n"
-                                  "comes from the probe's capture of its surroundings instead of the sky (under SSR / RT reflections,\n"
-                                  "where they find nothing). Captured when placed, moved or changed (one a frame).");
-            ImGui::SameLine();
-            ImGui::TextDisabled("(%u in use)", m_Renderer->getReflectionProbeCount());
-            ImGui::Separator();
-
-            // Hybrid Ray Tracing options (only visible when not in full Path Tracing)
-            bool rtEnabled = m_Renderer->getRayTracingEnabled();
-            if (ImGui::Checkbox("Enable Hybrid Ray Tracing", &rtEnabled))
-            {
-                m_Renderer->setRayTracingEnabled(rtEnabled);
-            }
-
-            if (rtEnabled)
-            {
-                ImGui::Indent();
-                static const char* rtResolutionNames[] = { "Full (every pixel)", "Half (a quarter of the rays)" };
-                const bool rrActive = m_Renderer->isDLSSSupported() && m_Renderer->isDLSSEnabled() &&
-                                      m_Renderer->getUpscaleMode() != NRI_UPSCALER_MODE_OFF &&
-                                      m_Renderer->isDLSSRayReconstructionSupported() && m_Renderer->isDLSSRayReconstructionEnabled();
-                // Ray Reconstruction wants its own per-pixel noise: the renderer traces at full resolution under it.
-                ImGui::BeginDisabled(rrActive);
-                int rtResolution = (m_Renderer->getRayTracingResolutionDivisor() > 1 && !rrActive) ? 1 : 0;
-                if (ImGui::Combo("Ray Tracing Resolution", &rtResolution, rtResolutionNames, IM_ARRAYSIZE(rtResolutionNames)))
-                    m_Renderer->setRayTracingResolutionDivisor(rtResolution == 1 ? 2u : 1u);
-                ImGui::EndDisabled();
-                if (rrActive)
-                {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("(full: Ray Reconstruction)");
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Only the ray traced effects, not the image: textures, geometry and DLSS stay as they are.\n"
-                                      "Half: RT reflections, RT sun shadows and RTAO trace one pixel of every 2 x 2 block, a different\n"
-                                      "one each frame; the others are filled from their neighbours on the same surface before the\n"
-                                      "denoisers, which accumulate the four over frames. About a quarter of their cost, a little\n"
-                                      "softer. The GI has its own setting (Screen Probe Spacing); the other lights' shadow rays stay\n"
-                                      "per pixel.");
-                bool rtShadows = m_Renderer->getRayTracingShadows();
-                if (ImGui::Checkbox("Ray Tracing Shadows", &rtShadows))
-                {
-                    m_Renderer->setRayTracingShadows(rtShadows);
-                }
-                ImGui::SetItemTooltip("Lights whose shadows are set to Ray Traced (Shadows, above) trace shadow rays. Off: they use\n"
-                                      "shadow maps instead. To turn shadows off altogether: the Shadows checkbox above.");
-                if (rtShadows)
-                {
-                    int shadowLights = static_cast<int>(m_Renderer->getShadowRayLightLimit());
-                    if (ImGui::SliderInt("Shadowed Lights per Pixel", &shadowLights, 0, 8, shadowLights == 0 ? "All" : "%d"))
-                        m_Renderer->setShadowRayLightLimit(static_cast<uint32_t>(shadowLights));
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Each pixel traces shadow rays only for the lights that light it the most; the weaker ones\n"
-                                          "light it without a shadow. The sun's soft shadow is always traced. All: every light in range.");
-                }
-
-                bool rtReflections = m_Renderer->getRayTracingReflections();
-                if (ImGui::Checkbox("Ray Tracing Reflections", &rtReflections))
-                {
-                    m_Renderer->setRayTracingReflections(rtReflections);
-                }
-                ImGui::SetItemTooltip("Reflections traced against the scene (what is off screen too). Off: Screen-Space Reflections\n"
-                                      "stand in, where they are on.");
-
-                bool rtaoEnabled = m_Renderer->getRTAOEnabled();
-                if (ImGui::Checkbox("Ray Tracing Ambient Occlusion (RTAO)", &rtaoEnabled))
-                {
-                    m_Renderer->setRTAOEnabled(rtaoEnabled);
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Traces real rays for ambient occlusion instead of SSAO's screen-space reprojection -- turning this on turns SSAO off (see Ambient Occlusion, above). Same radius/power settings, so the two are directly comparable.");
-
-                bool rtCulling = m_Renderer->getRayTracingCulling();
-                if (ImGui::Checkbox("Ray Tracing Culling", &rtCulling))
-                    m_Renderer->setRayTracingCulling(rtCulling);
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Leaves far, small objects out of what rays can hit (Unreal's ray tracing culling): an object\n"
-                                      "farther than the radius whose bounds look smaller than the angle is not in the TLAS. Within the\n"
-                                      "radius, or larger than the angle, everything stays -- in front of the camera or behind it.\n"
-                                      "Over the ray tracing memory budget, the BLAS of meshes not traced for a while are freed and\n"
-                                      "built again when needed.");
-                if (rtCulling)
-                {
-                    float cullRadiusMeters = WorldUnits::ToMeters(m_Renderer->getRayTracingCullRadius());
-                    if (ImGui::DragFloat("Culling Radius (m)", &cullRadiusMeters, 1.0f, 0.0f, 100000.0f, "%.0f"))
-                        m_Renderer->setRayTracingCullRadius(WorldUnits::FromMeters(cullRadiusMeters));
-                    float cullAngle = m_Renderer->getRayTracingCullAngle();
-                    if (ImGui::SliderFloat("Culling Angle (deg)", &cullAngle, 0.0f, 10.0f, "%.2f"))
-                        m_Renderer->setRayTracingCullAngle(cullAngle);
-                }
-                ImGui::TextDisabled("TLAS: %u instances, %u culled, %u BLAS evicted", m_Renderer->getTlasInstanceCount(),
-                                    m_Renderer->getTlasCulledCount(), m_Renderer->getEvictedBlasCount());
-
-                ImGui::BeginDisabled(!m_Renderer->isAsyncComputeAvailable());
-                bool asyncCompute = m_Renderer->getAsyncComputeEnabled();
-                if (ImGui::Checkbox("Async Compute (Screen-Probe GI)", &asyncCompute))
-                    m_Renderer->setAsyncComputeEnabled(asyncCompute);
-                ImGui::EndDisabled();
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                    ImGui::SetTooltip(m_Renderer->isAsyncComputeAvailable()
-                                          ? "The screen-probe GI runs on the GPU's compute queue, beside the SSAO / RTAO / RT shadow passes,\n"
-                                            "which do not touch what it reads and writes; the reflections and the lighting wait for it.\n"
-                                            "Off: everything runs on the graphics queue, one after another. The image is the same either\n"
-                                            "way; compare the GPU frame time, and see both queues in Window > Profiler."
-                                          : "This GPU has no compute-only queue family: compute runs on the graphics queue.");
-                if (m_Renderer->isAsyncComputeAvailable() && asyncCompute)
-                {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("(%u passes on the compute queue)", m_Renderer->getAsyncComputePassCount());
-                }
-
-                // Diffuse Global Illumination (GI)
-                static const char* giModeNames[] = {
-                    "Off (IBL Ambient)",
-                    "DDGI (Probe Volumes)",
-                    "ReSTIR GI (Screen-Space Resampling via RTXDI)",
-                    "Screen Probes (Lumen-style final gather)",
-                    "Raster Probe Volume (no rays: Irradiance Volume entity)"
-                };
-                int currentGIMode = static_cast<int>(m_Renderer->getDiffuseGIMode());
-                if (ImGui::Combo("Diffuse Global Illumination", &currentGIMode, giModeNames, IM_ARRAYSIZE(giModeNames)))
-                {
-                    m_Renderer->setDiffuseGIMode(static_cast<uint32_t>(currentGIMode));
-                    // The screen probes' rays read DDGI at their hits (the second bounce): it runs under them.
-                    m_Renderer->setDDGIEnabled(currentGIMode == 1 || currentGIMode == 3);
-
-                    // "PBR Debug View" mode 16 ("Indirect Diffuse GI Only") is a second, independent
-                    // switch that also keeps ReSTIR GI's full pipeline running when no GI technique is
-                    // chosen (Renderer::isReSTIRGIRequested) -- leaving it stuck on 16 silently keeps paying
-                    // for TLAS build + all three ReSTIR GI passes + NRD GI denoise every frame with
-                    // no visual indication why. Clear it whenever GI mode no longer needs it.
-                    if (currentGIMode == 0 && m_Renderer->getDebugMode() == 16)
-                    {
-                        m_Renderer->setDebugMode(0);
-                    }
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Select indirect diffuse lighting technique:\n- Off: Constant or Cubemap IBL\n- DDGI: Irradiance probe volume grid\n- ReSTIR GI: RTXDI Spatiotemporal reservoir resampling (screen-space indirect diffuse)\n- Screen Probes: what Lumen does for its final gather -- probes on the visible surfaces trace the scene,\n  DDGI underneath gives the second bounce. Smooth, no light through walls (the default of every preset)");
-                }
-
-                uint32_t activeDebugMode = m_Renderer->getDebugMode();
-
-                // Screen-probe GI settings
-                if (m_Renderer->getDiffuseGIMode() == 3)
-                {
-                    ImGui::Indent();
-                    const nri::Extent2D probes = m_Renderer->getScreenProbeCounts();
-                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.8f, 1.0f), "Screen probes: %ux%u (%u probes, 64 rays each)", probes.width, probes.height,
-                                       probes.width * probes.height);
-
-                    static const char* tileNames[] = { "8 px (finest, 4x the rays of 16)", "12 px", "16 px", "24 px", "32 px (fastest)" };
-                    static const uint32_t tileSizes[] = { 8, 12, 16, 24, 32 };
-                    uint32_t& tileSize = m_Renderer->getScreenProbeTileSize();
-                    int tileIndex = 2;
-                    for (int i = 0; i < IM_ARRAYSIZE(tileSizes); ++i)
-                    {
-                        if (tileSizes[i] == tileSize)
-                            tileIndex = i;
-                    }
-                    if (ImGui::Combo("Screen Probe Spacing", &tileIndex, tileNames, IM_ARRAYSIZE(tileNames)))
-                        tileSize = tileSizes[tileIndex];
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("One probe per this many pixels each way (render resolution). Finer: more detail in corners and on small\n"
-                                          "objects, and more rays (cost grows with the square).");
-
-                    uint32_t& filterPasses = m_Renderer->getScreenProbeFilterPasses();
-                    int filterInt = static_cast<int>(std::min(filterPasses, 3u));
-                    if (ImGui::SliderInt("Spatial Filter Passes", &filterInt, 0, 3))
-                        filterPasses = static_cast<uint32_t>(filterInt);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Each pass averages a probe with its neighbours on the same surface: smoother, less local.");
-
-                    uint32_t& maxHistory = m_Renderer->getScreenProbeMaxHistory();
-                    int historyInt = static_cast<int>(std::clamp(maxHistory, 1u, 64u));
-                    if (ImGui::SliderInt("Temporal Frames", &historyInt, 1, 64))
-                        maxHistory = static_cast<uint32_t>(historyInt);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Frames accumulated at most per pixel: more is smoother and slower to follow changes in the light\n"
-                                          "(a large change still shortens it on its own).");
-
-                    if (ImGui::Button("Reset Screen Probe History"))
-                        m_Renderer->resetScreenProbeHistory();
-                    ImGui::TextDisabled("Second bounce: the DDGI cascades (settings below)");
-                    ImGui::Unindent();
-                }
-
-                // ReSTIR GI Settings (RTXDI)
-                if (m_Renderer->isReSTIRGIRequested())
-                {
-                    ImGui::Indent();
-                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR GI (RTXDI SDK Active)");
-
-                    float& spatialRadius = m_Renderer->getReSTIRGISpatialRadius();
-                    ImGui::SliderFloat("Spatial Radius (px)", &spatialRadius, 4.0f, 64.0f, "%.1f");
-
-                    uint32_t& numSamples = m_Renderer->getReSTIRGINumSpatialSamples();
-                    int samplesInt = static_cast<int>(numSamples);
-                    if (ImGui::SliderInt("Spatial Samples", &samplesInt, 1, 8))
-                    {
-                        numSamples = static_cast<uint32_t>(samplesInt);
-                    }
-
-                    uint32_t& maxM = m_Renderer->getReSTIRGIMaxHistoryLength();
-                    int maxMInt = static_cast<int>(maxM);
-                    if (ImGui::SliderInt("Max History Length (M)", &maxMInt, 1, 32))
-                    {
-                        maxM = static_cast<uint32_t>(maxMInt);
-                    }
-
-                    float& normalThresh = m_Renderer->getReSTIRGINormalThreshold();
-                    ImGui::SliderFloat("Normal Threshold", &normalThresh, 0.1f, 0.99f, "%.2f");
-
-                    float& depthThresh = m_Renderer->getReSTIRGIDepthThreshold();
-                    ImGui::SliderFloat("Depth Threshold", &depthThresh, 0.01f, 0.5f, "%.2f");
-
-                    bool& boiling = m_Renderer->getReSTIRGIEnableBoilingFilter();
-                    ImGui::Checkbox("Enable Boiling Filter", &boiling);
-                    if (boiling)
-                    {
-                        float& strength = m_Renderer->getReSTIRGIBoilingFilterStrength();
-                        ImGui::SliderFloat("Boiling Filter Strength", &strength, 0.0f, 1.0f, "%.2f");
-                    }
-                    ImGui::TextDisabled("(GI Denoiser moved to the Denoising section below)");
-                    ImGui::Unindent();
-                }
-
-                // DDGI Settings
-                if (m_Renderer->getDiffuseGIMode() == 1 || m_Renderer->getDiffuseGIMode() == 3 || activeDebugMode == 17)
-                {
-                    ImGui::Indent();
-                    uint32_t totalProbes = m_Renderer->getDDGIProbeCountTotal();
-                    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Grid: %ux%ux%u (%u probes, %u rays/probe)",
-                        m_Renderer->getDDGIProbeCountX(),
-                        m_Renderer->getDDGIProbeCountY(),
-                        m_Renderer->getDDGIProbeCountZ(),
-                        totalProbes,
-                        m_Renderer->getDDGIRaysPerProbe());
-
-                    bool& follow = m_Renderer->getDDGIFollowCamera();
-                    ImGui::Checkbox("Follow Camera", &follow);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("The probe volume is centered on the camera and scrolls with it in whole cells, each probe keeping its\n"
-                                          "history. Beyond the volume the environment's light takes over. Off: a fixed grid (origin and spacing\n"
-                                          "below, in world units).");
-                    if (follow)
-                    {
-                        glm::vec3& spacingMeters = m_Renderer->getDDGISpacingMeters();
-                        ImGui::DragFloat3("Probe Spacing", glm::value_ptr(spacingMeters), 0.05f, 0.25f, 50.0f, "%.2f m");
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Between the probes of the first (finest) cascade.");
-                        uint32_t& cascades = m_Renderer->getDDGICascadeSetting();
-                        int cascadeCount = static_cast<int>(std::clamp(cascades, 1u, 4u));
-                        if (ImGui::SliderInt("Cascades", &cascadeCount, 1, 4))
-                            cascades = static_cast<uint32_t>(cascadeCount);
-                        float& cascadeScale = m_Renderer->getDDGICascadeScale();
-                        ImGui::SliderFloat("Cascade Scale", &cascadeScale, 1.5f, 4.0f, "%.1fx");
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("Nested volumes around the camera, each this much wider (and coarser) than the one inside it: fine\n"
-                                              "detail near you, light on buildings across the street and beyond. Far cascades update less often.");
-                        const glm::vec3 cells = glm::vec3(m_Renderer->getDDGIProbeCountX() - 1, m_Renderer->getDDGIProbeCountY() - 1,
-                                                          m_Renderer->getDDGIProbeCountZ() - 1);
-                        const glm::vec3 first = spacingMeters * cells;
-                        const glm::vec3 last = first * std::pow(std::max(cascadeScale, 1.5f), static_cast<float>(cascadeCount - 1));
-                        ImGui::TextDisabled("Around the camera: %.0f x %.0f x %.0f m fine, %.0f x %.0f x %.0f m in all", first.x, first.y, first.z,
-                                            last.x, last.y, last.z);
-                    }
-                    else
-                    {
-                        glm::vec3& origin = m_Renderer->getDDGIGridOrigin();
-                        ImGui::DragFloat3("Grid Origin", glm::value_ptr(origin), 0.1f);
-
-                        glm::vec3& spacing = m_Renderer->getDDGIGridSpacing();
-                        ImGui::DragFloat3("Grid Spacing", glm::value_ptr(spacing), 0.05f, 0.2f, 10000.0f);
-                    }
-
-                    static const char* strideNames[] = { "Every probe, every frame", "Half of them a frame", "A quarter a frame" };
-                    uint32_t& stride = m_Renderer->getDDGIUpdateStride();
-                    int strideIndex = stride >= 4 ? 2 : (stride >= 2 ? 1 : 0);
-                    if (ImGui::Combo("Probe Updates", &strideIndex, strideNames, IM_ARRAYSIZE(strideNames)))
-                        stride = strideIndex == 0 ? 1u : (strideIndex == 1 ? 2u : 4u);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("How many probes trace rays each frame. Fewer is cheaper; light changes settle a little more slowly.\n"
-                                          "Probes the volume just scrolled over always update at once.");
-
-                    ImGui::Checkbox("Probe Relocation", &m_Renderer->getDDGIRelocation());
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Probes that end up inside walls or right against a surface move (up to 45 %% of a cell) to\n"
-                                          "free space nearby, so the light next to thin walls and floors neither goes dark nor leaks.");
-
-                    float& hysteresis = m_Renderer->getDDGIHysteresis();
-                    ImGui::SliderFloat("Temporal Hysteresis", &hysteresis, 0.80f, 0.995f, "%.3f");
-
-                    float& normalBias = m_Renderer->getDDGINormalBias();
-                    ImGui::SliderFloat("Normal Bias", &normalBias, 0.0f, 1.0f, "%.2f");
-
-                    float& sphereRadius = m_Renderer->getDDGIDebugSphereRadius();
-                    ImGui::SliderFloat("Debug Sphere Radius", &sphereRadius, 0.02f, 0.5f, "%.2f");
-
-                    bool& xray = m_Renderer->getDDGIDebugXRay();
-                    ImGui::Checkbox("Probe Spheres X-Ray (See Through Walls)", &xray);
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("Disables depth testing for probe spheres so all probes are visible in the scene without being occluded by walls or floors.");
-                    }
-
-                    if (ImGui::Button("Reset Volume to Defaults"))
-                    {
-                        m_Renderer->resetDDGIGridToDefaults();
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button("Reset DDGI History"))
-                    {
-                        m_Renderer->resetDDGIHistory();
-                    }
-                    ImGui::Unindent();
-                }
-
-                // Direct Lighting (ReSTIR DI)
-                static const char* directLightingModeNames[] = {
-                    "Brute-Force Loop (every light, default)",
-                    "ReSTIR DI (Screen-Space Resampled, RTXDI)"
-                };
-                int currentDirectLightingMode = static_cast<int>(m_Renderer->getDirectLightingMode());
-                if (ImGui::Combo("Direct Lighting", &currentDirectLightingMode, directLightingModeNames, IM_ARRAYSIZE(directLightingModeNames)))
-                {
-                    m_Renderer->setDirectLightingMode(static_cast<uint32_t>(currentDirectLightingMode));
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Brute-force loop: every light in range, each with its own shadow ray per pixel (the sun's from the\n"
-                                      "denoised shadow mask). Exact and noise-free; the cost grows with the number of lights that reach a pixel.\n"
-                                      "ReSTIR DI: one light per pixel resampled from all of them, one shadow ray, then denoised -- the\n"
-                                      "many-light technique (UE5's MegaLights is the same idea); worth it with hundreds of overlapping lights.\n"
-                                      "Switch \"PBR Debug View\" to \"8: Direct Lights Only\" to compare the two in isolation.");
-                }
-
-                if (m_Renderer->getDirectLightingMode() == 1)
-                {
-                    ImGui::Indent();
-                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "ReSTIR DI (RTXDI): presampled lights (RIS tiles, ReGIR grid), temporal + spatial reuse");
-
-                    uint32_t& numLocal = m_Renderer->getReSTIRDINumLocalLightSamples();
-                    int numLocalInt = static_cast<int>(numLocal);
-                    if (ImGui::SliderInt("Local Light Samples", &numLocalInt, 1, 16))
-                        numLocal = static_cast<uint32_t>(numLocalInt);
-
-                    uint32_t& numInfinite = m_Renderer->getReSTIRDINumInfiniteLightSamples();
-                    int numInfiniteInt = static_cast<int>(numInfinite);
-                    if (ImGui::SliderInt("Infinite (Directional) Light Samples", &numInfiniteInt, 1, 2))
-                        numInfinite = static_cast<uint32_t>(numInfiniteInt);
-
-                    float& diSpatialRadius = m_Renderer->getReSTIRDISpatialRadius();
-                    ImGui::SliderFloat("Spatial Radius (px)##DI", &diSpatialRadius, 4.0f, 64.0f, "%.1f");
-
-                    uint32_t& diNumSpatialSamples = m_Renderer->getReSTIRDINumSpatialSamples();
-                    int diSpatialInt = static_cast<int>(diNumSpatialSamples);
-                    if (ImGui::SliderInt("Spatial Samples##DI", &diSpatialInt, 1, 8))
-                        diNumSpatialSamples = static_cast<uint32_t>(diSpatialInt);
-
-                    uint32_t& diMaxM = m_Renderer->getReSTIRDIMaxHistoryLength();
-                    int diMaxMInt = static_cast<int>(diMaxM);
-                    if (ImGui::SliderInt("Max History Length (M)##DI", &diMaxMInt, 1, 32))
-                        diMaxM = static_cast<uint32_t>(diMaxMInt);
-
-                    float& diNormalThresh = m_Renderer->getReSTIRDINormalThreshold();
-                    ImGui::SliderFloat("Normal Threshold##DI", &diNormalThresh, 0.1f, 0.99f, "%.2f");
-
-                    float& diDepthThresh = m_Renderer->getReSTIRDIDepthThreshold();
-                    ImGui::SliderFloat("Depth Threshold##DI", &diDepthThresh, 0.01f, 0.5f, "%.2f");
-
-                    bool& regirEnabled = m_Renderer->getReGIREnabled();
-                    ImGui::Checkbox("ReGIR (World-Space Light Grid)", &regirEnabled);
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("Pre-bakes power-weighted local-light candidates into a world-space grid so nearby\npixels draw from lights that actually matter at that location, instead of a uniform screen-wide RIS tile.\nOff falls back to the plain RIS tile for every pixel -- still power-weighted, just not spatially localized.");
-                    }
-                    if (regirEnabled)
-                    {
-                        ImGui::Indent();
-                        float& regirCellSize = m_Renderer->getReGIRCellSize();
-                        ImGui::SliderFloat("Cell Size (m)", &regirCellSize, 0.1f, 8.0f, "%.2f");
-                        glm::vec3& regirCenter = m_Renderer->getReGIRGridCenter();
-                        ImGui::DragFloat3("Grid Center", glm::value_ptr(regirCenter), 0.5f);
-                        float& regirJitter = m_Renderer->getReGIRSamplingJitter();
-                        ImGui::SliderFloat("Cell Jitter", &regirJitter, 0.0f, 1.0f, "%.2f");
-                        if (ImGui::IsItemHovered())
-                        {
-                            ImGui::SetTooltip("How much each cell's sampled position wobbles every frame (as a fraction of cell size).\n0 = fully static cell assignment: perfectly stable per-pixel, but you may see a faint grid pattern at cell boundaries.\n1 = RTXPT's default: diffuses that boundary across frames, but with only a handful of lights and no heavy\ntemporal accumulation this reads as light edges constantly moving/flickering instead. Try lowering this\ntoward 0 if lights feel unstable -- raise it back up once you have many more lights in the scene.");
-                        }
-                        ImGui::Unindent();
-                    }
-
-                    ImGui::Unindent();
-                }
-
-                ImGui::Unindent();
-            }
-        }
-
-        // =========================================================================
-        // DENOISING (NRD / DLSS) -- its own top-level section, independent of whichever tracer mode
-        // or GI technique is active above: a denoiser is a separate concern from what produced the
-        // signal it's cleaning up, not a sub-setting of "Ray Tracing". NOTE: right now NRD is only
-        // wired to Hybrid Ray Tracing's separate 1-SPP shadow/reflection/GI passes -- the Path Tracer
-        // instead relies on DLSS Ray Reconstruction or progressive accumulation, so these controls
-        // stay hidden while Path Tracing is active rather than implying they'd do something they
-        // currently don't.
-        // =========================================================================
-        ImGui::Separator();
-        ImGui::Text("Denoising");
-
-        bool showAnyDenoiserControl = false;
-        if (!m_Renderer->isPathTracingEnabled() && m_Renderer->getRayTracingEnabled())
-        {
-            if (m_Renderer->getRayTracingShadows())
-            {
-                showAnyDenoiserControl = true;
-                bool nrdShadows = m_Renderer->getNRDShadowsEnabled();
-                if (ImGui::Checkbox("NRD SIGMA Denoiser (Shadows)", &nrdShadows))
-                {
-                    m_Renderer->setNRDShadowsEnabled(nrdShadows);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Uses NVIDIA Real-Time Denoisers (SIGMA) for penumbra filtering & contact hardening.\nRuns upstream pre-lighting on the shadow mask; fully compatible with DLSS-SR and DLSS-RR.\nUncheck to view raw 1-SPP shadows.");
-                }
-            }
-
-            if (m_Renderer->getRayTracingReflections())
-            {
-                showAnyDenoiserControl = true;
-                bool dlssRR = m_Renderer->isDLSSRayReconstructionEnabled();
-                if (dlssRR)
-                {
-                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Reflections Denoiser: DLSS Ray Reconstruction (Active)");
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip("DLSS Ray Reconstruction is active and handles reflections downstream.\nSelect NRD REBLUR or RELAX below to switch to cross-vendor non-AI denoising (auto-disables DLSS-RR).");
-                    }
-                }
-
-                static const char* reflDenoiserNames[] = {
-                    "Off (Raw 1-SPP)",
-                    "NRD REBLUR (Variance Guided)",
-                    "NRD RELAX (A-Trous Wavelet)"
-                };
-                int currentReflDenoiser = static_cast<int>(m_Renderer->getNRDReflectionDenoiser());
-                if (ImGui::Combo("Reflection Denoiser", &currentReflDenoiser, reflDenoiserNames, IM_ARRAYSIZE(reflDenoiserNames)))
-                {
-                    m_Renderer->setNRDReflectionDenoiser(static_cast<Nox::NRDReflectionDenoiser>(currentReflDenoiser));
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Cross-vendor non-AI denoisers for specular reflections.\nEnabling NRD REBLUR or RELAX automatically disables DLSS Ray Reconstruction to prevent double-filtering.");
-                }
-            }
-
-            if (m_Renderer->isReSTIRGIRequested())
-            {
-                showAnyDenoiserControl = true;
-                static const char* giDenoiserNames[] = {
-                    "Off (Raw 1-SPP)",
-                    "NRD REBLUR Diffuse (Variance Guided)",
-                    "NRD RELAX Diffuse (A-Trous Wavelet)"
-                };
-                int currentGIDenoiser = static_cast<int>(m_Renderer->getNRDGIDenoiser());
-                if (ImGui::Combo("GI Denoiser", &currentGIDenoiser, giDenoiserNames, IM_ARRAYSIZE(giDenoiserNames)))
-                {
-                    m_Renderer->setNRDGIDenoiser(static_cast<Nox::NRDDiffuseDenoiser>(currentGIDenoiser));
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR GI diffuse output using NRD (same suite already denoising reflections/shadows).\nStabilizes the swimming/rotating artifacts inherent to raw ReSTIR GI under camera motion.");
-                }
-            }
-
-            if (m_Renderer->getDirectLightingMode() == 1)
-            {
-                showAnyDenoiserControl = true;
-                static const char* diDenoiserNames[] = {
-                    "Off (Raw 1-SPP)",
-                    "NRD REBLUR Diffuse (Variance Guided)",
-                    "NRD RELAX Diffuse (A-Trous Wavelet)"
-                };
-                int currentDIDenoiser = static_cast<int>(m_Renderer->getNRDDIDenoiser());
-                if (ImGui::Combo("DI Denoiser", &currentDIDenoiser, diDenoiserNames, IM_ARRAYSIZE(diDenoiserNames)))
-                {
-                    m_Renderer->setNRDDIDenoiser(static_cast<Nox::NRDDiffuseDenoiser>(currentDIDenoiser));
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("Denoises the raw 1-SPP ReSTIR DI direct lighting output using NRD (its own separate history from the GI denoiser above).\nStabilizes the light-selection noise from RIS/ReGIR resampling under camera motion.");
-                }
-            }
-        }
-
-        if (!showAnyDenoiserControl)
-        {
-            ImGui::TextDisabled(m_Renderer->isPathTracingEnabled()
-                ? "Path Tracer denoising (DLSS-RR / NRD REBLUR-RELAX / progressive accumulation) is configured under Ray Tracing above."
-                : "Enable Ray Tracing Shadows, Reflections, or ReSTIR GI above to configure their denoisers.");
-        }
-
-        ImGui::Separator();
-        ImGui::Checkbox("Show physics collider", &m_ShowPhysicsColliders);
-        ImGui::SetItemTooltip("Every collider as physics builds it. Green: part of a Rigid Body 3D (on the entity or above it).\n"
-                              "Red: part of no body, so it does not collide. Blue: a Character Controller 3D's capsule.\n"
-                              "In Play / Simulate also Foot Placement's rays: green to where they hit the ground, red where they found none.");
-        ImGui::Image(m_Font->GetAtlasTexture()->getImTextureID(), {512, 512}, ImVec2(0, 1), ImVec2(1, 0));
-
-        ImGui::End(); // End Settings
-        
-        UI_ToolBar();
-
-        UpdateHistory();
-    }
-
-    void EditorLayer::UI_ToolBar()
-    {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0, 2});
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2{0, 0});
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2{0, 50});
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0, 0, 0, 0});
-        auto& colors = ImGui::GetStyle().Colors; //imguilayer styling ganz unten
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{
-                                  colors[ImGuiCol_ButtonHovered].x, colors[ImGuiCol_ButtonHovered].y,
-                                  colors[ImGuiCol_ButtonHovered].z, 0.5f
-                              });
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{
-                                  colors[ImGuiCol_ButtonActive].x, colors[ImGuiCol_ButtonActive].y,
-                                  colors[ImGuiCol_ButtonActive].z, 0.5f
-                              });
-
-        ImGui::Begin("##toolbar", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-        ImGui::SetWindowSize(ImVec2(ImGui::GetWindowWidth(), 40.0f));
-
-        float size = ImGui::GetWindowHeight() - 4.0f;
-        ImGui::SetCursorPosX((ImGui::GetWindowContentRegionMax().x * 0.5f) - (size * 0.5f));
-
-        // Prefab Mode: the prefab's name and its Save / Exit buttons take the toolbar (nothing plays while a prefab is edited).
-        if (m_PrefabMode.Active)
-        {
-            ImGui::SetCursorPos(ImVec2(10.0f, 10.0f));
-            ImGui::TextColored(ImVec4(0.45f, 0.7f, 1.0f, 1.0f), "Prefab Mode: %s%s%s", m_PrefabMode.Name.c_str(), m_PrefabMode.Variant ? " (variant)" : "",
-                               m_PrefabMode.Dirty ? "  *" : "");
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.35f, 0.55f, 1.0f));
-            if (ImGui::Button("Save"))
-                SavePrefabMode();
-            ImGui::SameLine();
-            if (ImGui::Button("Save & Exit"))
-            {
-                SavePrefabMode();
-                ExitPrefabMode();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Exit"))
-                RequestExitPrefabMode(); // asks first when there are unsaved changes
-            ImGui::PopStyleColor();
-        }
-
-        bool hasPlayButton = !m_PrefabMode.Active && (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Play);
-        bool hasSimulateButton = !m_PrefabMode.Active && (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Simulate);
-        bool hasPauseButton = !m_PrefabMode.Active && m_SceneState != SceneState::Edit;
-
-        if (hasPlayButton)
-        {
-            {
-                Ref<Texture2D> icon = (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Simulate) ? m_IconPlay : m_IconStop;
-                if (ImGui::ImageButton("##icon", icon->getImTextureID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1),
-                                       ImVec4(0, 0, 0, 0)))
-                {
-                    if (hasSimulateButton)
-                    {
-                        OnScenePlay();
-                    }
-                    else if (m_SceneState == SceneState::Play)
-                    {
-                        OnSceneStop();
-                    }
-                }
-            }
-            DrawPlaySettings();
-        }
-        if (hasSimulateButton)
-        {
-            if (hasPlayButton)
-                ImGui::SameLine();
-            {
-                Ref<Texture2D> icon = (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Play) ? m_IconSimulate : m_IconStop;
-                if (ImGui::ImageButton("##icon2", icon->getImTextureID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1),
-                                       ImVec4(0, 0, 0, 0)))
-                {
-                    if (m_SceneState == SceneState::Edit || m_SceneState == SceneState::Play)
-                    {
-                        OnSceneSimulate();
-                    }
-                    else if (m_SceneState == SceneState::Simulate)
-                    {
-                        OnSceneStop();
-                    }
-                }
-            }
-        }
-        if (hasPauseButton)
-        {
-            bool isPaused = m_ActiveScene->IsPaused();
-            ImGui::SameLine();
-            {
-                Ref<Texture2D> icon = m_IconPause;
-                if (ImGui::ImageButton("##icon3", icon->getImTextureID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1),
-                                       ImVec4(0, 0, 0, 0)))
-                {
-                    m_ActiveScene->SetPaused(!isPaused);
-                }
-            }
-
-            // Step button
-            if (isPaused)
-            {
-                ImGui::SameLine();
-                {
-                    Ref<Texture2D> icon = m_IconStep;
-                    if (ImGui::ImageButton("##icon4", icon->getImTextureID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1),
-                                           ImVec4(0, 0, 0, 0)))
-                    {
-                        m_ActiveScene->Step(); // make this tweakableinside imgui instead of hardcoding 1
-                    }
-                }
-            }
-        }
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(3);
-        ImGui::End();
-    }
-
-    void EditorLayer::DrawPlaySettings()
-    {
-        // The arrow beside Play: Unreal's Play settings (Net Mode, Number of Players).
-        ImGui::SameLine(0.0f, 1.0f);
-        ImGui::BeginDisabled(m_SceneState != SceneState::Edit);
-        if (ImGui::ArrowButton("##PlaySettings", ImGuiDir_Down))
-            ImGui::OpenPopup("PlaySettings");
-        ImGui::EndDisabled();
-        ImGui::SetItemTooltip("Play settings: multiplayer (net mode, number of players)");
-        if (ImGui::BeginPopup("PlaySettings"))
-        {
-            ImGui::SeparatorText("Multiplayer");
-            const char* modes[] = { "Standalone", "Play As Listen Server", "Play As Client" };
-            int mode = static_cast<int>(m_PlayNet.Mode);
-            if (ImGui::Combo("Net Mode", &mode, modes, 3))
-                m_PlayNet.Mode = static_cast<PlayNetMode>(mode);
-            ImGui::SetItemTooltip("Standalone: no networking.\nListen Server: this viewport is the server and plays; the others join it.\n"
-                                  "Client: a dedicated server is started (a console window: its commands) and this viewport joins it.");
-            ImGui::BeginDisabled(m_PlayNet.Mode == PlayNetMode::Standalone);
-            ImGui::SliderInt("Number of Players", &m_PlayNet.Players, 1, 8);
-            ImGui::SetItemTooltip("This viewport is player 1; each other player is a NoxRuntime window, closed with Stop.");
-            const char* emulations[] = { "Off", "Average", "Bad" };
-            ImGui::Combo("Network Emulation", &m_PlayNet.Emulation, emulations, 3);
-            ImGui::SetItemTooltip("Lag, jitter and loss on every connection (NoxRuntime --net-emulation): average ~30 ms, bad ~100 ms with loss.");
-            ImGui::InputInt("Port", &m_PlayNet.Port);
-            m_PlayNet.Port = std::clamp(m_PlayNet.Port, 1, 65535);
-            ImGui::Checkbox("Save the scene without asking", &m_PlayNet.SaveWithoutAsking);
-            ImGui::Checkbox("Network debug log", &m_PlayNet.DebugTrace);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Every player's log and the server's get the network debug trace (--net-debug): inputs that come unevenly,\n"
-                                  "a standing character that moves, the animation parameters sent and applied, prediction corrections, long frames.");
-            ImGui::SetItemTooltip("The other players load the scene from disk: Play saves it first.");
-#if NOX_WITH_MCP
-            ImGui::Checkbox("Players' MCP servers", &m_PlayNet.PlayerMcp);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Every other player's window and the dedicated server run an MCP server of their own (NoxRuntime --mcp), so an\n"
-                                  "AI tool connected to this editor can look at and drive them too (runtime_call). Ports: the editor's MCP\n"
-                                  "port + 1 for the dedicated server, + n for player n; the project's token; the editor's access level.");
-#endif
-            ImGui::EndDisabled();
-            ImGui::EndPopup();
-        }
-        if (m_PlaySession)
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", m_PlayWaitingForServer ? ("waiting for the dedicated server -- " + m_PlaySession->Describe()).c_str()
-                                                             : m_PlaySession->Describe().c_str());
-        }
-
-        // Multiplayer Play saves the scene first (the other players load it from disk).
-        if (m_OpenSaveAndPlay)
-        {
-            ImGui::OpenPopup("Save and Play");
-            m_OpenSaveAndPlay = false;
-        }
-        if (ImGui::BeginPopupModal("Save and Play", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            ImGui::TextUnformatted("Multiplayer Play starts the other players (NoxRuntime) on the saved scene:");
-            ImGui::TextUnformatted("the scene is saved first.");
-            ImGui::Checkbox("Don't ask again (this session)", &m_PlayNet.SaveWithoutAsking);
-            if (ImGui::Button("Save and Play"))
-            {
-                ImGui::CloseCurrentPopup();
-                SaveScene();
-                BeginMultiplayerPlay();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel"))
-            {
-                m_PlayNet.SaveWithoutAsking = false;
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::EndPopup();
-        }
-    }
-
-    bool EditorLayer::AnyNodeGraphEditorWantsInput() const
-    {
-        return std::any_of(m_NodeGraphEditors.begin(), m_NodeGraphEditors.end(),
-            [](const Scope<NodeGraphEditorPanel>& panel) { return panel->WantsInput(); });
-    }
-
-    bool EditorLayer::AnyNodeGraphEditorHovered() const
-    {
-        return std::any_of(m_NodeGraphEditors.begin(), m_NodeGraphEditors.end(),
-            [](const Scope<NodeGraphEditorPanel>& panel) { return panel->IsHovered(); });
-    }
-
-    bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
-    {
-        // 1. Abort if the user is typing in an ImGui text field
-        if (ImGui::GetIO().WantTextInput)
-            return false;
-
-        // A graph editor window owns the keyboard while it's focused or hovered (Delete removes its selected
-        // node, not the scene entity selected elsewhere; Q/W/E/R aren't gizmo switches there).
-        if (AnyNodeGraphEditorWantsInput())
-            return false;
-
-        // Shortcuts
-        if (e.IsRepeat())
-        {
-            return false;
-        }
-
-
-        // The modifiers held when the key went down, not the live keyboard state: by the time the event is handled (once per
-        // frame) a fast Ctrl+Shift+Z can already have let go of Shift, which read as Ctrl+Z and undid instead of redoing.
-        const uint16_t modifiers = e.GetModifiers();
-        bool control = (modifiers & SDL_KMOD_CTRL) != 0;
-        bool shift = (modifiers & SDL_KMOD_SHIFT) != 0;
-
-        // Shortcuts change the scene outside any ImGui item (Delete, Ctrl+D, End): the history looks for a change this frame.
-        m_HistoryCheckRequested = true;
-
-        // Letter shortcuts follow the keyboard layout, like in every editor: Ctrl+Z is the key labeled Z on a German QWERTZ
-        // keyboard too. The event carries the physical scancode, which names the US position (Z and Y are swapped on QWERTZ,
-        // so undo and redo came out reversed); a letter key is mapped back to the scancode of the letter it types. The fly
-        // camera's WASD stays physical on purpose (Input::IsKeyPressed).
-        int keyCode = e.GetKeyCode();
-        const SDL_Keycode layoutKey = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(keyCode), SDL_KMOD_NONE, false);
-        if (layoutKey >= SDLK_A && layoutKey <= SDLK_Z)
-            keyCode = SDL_SCANCODE_A + static_cast<int>(layoutKey - SDLK_A);
-
-        switch (keyCode)
-        {
-        case SDL_SCANCODE_Z:
-            {
-                // Ctrl+Z undo, Ctrl+Shift+Z redo (text fields keep their own undo: WantTextInput returned above).
-                if (control)
-                {
-                    if (shift)
-                        Redo();
-                    else
-                        Undo();
-                }
-                break;
-            }
-        case SDL_SCANCODE_Y:
-            {
-                if (control)
-                    Redo();
-                break;
-            }
-        case SDL_SCANCODE_N:
-            {
-                if (control)
-                {
-                    NewScene();
-                }
-                break;
-            }
-        case SDL_SCANCODE_O:
-            {
-                if (control)
-                {
-                    OpenProject();
-                }
-                break;
-            }
-        case SDL_SCANCODE_S:
-            {
-                if (control)
-                {
-                    if (shift)
-                        SaveSceneAs();
-                    else
-                        SaveScene();
-                }
-                break;
-            }
-
-        // Scene Commands
-        case SDL_SCANCODE_D:
-            {
-                if (control)
-                {
-                    OnDuplicateEntity();
-                }
-                break;
-            }
-
-        // The gizmo mode is a toolbar button now (UI_ViewportOverlay), not Q/W/E/R: those double as WASD-fly's strafe/forward and
-        // the fly-up key, so a key held to move the camera can no longer also switch what the gizmo does.
-        case SDL_SCANCODE_R:
-            if (control)
-            {
-                ScriptEngine::ReloadAssembly();
-            }
-            break;
-        case SDL_SCANCODE_B:
-            if (control)
-                m_ScriptBuilder.RequestBuild();
-            break;
-        case SDL_SCANCODE_KP_1:
-            if (m_ViewportHovered)
-                SetViewMode(control ? EditorViewMode::Back : EditorViewMode::Front);
-            break;
-        case SDL_SCANCODE_KP_3:
-            if (m_ViewportHovered)
-                SetViewMode(control ? EditorViewMode::Left : EditorViewMode::Right);
-            break;
-        case SDL_SCANCODE_KP_7:
-            if (m_ViewportHovered)
-                SetViewMode(control ? EditorViewMode::Bottom : EditorViewMode::Top);
-            break;
-        case SDL_SCANCODE_KP_5:
-            if (m_ViewportHovered)
-                SetViewMode(EditorViewMode::Perspective);
-            break;
-        case SDL_SCANCODE_M:
-            {
-                if (m_ViewportHovered && !control)
-                {
-                    m_MeasureTool = !m_MeasureTool;
-                    if (!m_MeasureTool)
-                        m_MeasureStage = 0;
-                }
-                break;
-            }
-        case SDL_SCANCODE_ESCAPE:
-            {
-                // Esc: first drops the line being measured, then leaves the tool; else in Play / Simulate it stops (Unreal's PIE).
-                if (m_MeasureTool)
-                {
-                    if (m_MeasureStage != 0)
-                        m_MeasureStage = 0;
-                    else
-                        m_MeasureTool = false;
-                }
-                else if (m_SceneState != SceneState::Edit)
-                    OnSceneStop();
-                break;
-            }
-        case SDL_SCANCODE_END:
-            {
-                // Unreal's "Snap to Floor".
-                if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
-                    SnapSelectionToFloor();
-                break;
-            }
-        case SDL_SCANCODE_F:
-            {
-                // Unreal's "Frame Selected" -- the same thing double-clicking an entity in the Outliner does.
-                if (m_ViewportHovered && !control)
-                    FocusOnEntity(m_SceneHierarchyPanel.GetSelectedEntity());
-                break;
-            }
-        case SDL_SCANCODE_DELETE:
-            {
-                if (Application::Get().GetLayer<ImGuiLayer>()->GetActiveWidgetID() == 0)
-                {
-                    // Everything selected, not just the last one. Resolved by UUID: deleting a parent already removes its
-                    // selected children.
-                    std::vector<UUID> toDelete;
-                    for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
-                    {
-                        // An entity of a prefab instance can be deleted too: the instance remembers it (an override).
-                        if (selected)
-                            toDelete.push_back(selected.GetUUID());
-                    }
-                    m_SceneHierarchyPanel.ClearSelection();
-                    for (UUID id : toDelete)
-                    {
-                        if (Entity entity = m_ActiveScene->GetEntityByUUID(id))
-                            m_ActiveScene->DestroyEntity(entity);
-                    }
-                }
-                break;
-            }
-        default:
-            break;
-        }
-
-        return false;
-    }
-
-    bool EditorLayer::IsButtonHovered() const
-    {
-        return true; //maybe useful for imgui ImGui::IsItemHovered()
-    }
-
-    bool EditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent& event)
-    {
-        if (AnyNodeGraphEditorHovered())
-            return false; // a click in the graph window must not also pick the scene entity under the viewport
-
-        if (event.GetMouseButton() == SDL_BUTTON_LEFT)
-        {
-            // The measure tool takes the clicks (no selecting) while it is on.
-            if (m_MeasureTool && m_ViewportHovered && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
-            {
-                MeasureClick();
-                return false;
-            }
-
-            if (m_ViewportHovered && !GizmoTakesMouse() && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
-            {
-                bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
-                bool control = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
-
-                // A click on an entity of a prefab instance picks the instance -- the outermost one when instances sit inside each other
-                // (Ctrl+click picks the entity itself).
-                Entity picked = m_HoveredEntity;
-                while (picked && !control && picked.HasComponent<PrefabNodeComponent>())
-                {
-                    Entity instance = m_ActiveScene->GetEntityByUUID(picked.GetComponent<PrefabNodeComponent>().Instance);
-                    if (!instance)
-                        break;
-                    picked = instance;
-                }
-
-                if (picked)
-                {
-                    if (shift)
-                        m_SceneHierarchyPanel.SelectRange(picked);
-                    else if (control)
-                        m_SceneHierarchyPanel.ToggleSelectedEntity(picked);
-                    else
-                        m_SceneHierarchyPanel.SetSelectedEntity(picked);
-                }
-                else
-                {
-                    // Clicking empty space: clear selection unless Shift/Ctrl is held
-                    if (!shift && !control)
-                    {
-                        m_SceneHierarchyPanel.ClearSelection();
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    void EditorLayer::OnOverlayRender()
-    {
-        if (m_SceneState == SceneState::Play)
-        {
-            Entity camera = m_ActiveScene->GetPrimaryCameraEntity();
-            if (!camera)
-                return;
-
-            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<WorldTransformComponent>().WorldMatrix);
-        }
-        else
-        {
-            m_Renderer->BeginScene(m_EditorCamera);
-        }
-
-        if (m_SceneState != SceneState::Play && m_ShowGrid)
-            DrawWorldGrid();
-        if (m_SceneState != SceneState::Play && m_ShowReferenceFigure)
-        {
-            // Under the cursor: where the cursor points on the surfaces (the y = 0 plane past them), kept while the mouse is elsewhere.
-            glm::dvec3 underCursor;
-            if (m_ReferenceFigureAtCursor && m_ViewportHovered && PickWorldPoint(underCursor))
-                m_ReferenceFigurePosition = underCursor;
-            DrawReferenceFigure(m_ReferenceFigureAtCursor ? m_ReferenceFigurePosition : glm::dvec3(0.0));
-        }
-
-        // Rect lights are not geometry: their rectangle and a stroke the way they shine (the entity's -Z) show where they are.
-        if (m_SceneState != SceneState::Play)
-        {
-            auto rectLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, RectLightComponent>();
-            for (auto entity : rectLights)
-            {
-                auto [wtc, light] = rectLights.get<WorldTransformComponent, RectLightComponent>(entity);
-                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // (overlays draw in the renderer's space)
-                const glm::vec3 centre = glm::vec3(world[3]);
-                const glm::vec3 halfX = glm::vec3(world[0]) * (0.5f * light.Width);
-                const glm::vec3 halfY = glm::vec3(world[1]) * (0.5f * light.Height);
-                const glm::vec3 corners[4] = { centre - halfX - halfY, centre + halfX - halfY, centre + halfX + halfY, centre - halfX + halfY };
-                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
-                for (int i = 0; i < 4; ++i)
-                    m_Renderer2D->DrawXRayLine(corners[i], corners[(i + 1) % 4], colour);
-                const glm::vec3 forward = -glm::vec3(world[2]);
-                if (glm::length(forward) > 1e-6f)
-                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * 0.5f * (glm::length(halfX) + glm::length(halfY)), colour);
-            }
-            // Reflection probes: their box.
-            auto probes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, ReflectionProbeComponent>();
-            for (auto entity : probes)
-            {
-                auto [wtc, probe] = probes.get<WorldTransformComponent, ReflectionProbeComponent>(entity);
-                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
-                glm::vec3 corners[8];
-                for (int i = 0; i < 8; ++i)
-                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? probe.Extents.x : -probe.Extents.x, (i & 2) ? probe.Extents.y : -probe.Extents.y,
-                                                             (i & 4) ? probe.Extents.z : -probe.Extents.z, 1.0f));
-                const glm::vec4 colour(0.4f, 0.8f, 1.0f, 1.0f);
-                for (int i = 0; i < 8; ++i)
-                    for (int axis = 1; axis < 8; axis <<= 1)
-                        if (!(i & axis))
-                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
-            }
-            // Irradiance volumes: their box.
-            auto volumes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, IrradianceVolumeComponent>();
-            for (auto entity : volumes)
-            {
-                auto [wtc, volume] = volumes.get<WorldTransformComponent, IrradianceVolumeComponent>(entity);
-                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
-                glm::vec3 corners[8];
-                for (int i = 0; i < 8; ++i)
-                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? volume.Extents.x : -volume.Extents.x, (i & 2) ? volume.Extents.y : -volume.Extents.y,
-                                                             (i & 4) ? volume.Extents.z : -volume.Extents.z, 1.0f));
-                const glm::vec4 colour(1.0f, 0.75f, 0.3f, 1.0f);
-                for (int i = 0; i < 8; ++i)
-                    for (int axis = 1; axis < 8; axis <<= 1)
-                        if (!(i & axis))
-                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
-            }
-            // Disc lights likewise: their circle and the way they shine.
-            auto discLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, DiscLightComponent>();
-            for (auto entity : discLights)
-            {
-                auto [wtc, light] = discLights.get<WorldTransformComponent, DiscLightComponent>(entity);
-                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // (overlays draw in the renderer's space)
-                const glm::vec3 centre = glm::vec3(world[3]);
-                const float scale = glm::max(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])));
-                const glm::vec3 axisX = glm::length(glm::vec3(world[0])) > 1e-6f ? glm::normalize(glm::vec3(world[0])) * light.Radius * scale : glm::vec3(0.0f);
-                const glm::vec3 axisY = glm::length(glm::vec3(world[1])) > 1e-6f ? glm::normalize(glm::vec3(world[1])) * light.Radius * scale : glm::vec3(0.0f);
-                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
-                constexpr int Segments = 32;
-                for (int i = 0; i < Segments; ++i)
-                {
-                    const float a0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
-                    const float a1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
-                    m_Renderer2D->DrawXRayLine(centre + axisX * std::cos(a0) + axisY * std::sin(a0), centre + axisX * std::cos(a1) + axisY * std::sin(a1), colour);
-                }
-                const glm::vec3 forward = -glm::vec3(world[2]);
-                if (glm::length(forward) > 1e-6f)
-                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * light.Radius * scale, colour);
-            }
-        }
-
-        // The selected sound's attenuation spheres (Unreal's): full volume inside Min Distance (light blue), silent past Max (dark blue).
-        if (m_SceneState != SceneState::Play)
-        {
-            Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
-            if (selected && selected.HasComponent<AudioSourceComponent>() && selected.HasComponent<WorldTransformComponent>() &&
-                selected.GetComponent<AudioSourceComponent>().Spatial && !selected.HasComponent<InactiveInHierarchyComponent>())
-            {
-                const auto& source = selected.GetComponent<AudioSourceComponent>();
-                const glm::vec3 centre = glm::vec3(m_Renderer->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix)[3]);
-                auto sphere = [&](float meters, const glm::vec4& colour)
-                {
-                    const float radius = WorldUnits::FromMeters(meters);
-                    constexpr int Segments = 48;
-                    for (int axis = 0; axis < 3; ++axis)
-                    {
-                        const int a = (axis + 1) % 3, b = (axis + 2) % 3;
-                        for (int i = 0; i < Segments; ++i)
-                        {
-                            const float t0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
-                            const float t1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
-                            glm::vec3 p0 = centre, p1 = centre;
-                            p0[a] += std::cos(t0) * radius; p0[b] += std::sin(t0) * radius;
-                            p1[a] += std::cos(t1) * radius; p1[b] += std::sin(t1) * radius;
-                            m_Renderer2D->DrawXRayLine(p0, p1, colour);
-                        }
-                    }
-                };
-                sphere(source.Spatialization.MinDistance, glm::vec4(0.55f, 0.85f, 1.0f, 0.9f));
-                sphere(source.Spatialization.MaxDistance, glm::vec4(0.2f, 0.4f, 1.0f, 0.7f));
-            }
-        }
-
-        // Level Streaming Volumes (orange) and Audio Volumes (blue): their boxes while editing and simulating (Unreal shows its volumes
-        // in the editor).
-        if (m_SceneState != SceneState::Play)
-        {
-            constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
-            constexpr glm::vec4 kAudioVolumeColor(0.3f, 0.6f, 1.0f, 0.9f);
-            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
-            auto drawBox = [&](const WorldTransformComponent& wtc, const glm::vec3& halfExtents, const glm::vec4& color)
-            {
-                glm::vec3 corners[8];
-                for (int i = 0; i < 8; ++i)
-                {
-                    const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
-                    corners[i] = glm::vec3(m_Renderer->ToRenderSpace(wtc.WorldMatrix) * glm::vec4(sign * halfExtents, 1.0f));
-                }
-                for (const auto& edge : edges)
-                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], color);
-            };
-            auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
-            for (auto entity : view)
-            {
-                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
-                    continue; // (hidden: the eye closed)
-                auto [wtc, volume] = view.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
-                drawBox(wtc, volume.HalfExtents, kVolumeColor);
-            }
-            // Bounded Post Process Volumes (violet; an unbound one covers the whole scene: no box).
-            constexpr glm::vec4 kPostProcessVolumeColor(0.75f, 0.45f, 1.0f, 0.9f);
-            auto postView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PostProcessVolumeComponent>();
-            for (auto entity : postView)
-            {
-                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
-                    continue;
-                auto [wtc, volume] = postView.get<WorldTransformComponent, PostProcessVolumeComponent>(entity);
-                if (!volume.Unbound)
-                    drawBox(wtc, volume.HalfExtents, kPostProcessVolumeColor);
-            }
-            auto audioView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AudioVolumeComponent>();
-            for (auto entity : audioView)
-            {
-                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
-                    continue;
-                auto [wtc, volume] = audioView.get<WorldTransformComponent, AudioVolumeComponent>(entity);
-                drawBox(wtc, volume.HalfExtents, kAudioVolumeColor);
-            }
-            // Acoustic Probe Volumes (green), and the selected one's baked probes (small crosses, Steam Audio's probe gizmos).
-            constexpr glm::vec4 kProbeVolumeColor(0.35f, 0.9f, 0.55f, 0.9f);
-            auto probeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AcousticProbeVolumeComponent>();
-            const Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
-            for (auto entity : probeView)
-            {
-                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
-                    continue;
-                auto [wtc, volume] = probeView.get<WorldTransformComponent, AcousticProbeVolumeComponent>(entity);
-                drawBox(wtc, volume.HalfExtents, kProbeVolumeColor);
-                if (selected != Entity(entity, m_ActiveScene.get()) || volume.BakedData == 0 || AssetManager::RequestAsset(volume.BakedData) != AssetState::Ready)
-                    continue;
-                const Ref<AcousticData> data = AssetManager::GetAsset<AcousticData>(volume.BakedData);
-                const float arm = WorldUnits::FromMeters(0.15f);
-                for (const glm::vec3& probe : data->ProbePositions)
-                {
-                    const glm::vec3 p = glm::vec3(m_Renderer->ToRenderSpace(data->Origin + glm::dvec3(probe)));
-                    m_Renderer2D->DrawXRayLine(p - glm::vec3(arm, 0, 0), p + glm::vec3(arm, 0, 0), kProbeVolumeColor);
-                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, arm, 0), p + glm::vec3(0, arm, 0), kProbeVolumeColor);
-                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, 0, arm), p + glm::vec3(0, 0, arm), kProbeVolumeColor);
-                }
-            }
-        }
-
-        // A world's loaded cells: the content bounds of each, in green (World Partition panel, Show in Viewport).
-        if (m_WorldPartitionPanel.ShowCellsInViewport() && m_ActiveScene->IsWorldPartitioned())
-        {
-            constexpr glm::vec4 kCellColor(0.3f, 0.85f, 0.45f, 0.8f);
-            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
-            const WorldPartition& world = m_ActiveScene->GetWorldPartition();
-            for (const WorldCellCoord& cell : m_ActiveScene->GetLoadedWorldCells(false))
-            {
-                auto info = world.Cells.find(cell);
-                if (info == world.Cells.end())
-                    continue;
-                glm::vec3 corners[8];
-                for (int i = 0; i < 8; ++i)
-                {
-                    corners[i] = m_Renderer->ToRenderSpace(glm::dvec3((i & 1) ? info->second.BoundsMax.x : info->second.BoundsMin.x,
-                                                                      (i & 2) ? info->second.BoundsMax.y : info->second.BoundsMin.y,
-                                                                      (i & 4) ? info->second.BoundsMax.z : info->second.BoundsMin.z));
-                }
-                for (const auto& edge : edges)
-                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kCellColor);
-            }
-        }
-
-        if (m_ShowPhysicsColliders)
-        {
-            // Box Colliders
-            {
-                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider2DComponent>();
-                for (auto entity : view)
-                {
-                    auto [wtc, bc2d] = view.get<WorldTransformComponent, BoxCollider2DComponent>(entity);
-
-                    /*glm::vec3 translation = tc.Translation + glm::vec3(bc2d.Offset, 0.001f);
-                    glm::vec3 scale = tc.Scale * glm::vec3(bc2d.Size * 2.0f, 1.0f);
-
-                    // box2d needs first translation then offset otherwise it offsets the bounding box from center instead of creating from center around
-                    glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
-                        * glm::rotate(glm::mat4(1.0f), tc.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f))
-                        * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
-                        * glm::scale(glm::mat4(1.0f), scale * glm::vec3(bc2d.Size * 2.0f, 1.0f));*/
-
-                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix)
-                        * glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f))
-                        * glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
-
-                    m_Renderer2D->DrawRect(transform, glm::vec4(0, 1, 0, 1));
-                }
-            }
-            // Circle Colliders
-            {
-                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CircleCollider2DComponent>();
-                for (auto entity : view)
-                {
-                    auto [wtc, cc2d] = view.get<WorldTransformComponent, CircleCollider2DComponent>(entity);
-
-                    /*glm::vec3 translation = tc.Translation + glm::vec3(cc2d.Offset, 0.001f);
-                    glm::vec3 scale = tc.Scale * glm::vec3(cc2d.Radius * 2.0f);
-
-                    glm::mat4 transform = glm::translate(glm::mat4(1.0f), translation)
-                        * glm::scale(glm::mat4(1.0f), scale);*/
-
-                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix)
-                        * glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f))
-                        * glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
-
-                    m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
-                }
-            }
-            DrawPhysicsColliders3D();
-        }
-
-        // Draw selected entity outline 2D and 3D
-        const auto& selectedEntities = m_SceneHierarchyPanel.GetSelectedEntities();
-        if (!selectedEntities.empty())
-        {
-            std::vector<int32_t> selectedIDs;
-            selectedIDs.reserve(selectedEntities.size());
-
-            for (const Entity& entity : selectedEntities)
-            {
-                if (entity)
-                {
-                    selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(entity)));
-                }
-            }
-
-            m_Renderer->SetSelectedEntityID(selectedIDs);
-        }
-        else
-        {
-            m_Renderer->SetSelectedEntityID({});
-        }
-        
-        /*if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
-        {
-            glm::mat4 transform = glm::mat4(1.0f);
-
-            // Use the WorldMatrix so the outline respects parent transformations!
-            if (selectedEntity.HasComponent<WorldTransformComponent>())
-            {
-                transform = selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix;
-            }
-            else if (selectedEntity.HasComponent<TransformComponent>())
-            {
-                // Fallback just in case an entity somehow doesn't have a WorldTransformComponent yet
-                transform = selectedEntity.GetComponent<TransformComponent>().GetTransform();
-            }
-            m_Renderer2D->DrawRect(transform, glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
-            /*const TransformComponent& transform = selectedEntity.GetComponent<TransformComponent>();
-            m_Renderer2D->DrawRect(transform.GetTransform(), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));#1#
-        }*/
-        
-        m_Renderer->EndScene();
-    }
-
     bool EditorLayer::NewProject()
     {
-        // The Project Manager's form in short: the name and folder from a save dialog, the rest its defaults (centimeters, Auto
-        // quality, a C# scripts project). The Project Manager (File > Project Manager...) has every option.
         std::filesystem::path path = Utility::SaveFile("Nox Project\0nproj\0");
         if (path.empty())
             return false;
@@ -3628,8 +436,54 @@ namespace Nox
             NOX_CORE_ERROR("New Project: {}", error);
             return false;
         }
-        m_CreateBasicScene = true; // (the Basic template, like the Project Manager's default)
+        m_CreateBasicScene = true;
         return OpenProject(projectFile);
+    }
+
+    void EditorLayer::SaveAll()
+    {
+        // Assets first (they do not ask anything); the scene last (an untitled one asks for its name).
+        m_AssetEditors.SaveAll();
+        MaterialEdits::SaveAll();
+        m_AssetEditors.EndPreviews(); // (a timeline's poses are not saved into the scene)
+        if (AudioMixer::IsDirty())
+            AudioMixer::Save();
+        if (m_SceneDirty || m_EditorScenePath.empty())
+            SaveScene();
+        if (!HasUnsavedChanges(UnsavedAssets | UnsavedMixer))
+            Notify(NoxUI::UINotificationSeverity::Success, "Saved", "Everything that was unsaved.");
+    }
+
+    void EditorLayer::NewProjectAsync()
+    {
+        Utility::SaveFileAsync("Nox Project\0nproj\0", [this](std::string chosen)
+        {
+            if (chosen.empty())
+                return;
+            const std::filesystem::path path(chosen);
+            ProjectLibrary::NewProjectSettings settings;
+            settings.Name = path.stem().string();
+            settings.Location = path.parent_path();
+            std::string error;
+            const std::filesystem::path projectFile = ProjectLibrary::CreateProject(settings, error);
+            if (projectFile.empty())
+            {
+                NOX_CORE_ERROR("New Project: {}", error);
+                Notify(NoxUI::UINotificationSeverity::Error, "Project not made", error);
+                return;
+            }
+            m_CreateBasicScene = true;
+            OpenProject(projectFile);
+        });
+    }
+
+    void EditorLayer::OpenProjectAsync()
+    {
+        Utility::OpenFileAsync("Nox Project\0nproj\0", [this](std::string chosen)
+        {
+            if (!chosen.empty())
+                OpenProject(std::filesystem::path(chosen));
+        });
     }
 
     bool EditorLayer::OpenProject()
@@ -3640,11 +494,86 @@ namespace Nox
         return OpenProject(filepath);
     }
 
+    bool EditorLayer::OpenProject(const std::filesystem::path& path)
+    {
+        if (path.empty())
+            return false;
+
+        const bool hadProject = Project::GetActive() != nullptr;
+        if (hadProject)
+        {
+            // The graph and material windows show the project being left: closed while it is still loaded (unsaved edits were
+            // asked about before; what is left goes back to the files).
+            ExitPrefabMode(); // (asked about before)
+            m_AssetEditors.CloseAll();
+            MaterialEdits::Clear(); // (asked about before: what is left belonged to the project being left)
+            SaveLayoutFiles(); // the project being left keeps its layout
+        }
+        if (!Project::Load(path))
+        {
+            NOX_CORE_ERROR("Could not open the project '{}'", path.string());
+            Notify(NoxUI::UINotificationSeverity::Error, "Project not opened", path.filename().string() + " -- see the Output Log.");
+            return false;
+        }
+        AssetPreviewRenderer::Get().Clear(); // the thumbnails were the other project's
+
+        Ref<Project> project = Project::GetActive();
+        ProjectLibrary::RememberRecentProject(path);
+        if (auto win = Application::Get().getWindow(); win && win->getHandle() && project)
+            SDL_SetWindowTitle(win->getHandle(), ("Nox Editor - " + project->GetConfig().Name).c_str());
+
+        m_EditorCamera.ApplyWorldUnitDefaults();
+        if (m_Renderer && project)
+        {
+            m_Renderer->ApplyQualitySetting(project->GetConfig().RenderQuality);
+            m_Renderer->ApplyProjectRendererSettings(project->GetConfig().Renderer);
+        }
+        if (project && project->GetEditorAssetManager())
+            project->GetEditorAssetManager()->Init();
+        AudioMixer::LoadProjectMixer(true);
+        if (m_Renderer)
+            m_Renderer->InitializeCustomLitShaders();
+
+        m_CustomLitSignature = CustomLitSignature();
+        if (!m_CustomLitSignature.empty())
+            WriteMaterialShaderEditorSettings();
+
+        m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
+        if (ScriptEngine::IsInitialized())
+        {
+            ScriptEngine::LoadProjectAssembly();
+            BuildScriptsIfNeverBuilt();
+        }
+
+        const AssetHandle startScene = project ? project->GetConfig().StartScene : AssetHandle(0);
+        if (startScene != 0)
+            OpenScene(startScene);
+        else if (hadProject)
+            NewScene();
+
+        if (m_CreateBasicScene && project && project->GetConfig().StartScene == 0)
+            CreateBasicScene();
+        m_CreateBasicScene = false;
+
+        {
+            std::error_code error;
+            m_ThumbnailPending = !std::filesystem::exists(ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory()), error);
+            m_ThumbnailTimer = 0.0f;
+        }
+        m_Commands.Load(KeyBindingsPath()); // (this project's key bindings)
+        m_ProjectSettings.MarkDirty();       // (its rows read the project that is open)
+        m_ContentBrowserPanel.Refresh();
+        if (project)
+            Notify(NoxUI::UINotificationSeverity::Success, "Project opened", project->GetConfig().Name);
+        return true;
+    }
+
     bool EditorLayer::OpenStartupProject(const std::filesystem::path& failed)
     {
-        const std::string message = failed.empty() ? std::string("No project is open. Open an existing project (.nproj) or make a new one.")
-                                                   : "The project " + failed.generic_string() + " could not be opened (the log says why).\n"
-                                                     "Open another project (.nproj) or make a new one.";
+        const std::string message = failed.empty()
+            ? std::string("No project is open. Open an existing project (.nproj) or make a new one.")
+            : "The project " + failed.generic_string() + " could not be opened (the log says why).\n"
+              "Open another project (.nproj) or make a new one.";
         while (true)
         {
             const SDL_MessageBoxButtonData buttons[] = {
@@ -3667,165 +596,13 @@ namespace Nox
         }
     }
 
-    AssetHandle EditorLayer::RegisterSceneAsset(const std::filesystem::path& scenePath)
-    {
-        Ref<Project> project = Project::GetActive();
-        if (!project || scenePath.empty())
-            return 0;
-        auto assets = project->GetEditorAssetManager();
-        std::error_code error;
-        const std::filesystem::path relative = std::filesystem::relative(scenePath, Project::GetActiveAssetDirectory(), error);
-        if (error || relative.empty() || relative.native().starts_with(std::filesystem::path("..").native()))
-            return 0; // saved outside the project's assets: not one of its scenes
-        AssetHandle handle = assets->FindHandleByPath(relative, AssetType::Scene);
-        if (handle == 0)
-        {
-            assets->ImportAsset(relative, relative, AssetType::Scene);
-            handle = assets->FindHandleByPath(relative, AssetType::Scene);
-        }
-        return handle;
-    }
-
-    void EditorLayer::AdoptStartSceneIfNone(const std::filesystem::path& scenePath)
-    {
-        Ref<Project> project = Project::GetActive();
-        if (!project || project->GetConfig().StartScene != 0)
-            return;
-        // Unreal's Editor Startup Map / Game Default Map: a project without one takes the first scene saved (Settings > Start Scene
-        // changes it).
-        if (const AssetHandle handle = RegisterSceneAsset(scenePath); handle != 0)
-        {
-            project->GetConfig().StartScene = handle;
-            Project::SaveActive();
-            NOX_CORE_INFO("Start Scene: {} (the project opens with it; Settings > Start Scene changes it)", scenePath.filename().string());
-        }
-    }
-
-    void EditorLayer::CreateBasicScene()
-    {
-        NewScene();
-        Scene& scene = *m_EditorScene;
-
-        // The lights in an outliner folder of their own, as Unreal's template levels keep them ("Lighting").
-        const std::string lighting = "Lighting";
-        scene.AddFolder(lighting);
-
-        // The sky: the procedural atmosphere with clouds, sun and moon (and its height fog off by default, as the component is).
-        Entity sky = scene.CreateEntity("Sky");
-        sky.AddComponent<EnvironmentLightComponent>().Source = EnvironmentSource::ProceduralSky;
-        sky.AddComponent<FolderComponent>(lighting);
-
-        // The sun the sky follows: daylight intensity, 54 degrees up (the sky's own default sun, as a light that can be moved).
-        Entity sun = scene.CreateEntity("Sun");
-        sun.AddComponent<FolderComponent>(lighting);
-        sun.AddComponent<DirectionalLightComponent>().Intensity = DefaultSkySunIntensity;
-        sun.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(DefaultSkySunRotation());
-        sun.MarkTransformDirty();
-
-        // A 50 m floor (the 1 m Plane shape, scaled) with a static box collider a little below its surface, so a character stands on it.
-        if (const AssetHandle plane = GetShapeAsset(PrimitiveShape::Plane); plane != 0)
-        {
-            Entity floor = scene.CreateEntity("Floor");
-            auto& instance = floor.AddComponent<ModelInstanceComponent>();
-            instance.Model = plane;
-            instance.AtFileLayout = true;
-            floor.GetComponent<TransformComponent>().Scale = glm::vec3(50.0f, 1.0f, 50.0f);
-            floor.MarkTransformDirty();
-            floor.AddComponent<RigidBody3DComponent>().Type = RigidBody3DComponent::BodyType::Static;
-            auto& box = floor.AddComponent<BoxCollider3DComponent>();
-            box.HalfExtents = glm::vec3(WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.05f), WorldUnits::FromMeters(0.5f));
-            box.Offset = glm::vec3(0.0f, -WorldUnits::FromMeters(0.05f), 0.0f);
-            AssetManager::RequestAsset(plane);
-        }
-
-        // What Play looks through: 2 m up, 8 m back, looking slightly down at the middle of the floor.
-        Entity camera = scene.CreateEntity("Camera");
-        camera.AddComponent<CameraComponent>().Primary = true;
-        auto& cameraTransform = camera.GetComponent<TransformComponent>();
-        cameraTransform.Translation = glm::dvec3(0.0, WorldUnits::FromMeters(2.0f), WorldUnits::FromMeters(8.0f));
-        cameraTransform.Rotation = glm::vec3(glm::radians(-12.0f), 0.0f, 0.0f);
-        camera.MarkTransformDirty();
-
-        const std::filesystem::path path = Project::GetActiveAssetDirectory() / "Scenes" / "Main.nox";
-        std::error_code error;
-        std::filesystem::create_directories(path.parent_path(), error);
-        SerializeScene(m_EditorScene, path);
-        m_EditorScenePath = path;
-        AdoptStartSceneIfNone(path);
-        m_HistoryCheckRequested = true;
-        m_ApplyBasicSceneView = true;
-        ApplyBasicSceneView(); // (again once the editor camera is made, when this runs as the editor starts)
-    }
-
-    void EditorLayer::ApplyBasicSceneView()
-    {
-        // Unreal's view of a new level: from above one corner of the floor, 25 degrees down at its middle, 15 m away. (Before, the
-        // editor camera stood level with the floor and saw it edge-on: invisible until moved.)
-        m_EditorCamera.SetFocalPoint(glm::dvec3(0.0));
-        m_EditorCamera.SetDistance(WorldUnits::FromMeters(15.0f));
-        m_EditorCamera.SetOrientation(glm::radians(25.0f), glm::radians(35.0f));
-    }
-
-    void EditorLayer::CaptureProjectThumbnail()
-    {
-        Ref<Project> project = Project::GetActive();
-        Ref<Texture2D> image = m_Renderer->GetSceneResourceRef();
-        if (!project || !image || image->GetWidth() < 16 || image->GetHeight() < 16)
-            return;
-        const std::filesystem::path file = ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory());
-        const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
-        m_Renderer->ReadbackTexture(std::move(image), [file, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
-        {
-            if (pixels.size() != static_cast<size_t>(width) * height * 4 || width == 0 || height == 0)
-                return;
-            // A 16:9 crop of the middle, scaled to 384 x 216 by averaging the texels each output texel covers.
-            constexpr uint32_t outWidth = 384, outHeight = 216;
-            uint32_t cropWidth = width, cropHeight = static_cast<uint32_t>(width * 9ull / 16ull);
-            if (cropHeight > height)
-            {
-                cropHeight = height;
-                cropWidth = static_cast<uint32_t>(height * 16ull / 9ull);
-            }
-            const uint32_t x0 = (width - cropWidth) / 2, y0 = (height - cropHeight) / 2;
-            std::vector<uint8_t> out(static_cast<size_t>(outWidth) * outHeight * 4);
-            for (uint32_t y = 0; y < outHeight; ++y)
-                for (uint32_t x = 0; x < outWidth; ++x)
-                {
-                    const uint32_t sx0 = x0 + x * cropWidth / outWidth, sx1 = std::max(sx0 + 1, x0 + (x + 1) * cropWidth / outWidth);
-                    const uint32_t sy0 = y0 + y * cropHeight / outHeight, sy1 = std::max(sy0 + 1, y0 + (y + 1) * cropHeight / outHeight);
-                    uint32_t sum[3] = { 0, 0, 0 }, count = 0;
-                    for (uint32_t sy = sy0; sy < sy1 && sy < height; ++sy)
-                        for (uint32_t sx = sx0; sx < sx1 && sx < width; ++sx)
-                        {
-                            const uint8_t* texel = &pixels[(static_cast<size_t>(sy) * width + sx) * 4];
-                            sum[0] += texel[0];
-                            sum[1] += texel[1];
-                            sum[2] += texel[2];
-                            ++count;
-                        }
-                    uint8_t* target = &out[(static_cast<size_t>(y) * outWidth + x) * 4];
-                    count = std::max(count, 1u);
-                    target[0] = static_cast<uint8_t>(sum[bgra ? 2 : 0] / count);
-                    target[1] = static_cast<uint8_t>(sum[1] / count);
-                    target[2] = static_cast<uint8_t>(sum[bgra ? 0 : 2] / count);
-                    target[3] = 255;
-                }
-            std::error_code error;
-            std::filesystem::create_directories(file.parent_path(), error);
-            if (!stbi_write_png(file.string().c_str(), outWidth, outHeight, 4, out.data(), outWidth * 4))
-                NOX_CORE_WARN("Project thumbnail: cannot write {}", file.generic_string());
-        });
-    }
-
     void EditorLayer::OpenProjectManager()
     {
-        // Unreal / Godot: the project browser is a fresh editor process, this one closes (one project per editor process: the
-        // scripting runtime cannot be started twice in one). The graphics API switch is passed on.
         const char* base = SDL_GetBasePath();
         const ApplicationCommandLineArgs& args = Application::Get().GetSpecification().CommandLineArgs;
-        // This executable by its full path (argv[0] can be relative); the new process starts in this one's working directory, where
-        // the editor's assets are found.
-        std::filesystem::path fileName = args.Count > 0 && args.Args[0] ? std::filesystem::path(args.Args[0]).filename() : std::filesystem::path("NoxEditor");
+        std::filesystem::path fileName = args.Count > 0 && args.Args[0]
+            ? std::filesystem::path(args.Args[0]).filename()
+            : std::filesystem::path("NoxEditor");
 #ifdef _WIN32
         if (!fileName.has_extension())
             fileName += ".exe";
@@ -3833,8 +610,11 @@ namespace Nox
         const std::filesystem::path executable = std::filesystem::path(base ? base : "") / fileName;
         std::vector<std::string> arguments{ "--project-manager" };
         for (int index = 1; index < args.Count; ++index)
-            if (ApplicationCommandLineArgs::IsSwitch(args.Args[index]) && std::string_view(args.Args[index]) != "--project-manager")
+        {
+            if (ApplicationCommandLineArgs::IsSwitch(args.Args[index]) &&
+                std::string_view(args.Args[index]) != "--project-manager")
                 arguments.emplace_back(args.Args[index]);
+        }
         std::string error;
         if (!LaunchDetachedProcess(executable, arguments, error))
         {
@@ -3842,164 +622,38 @@ namespace Nox
             return;
         }
         NOX_CORE_INFO("Project Manager: started {} --project-manager; this editor closes", executable.generic_string());
-        Application::Shutdown();
-    }
-
-    bool EditorLayer::OpenProject(const std::filesystem::path& path)
-    {
-        const bool hadProject = Project::GetActive() != nullptr;
-        if (Project::Load(path))
-        {
-            ProjectLibrary::RememberRecentProject(path);
-            SDL_SetWindowTitle(Application::Get().getWindow()->getHandle(), ("Nox Editor - " + Project::GetActive()->GetConfig().Name).c_str());
-            m_EditorCamera.ApplyWorldUnitDefaults(); // the project's world unit is only known now (U6)
-            m_Renderer->ApplyQualitySetting(Project::GetActive()->GetConfig().RenderQuality);
-            m_Renderer->ApplyProjectRendererSettings(Project::GetActive()->GetConfig().Renderer);
-            Project::GetActive()->GetEditorAssetManager()->Init();
-            AudioMixer::LoadProjectMixer(true); // its buses and effects (made with the default ones if the project has none yet)
-            // Its Material Shaders (Custom Lit, CustomLitShaders.h) before its materials are packed; then watched (PollCustomLitShaders).
-            m_Renderer->InitializeCustomLitShaders();
-            m_CustomLitSignature = CustomLitSignature();
-            if (!m_CustomLitSignature.empty()) // (the project has Material Shaders: code editors find the engine's include)
-                WriteMaterialShaderEditorSettings();
-            // The project's scripts (at startup ScriptEngine::Initialize loads them, after this).
-            m_ScriptBuilder.SetProject(ScriptEngine::GetProjectScriptsProject());
-            if (ScriptEngine::IsInitialized())
-            {
-                ScriptEngine::LoadProjectAssembly();
-                BuildScriptsIfNeverBuilt();
-            }
-
-            AssetHandle startScene = Project::GetActive()->GetConfig().StartScene;
-            if (startScene)
-                OpenScene(startScene);
-            else if (hadProject)
-                NewScene(); // nothing of the project before stays open
-
-            m_ContentBrowserPanel = CreateScope<ContentBrowserPanel>(Project::GetActive());
-            m_ContentBrowserPanel->SetOpenAssetCallback([this](AssetHandle handle) { OpenAsset(handle); });
-            m_ContentBrowserPanel->SetCreatePrefabCallback([this](UUID dragged, const std::filesystem::path& folder) { return CreatePrefab(dragged, folder); });
-            m_SceneHierarchyPanel.SetCreatePrefabCallback([this](UUID entity)
-            {
-                // Into the folder the Content Browser shows, like a prefab dragged into it.
-                if (m_ContentBrowserPanel)
-                {
-                    const AssetHandle created = CreatePrefab(entity, m_ContentBrowserPanel->CurrentFolder());
-                    if (created != 0)
-                        m_ContentBrowserPanel->ShowNewAsset(created);
-                }
-            });
-            m_ContentBrowserPanel->SetCreateVariantCallback([this](AssetHandle base, const std::filesystem::path& folder) { return CreateVariant(base, folder); });
-            // The browser's reference checks see what the open scenes use right now, unsaved changes included.
-            // Replace References in the open scene: through its text (the same load as an undo step), every token of the old
-            // handle becomes the new one.
-            m_ContentBrowserPanel->SetReplaceInScenesCallback([this](AssetHandle from, AssetHandle to)
-            {
-                if (!m_EditorScene || m_SceneState != SceneState::Edit)
-                    return;
-                SceneSerializer serializer(m_EditorScene);
-                std::string text = serializer.SerializeToText();
-                const std::string fromText = std::to_string(static_cast<uint64_t>(from));
-                const std::string toText = std::to_string(static_cast<uint64_t>(to));
-                bool changed = false;
-                for (size_t at = text.find(fromText); at != std::string::npos; at = text.find(fromText, at))
-                {
-                    const bool digitBefore = at > 0 && std::isdigit(static_cast<unsigned char>(text[at - 1]));
-                    const bool digitAfter = at + fromText.size() < text.size() && std::isdigit(static_cast<unsigned char>(text[at + fromText.size()]));
-                    if (digitBefore || digitAfter)
-                    {
-                        at += fromText.size();
-                        continue;
-                    }
-                    text.replace(at, fromText.size(), toText);
-                    at += toText.size();
-                    changed = true;
-                }
-                if (changed)
-                {
-                    RestoreHistoryState(text);
-                    m_HistoryCheckRequested = true;
-                }
-            });
-            m_ContentBrowserPanel->SetSceneReferencesCallback([this](std::unordered_set<AssetHandle>& handles)
-            {
-                if (m_EditorScene)
-                    m_EditorScene->CollectAssetReferences(handles);
-                if (m_ActiveScene && m_ActiveScene != m_EditorScene)
-                    m_ActiveScene->CollectAssetReferences(handles);
-            });
-            if (m_CreateBasicScene && Project::GetActive()->GetConfig().StartScene == 0)
-                CreateBasicScene();
-            m_CreateBasicScene = false;
-            {
-                std::error_code error;
-                m_ThumbnailPending = !std::filesystem::exists(ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory()), error);
-                m_ThumbnailTimer = 0.0f;
-            }
-            return true;
-        }
-        NOX_CORE_ERROR("Could not open the project '{}'", path.string());
-        return false;
-    }
-
-    void EditorLayer::SaveProject()
-    {
-        //Project::SaveActive();
+        Application::Get().Shutdown();
     }
 
     void EditorLayer::NewScene()
     {
         CancelHLODBuild("new scene");
-        CancelAcousticBake("new scene");
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop();
         SaveEditorCameras();
-        EndTimelinePreviews();
         m_HoveredEntity = Entity();
-        m_SceneHierarchyPanel.SetSelectedEntity(Entity());
-
         m_EditorScene = CreateRef<Scene>();
         m_ActiveScene = m_EditorScene;
-
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
-
-        m_EditorScenePath = std::filesystem::path();
+        SetSceneContext(m_ActiveScene);
+        m_EditorScenePath.clear();
         m_UnloadUnusedAssetsRequested = true;
+        m_SceneCleanPending = true;
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
     }
 
-    void EditorLayer::OpenScene()
-    {
-        /*std::string filepath = Utility::OpenFile("Nox Scene *.nox\0nox\0");
-        NOX_CORE_ERROR("openscene {0}", filepath);
-        if (!filepath.empty())
-        {
-            OpenScene(filepath);
-        }*/
-    }
-
     void EditorLayer::OpenScene(AssetHandle handle)
     {
-        NOX_CORE_ASSERT(handle);
-        EndTimelinePreviews();
-
-        if (m_PrefabMode.Active)
-        {
-            // Asks first when the prefab has unsaved changes, then opens the scene.
-            RequestExitPrefabMode([this, handle]() { OpenScene(handle); });
-            return;
-        }
-        if (m_SceneState != SceneState::Edit)
-        {
-            OnSceneStop();
-        }
-
-        // Read and built without stopping the editor (a large scene took seconds of frozen window): the file is parsed on a thread,
-        // the entities created a slice a frame (OnUpdate), and the scene swapped in once complete. Another scene opened meanwhile
-        // replaces this load.
         CancelHLODBuild("another scene opened");
-        CancelAcousticBake("another scene opened");
-        m_SceneLoad = CreateScope<SceneLoader>(Project::GetActiveAssetDirectory() / Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle));
+        if (handle == 0 || !Project::GetActive())
+            return;
+        if (m_SceneState != SceneState::Edit)
+            OnSceneStop();
+        const std::filesystem::path rel = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+        if (rel.empty())
+            return;
+        m_SceneLoad = CreateScope<SceneLoader>(Project::GetActiveAssetDirectory() / rel);
         m_SceneLoadHandle = handle;
     }
 
@@ -4007,31 +661,37 @@ namespace Nox
     {
         Scope<SceneLoader> load = std::move(m_SceneLoad);
         const AssetHandle handle = std::exchange(m_SceneLoadHandle, AssetHandle(0));
-        if (!load || load->Failed())
-            return; // the loader logged why; the scene shown stays
-        if (m_PrefabMode.Active)
+        if (!load || !Project::GetActive())
+            return;
+        if (load->Failed())
         {
-            NOX_CORE_WARN("'{}' finished loading while a prefab is open: not opened", load->GetPath().filename().string());
+            Notify(NoxUI::UINotificationSeverity::Error, "Scene not opened",
+                   Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle).filename().string() + " could not be read -- see the Output Log.");
             return;
         }
         if (m_SceneState != SceneState::Edit)
-            OnSceneStop(); // Play / Simulate started while it loaded: they ran on the scene being left
+            OnSceneStop();
 
         Ref<Scene> newScene = load->GetScene();
-        newScene->LoadSubLevelsForEditing(); // its sub-levels' entities, edited together with it (Levels panel)
-        if (m_ViewportSize.x > 0 && m_ViewportSize.y > 0)
-            newScene->OnViewportResize(m_ViewportSize.x, m_ViewportSize.y);
+        newScene->LoadSubLevelsForEditing();
+        if (m_ViewportImage)
+        {
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+            const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+            if (w > 0 && h > 0)
+                newScene->OnViewportResize(w, h);
+        }
 
-        m_HoveredEntity = Entity(); // points into the scene being replaced (freed with it: the hover readout read a dead registry)
+        SaveEditorCameras();
+        m_HoveredEntity = Entity();
         m_EditorScene = newScene;
-        m_SceneHierarchyPanel.SetContext(m_EditorScene);
-
         m_ActiveScene = m_EditorScene;
-        SaveEditorCameras(); // the scene being left
         m_EditorScenePath = Project::GetActive()->GetEditorAssetManager()->GetFilePath(handle);
+        SetSceneContext(m_ActiveScene);
+        RefreshSceneLoadOverlay();
+
         const bool cameraRestored = RestoreEditorCameras();
-        // A world opened for the first time (no saved view): the camera frames its cells, which then load around it -- left wherever
-        // the previous scene had it, it could be outside the world and nothing would load.
         if (!cameraRestored && !m_FocusOnOpen && m_EditorScene->IsWorldPartitioned() && !m_EditorScene->GetWorldPartition().Cells.empty())
         {
             glm::dvec3 lowest(std::numeric_limits<double>::max()), highest(std::numeric_limits<double>::lowest());
@@ -4046,1931 +706,406 @@ namespace Nox
         {
             m_EditorCamera.SetFocalPoint(*m_FocusOnOpen);
             m_EditorCamera.SetDistance(WorldUnits::FromMeters(180.0f));
-            m_EditorCamera.SetOrientation(0.45f, 0.0f); // looking down at it
+            m_EditorCamera.SetOrientation(0.45f, 0.0f);
             m_FocusOnOpen.reset();
         }
-        // A world opens with the cells around what the editor camera looks at (its orbit's focal point: the camera itself orbits up
-        // to hundreds of meters away; the World Partition panel loads others).
         if (m_EditorScene->IsWorldPartitioned())
-            m_EditorScene->LoadWorldCells(m_EditorScene->WorldCellsAround(m_EditorCamera.GetFocalPoint(),
-                                                                          WorldUnits::FromMeters(m_EditorScene->GetWorldPartition().Settings.LoadingRange)));
+        {
+            m_EditorScene->LoadWorldCells(
+                m_EditorScene->WorldCellsAround(
+                    m_EditorCamera.GetFocalPoint(),
+                    WorldUnits::FromMeters(m_EditorScene->GetWorldPartition().Settings.LoadingRange)
+                )
+            );
+        }
         m_UnloadUnusedAssetsRequested = true;
 #if NOX_PROFILE_STATS
         Profiler::Get().ResetStats();
 #endif
+        m_SceneCleanPending = true;
+        Notify(NoxUI::UINotificationSeverity::Info, "Scene opened", m_EditorScenePath.filename().string());
     }
 
-    void EditorLayer::UI_SceneLoadProgress()
+    void EditorLayer::SaveScene(std::function<void(bool saved)> then)
     {
-        if (!m_SceneLoad)
+        if (!m_ActiveScene || !Project::GetActive())
+        {
+            if (then)
+                then(false);
             return;
-        // A small window at the bottom of the screen; the editor stays usable meanwhile.
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y - 60.0f),
-                                ImGuiCond_Always, ImVec2(0.5f, 1.0f));
-        ImGui::SetNextWindowBgAlpha(0.9f);
-        if (ImGui::Begin("##SceneLoad", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-                                                 ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
-        {
-            ImGui::Text("Opening %s", m_SceneLoad->GetPath().filename().string().c_str());
-            ImGui::ProgressBar(m_SceneLoad->GetProgress(), ImVec2(320.0f, 0.0f), m_SceneLoad->GetStage().c_str());
         }
-        ImGui::End();
-    }
-
-    namespace
-    {
-        std::filesystem::path EditorCamerasFile()
+        if (AudioMixer::IsDirty())
+            AudioMixer::Save();
+        if (m_PrefabMode.Active)
         {
-            return Project::GetProjectDirectory() / "Cache" / "EditorCameras.txt";
-        }
-
-        // Lines: <scene path>|<viewport>|<focal x y z> <distance> <pitch> <yaw> <view mode> <ortho half height>
-        std::vector<std::string> ReadEditorCameraLines()
-        {
-            std::vector<std::string> lines;
-            std::ifstream in(EditorCamerasFile());
-            for (std::string line; std::getline(in, line);)
-            {
-                if (!line.empty())
-                    lines.push_back(line);
-            }
-            return lines;
-        }
-    }
-
-    void EditorLayer::SaveEditorCameras()
-    {
-        if (!Project::GetActive() || m_EditorScenePath.empty())
+            // Ctrl+S in Prefab Mode saves the prefab, never the level.
+            const bool saved = SavePrefabMode();
+            if (then)
+                then(saved);
             return;
-        const std::string scene = m_EditorScenePath.generic_string();
-        std::vector<std::string> lines = ReadEditorCameraLines();
-        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|", 0) == 0; });
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            const ViewportSlot& slot = m_Viewports[index];
-            if (index != m_ActiveViewport && !slot.CameraSet)
-                continue;
-            const EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : slot.Camera;
-            const glm::dvec3 focal = camera.GetFocalPoint();
-            char line[512];
-            snprintf(line, sizeof(line), "%s|%d|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g", scene.c_str(), index, focal.x, focal.y, focal.z,
-                     camera.GetDistance(), camera.GetPitch(), camera.GetYaw(), static_cast<int>(camera.GetViewMode()), camera.GetOrthoHalfHeight());
-            lines.push_back(line);
         }
+        if (m_EditorScenePath.empty())
+        {
+            SaveSceneAs(std::move(then)); // (never saved: named first, in a dialog that does not stop the editor)
+            return;
+        }
+        const std::filesystem::path fullPath = m_EditorScenePath.is_absolute()
+            ? m_EditorScenePath
+            : Project::GetActiveAssetDirectory() / m_EditorScenePath;
         std::error_code error;
-        std::filesystem::create_directories(EditorCamerasFile().parent_path(), error);
-        std::ofstream out(EditorCamerasFile(), std::ios::trunc);
-        for (const std::string& line : lines)
-            out << line << "\n";
-    }
-
-    bool EditorLayer::RestoreEditorCameras()
-    {
-        bool activeRestored = false;
-        if (!Project::GetActive() || m_EditorScenePath.empty())
-            return activeRestored;
-        const std::string prefix = m_EditorScenePath.generic_string() + "|";
-        for (const std::string& line : ReadEditorCameraLines())
+        std::filesystem::create_directories(fullPath.parent_path(), error);
+        const auto before = std::filesystem::last_write_time(fullPath, error);
+        const bool existed = !error;
+        SerializeScene(m_ActiveScene, fullPath);
+        const auto after = std::filesystem::last_write_time(fullPath, error);
+        if (error || (existed && after == before))
         {
-            if (line.rfind(prefix, 0) != 0)
-                continue;
-            int index = -1, mode = 0;
-            glm::dvec3 focal(0.0);
-            float distance = 0.0f, pitch = 0.0f, yaw = 0.0f, orthoHalfHeight = 10.0f;
-            if (sscanf(line.c_str() + prefix.size(), "%d|%lf %lf %lf %f %f %f %d %f", &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
-                       &mode, &orthoHalfHeight) != 9 || index < 0 || index >= kMaxViewports || mode < 0 || mode > static_cast<int>(EditorViewMode::Right))
-                continue;
-            EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : m_Viewports[index].Camera;
-            camera.SetViewMode(static_cast<EditorViewMode>(mode));
-            camera.SetFocalPoint(focal);
-            camera.SetDistance(distance);
-            camera.SetOrientation(pitch, yaw);
-            if (camera.IsOrthographic())
-                camera.SetOrthoHalfHeight(orthoHalfHeight);
-            m_Viewports[index].CameraSet = true;
-            activeRestored |= index == m_ActiveViewport;
-        }
-        return activeRestored;
-    }
-
-    void EditorLayer::UI_StatusBar()
-    {
-        // What is still streaming in (§5.11.5): background loads (cooking on a first import), bytes on their way to the
-        // GPU, and meshes that draw but wait for their BLAS.
-        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
-        if (ImGui::BeginViewportSideBar("##StatusBar", ImGui::GetMainViewport(), ImGuiDir_Down, ImGui::GetFrameHeight(), flags))
-        {
-            if (ImGui::BeginMenuBar())
-            {
-                if (ImGui::GetTime() - m_StatusBarRefreshTime >= StatusBarRefreshSeconds)
-                {
-                    const auto assetManager = Project::GetActive()->GetEditorAssetManager();
-                    m_StatusBarCounts = {
-                        .Loading = assetManager->GetLoadingCount(),
-                        .Streaming = assetManager->GetStreamingCount(),
-                        .PendingMB = static_cast<double>(assetManager->GetPendingUploadBytes()) / (1024.0 * 1024.0),
-                        .BlasBuilds = m_Renderer->GetPendingBlasBuilds()
-                    };
-                    m_StatusBarRefreshTime = ImGui::GetTime();
-                }
-                // Model imports cooking in the background (Do Not Combine): a progress bar until the last mesh is done.
-                const EditorAssetManager::ImportProgress import = Project::GetActive()->GetEditorAssetManager()->GetImportProgress();
-                if (import.Imports > 0)
-                {
-                    char overlay[64];
-                    if (import.Total == 0)
-                        snprintf(overlay, sizeof(overlay), "Importing: reading the file...");
-                    else
-                        snprintf(overlay, sizeof(overlay), "Importing meshes %u / %u", import.Done, import.Total);
-                    ImGui::ProgressBar(import.Total == 0 ? 0.0f : static_cast<float>(import.Done) / static_cast<float>(import.Total),
-                                       ImVec2(220.0f, 0.0f), overlay);
-                    ImGui::SameLine();
-                }
-                const StatusBarCounts& counts = m_StatusBarCounts;
-                if (counts.Loading == 0 && counts.Streaming == 0 && counts.BlasBuilds == 0 && import.Imports == 0)
-                    ImGui::TextDisabled("Ready");
-                else
-                    ImGui::Text("Loading %zu asset(s)  |  Streaming %zu texture(s)  |  %.1f MB to upload  |  %zu BLAS build(s) pending",
-                                counts.Loading, counts.Streaming, counts.PendingMB, counts.BlasBuilds);
-                ImGui::EndMenuBar();
-            }
-        }
-        ImGui::End();
-    }
-
-    // Places model assets into the scene being edited at `point`, filed under `folder` ("" = the top level): a single asset is
-    // one model instance, several use each asset's file layout (per-mesh assets) -- either way the instance turns into plain
-    // flat entities once loaded. Used by the viewport (drop point on the ray) and the hierarchy panel (a folder row).
-    float EditorLayer::LocationSnapWorldUnits() const
-    {
-        return WorldUnits::FromCentimeters(kLocationSnapsCm[m_LocationSnapIndex]);
-    }
-
-    glm::dvec3 EditorLayer::SnapLocation(const glm::dvec3& point) const
-    {
-        if (!m_SnapEnabled)
-            return point;
-        const double step = LocationSnapWorldUnits();
-        return glm::round(point / step) * step;
-    }
-
-    // The snap switch and steps, floating at the top left of the viewport (its own window: a click on it is not a click in the scene).
-
-    // Only the viewports dock in the viewport area, like Unreal's level viewport: panels dock around it, never in it. A panel
-    // dropped in it became a tab of a node with no tab bar (one viewport), out of sight behind the viewport.
-    static const ImGuiWindowClass* ViewportWindowClass()
-    {
-        static const ImGuiWindowClass windowClass = []
-        {
-            ImGuiWindowClass value;
-            value.ClassId = ImHashStr("NoxViewportWindow");
-            value.DockingAllowUnclassed = false;
-            return value;
-        }();
-        return &windowClass;
-    }
-
-    void EditorLayer::UI_Viewports()
-    {
-        // The area the viewports dock into: a window in the middle of the editor with a dockspace of its own, so a layout preset
-        // rebuilds only this area and the other panels keep their places.
-        const ImGuiID viewportDockSpace = ImHashStr("NoxViewportDockSpace");
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::Begin("Viewports", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse);
-        ImGui::PopStyleVar();
-        if (m_PendingViewportLayout >= 0 || !ImGui::DockBuilderGetNode(viewportDockSpace))
-        {
-            const int layout = m_PendingViewportLayout >= 0 ? m_PendingViewportLayout : static_cast<int>(ViewportLayout::One);
-            m_PendingViewportLayout = -1;
-            ApplyViewportLayout(static_cast<ViewportLayout>(layout), viewportDockSpace, ImGui::GetContentRegionAvail());
-        }
-        ImGui::DockSpace(viewportDockSpace, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None, ViewportWindowClass());
-        ImGui::End();
-
-        // A panel a layout saved before put in the area floats again, where it can be seen and docked elsewhere.
-        auto undockPanels = [this](auto& self, ImGuiDockNode* node) -> void
-        {
-            if (!node)
-                return;
-            for (ImGuiWindow* window : node->Windows)
-            {
-                const bool isViewport = std::any_of(std::begin(m_Viewports), std::end(m_Viewports),
-                    [window](const ViewportSlot& slot) { return std::strcmp(window->Name, slot.Title) == 0; });
-                if (!isViewport)
-                    ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), window);
-            }
-            self(self, node->ChildNodes[0]);
-            self(self, node->ChildNodes[1]);
-        };
-        undockPanels(undockPanels, ImGui::DockBuilderGetNode(viewportDockSpace));
-
-        // The viewports open last session (once imgui.ini was read, before the first frame), then what to write back.
-        if (s_ViewportIni.Loaded)
-        {
-            s_ViewportIni.Loaded = false;
-            for (int index = 0; index < kMaxViewports; ++index)
-            {
-                ViewportSlot& slot = m_Viewports[index];
-                slot.ShowFlags = s_ViewportIni.Flags[index];
-                slot.ShowGrid = s_ViewportIni.Grid[index] != 0;
-                slot.ResolutionIndex = s_ViewportIni.Resolution[index];
-                slot.Realtime = s_ViewportIni.Realtime[index] != 0;
-                slot.ShowCameraPosition = s_ViewportIni.CameraPosition[index] != 0;
-                if (index > 0 && s_ViewportIni.Open[index])
-                    OpenViewport(index);
-            }
-        }
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            const ViewportSlot& slot = m_Viewports[index];
-            s_ViewportIni.Open[index] = slot.Open;
-            s_ViewportIni.Flags[index] = slot.ShowFlags;
-            s_ViewportIni.Grid[index] = slot.ShowGrid ? 1 : 0;
-            s_ViewportIni.Resolution[index] = slot.ResolutionIndex;
-            s_ViewportIni.Realtime[index] = slot.Realtime ? 1 : 0;
-            s_ViewportIni.CameraPosition[index] = slot.ShowCameraPosition ? 1 : 0;
-            if (index == m_ActiveViewport)
-                s_ViewportIni.View[index] = static_cast<int>(m_EditorCamera.GetViewMode());
-            else if (slot.CameraSet)
-                s_ViewportIni.View[index] = static_cast<int>(slot.Camera.GetViewMode());
-        }
-
-        // A closed viewport hands the tools back to the first one.
-        if (!m_Viewports[m_ActiveViewport].Open)
-            ActivateViewport(0);
-
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            if (!m_Viewports[index].Open)
-                continue;
-            if (index == m_ActiveViewport)
-                UI_ActiveViewport();
-            else
-                UI_ExtraViewport(index);
-        }
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            if (!m_Viewports[index].Open)
-            {
-                m_Viewports[index].Hovered = false;
-                m_Viewports[index].Size = { 0, 0 };
-                if (m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
-                    m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
-            }
-        }
-
-        // Input reaches the layer (the camera, picking, the click that activates another viewport) while a viewport is under the mouse.
-        Application::Get().GetImGuiLayer()->BlockEvents(HoveredViewport() < 0);
-
-        // Assets dragged from the Content Browser over another viewport: it becomes the active one, so the drop lands in it.
-        if (const ImGuiPayload* payload = ImGui::GetDragDropPayload())
-        {
-            const int hovered = HoveredViewport();
-            if (hovered >= 0 && hovered != m_ActiveViewport && (payload->IsDataType("CONTENT_BROWSER_ITEM") || payload->IsDataType("CONTENT_BROWSER_ITEMS")))
-                ActivateViewport(hovered);
-        }
-
-        // The viewport a mouse button went down in keeps the mouse until every button is up again: a drag that leaves it still
-        // steers its camera, and a right-click in another panel never flies the camera.
-        const bool anyButtonDown = ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
-                                   ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-        const bool anyButtonClicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-                                      ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
-        if (!anyButtonDown)
-            m_MouseCaptureViewport = -1;
-        else if (m_MouseCaptureViewport < 0 && anyButtonClicked)
-            m_MouseCaptureViewport = HoveredViewport();
-
-        UI_ViewportOverlay();
-        UI_StreamingTestWorld();
-    }
-
-    void EditorLayer::UI_StreamingTestWorld()
-    {
-        if (m_OpenTestWorldDialog)
-        {
-            ImGui::OpenPopup("Streaming Test World");
-            m_OpenTestWorldDialog = false;
-        }
-        if (ImGui::BeginPopupModal("Streaming Test World", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            StreamingTestWorldGenerator::Settings& settings = m_TestWorldSettings;
-            ImGui::TextWrapped("A world of N x N cells, each with its own terrain mesh and texture (nothing shared), so its data is larger\n"
-                               "than RAM and VRAM. It is written into the project as cooked assets and opened.");
-            ImGui::DragFloat("Size on Disk (GB)", &settings.TargetGigabytes, 0.25f, 0.25f, 200.0f, "%.2f");
-            ImGui::SetItemTooltip("N is chosen for it from the first tile's size. Larger than RAM plus VRAM shows that only what is near the\n"
-                                  "camera is in memory. Start small (2 GB) to try it.");
-            ImGui::DragFloat("Cell Size (m)", &settings.CellSizeMeters, 1.0f, 8.0f, 1024.0f, "%.0f");
-            ImGui::DragFloat("Loading Range (m)", &settings.LoadingRangeMeters, 1.0f, 16.0f, 8192.0f, "%.0f");
-            int quads = static_cast<int>(settings.TileQuads);
-            if (ImGui::DragInt("Tile Quads", &quads, 1.0f, 8, 512))
-                settings.TileQuads = static_cast<uint32_t>(quads);
-            ImGui::SetItemTooltip("Per side: 128 is 33k triangles a tile.");
-            int props = static_cast<int>(settings.PropsPerCell);
-            if (ImGui::DragInt("Props per Cell", &props, 5.0f, 0, 5000))
-                settings.PropsPerCell = static_cast<uint32_t>(std::max(props, 0));
-            ImGui::SetItemTooltip("Rocks, pines and stumps: an entity each (sharing three meshes), so that cells are as dense as an open\n"
-                                  "world's and their entities' cost shows (the fly-through logs it per cell). 0: only the ground.");
-            ImGui::DragFloat("World Offset (km)", &settings.WorldOffsetKm, 10.0f, 0.0f, 100000.0f, "%.0f");
-            ImGui::SetItemTooltip("Large world coordinates test: the whole world this far out along X and Z, the same content as at 0.\n"
-                                  "1000 km is far past where float positions jitter (a few km): anything that drifts, shakes or snaps\n"
-                                  "out there and not at 0 is a precision bug.");
-            int texture = 0; // 256 << index
-            while (texture < 4 && (256u << texture) < settings.TextureSize)
-                ++texture;
-            if (ImGui::Combo("Texture Size", &texture, "256\0" "512\0" "1024\0" "2048\0" "4096\0"))
-                settings.TextureSize = 256u << texture;
-            char folder[256] = {};
-            std::snprintf(folder, sizeof(folder), "%s", settings.Folder.c_str());
-            if (ImGui::InputText("Folder", folder, sizeof(folder)))
-                settings.Folder = folder;
-            char script[256] = {};
-            std::snprintf(script, sizeof(script), "%s", settings.CameraScript.c_str());
-            if (ImGui::InputText("Camera Script", script, sizeof(script)))
-                settings.CameraScript = script;
-            ImGui::SetItemTooltip("A script class put on the camera, e.g. Facerun.StreamingWorldTest (the fly-through test) or\n"
-                                  "Facerun.FlyCamera; empty: none.");
-            ImGui::Spacing();
-            if (ImGui::Button("Generate", ImVec2(120.0f, 0.0f)) && !settings.Folder.empty())
-            {
-                m_TestWorldGeneration = CreateScope<StreamingTestWorldGenerator>(settings);
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
-                ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
-        }
-
-        if (m_TestWorldGeneration)
-        {
-            ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Always);
-            if (ImGui::Begin("Generating the Streaming Test World", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking))
-            {
-                ImGui::ProgressBar(m_TestWorldGeneration->GetProgress(), ImVec2(-1.0f, 0.0f), m_TestWorldGeneration->GetStage().c_str());
-                if (ImGui::Button("Cancel"))
-                {
-                    m_TestWorldGeneration.reset(); // (what was written stays on disk, unregistered)
-                    NOX_CORE_WARN("Streaming test world: cancelled");
-                }
-            }
-            ImGui::End();
-        }
-    }
-
-    void EditorLayer::UI_ActiveViewport()
-    {
-        ViewportSlot& slot = m_Viewports[m_ActiveViewport];
-        // We define "viewport" with no padding an retrieve the rendering area
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::SetNextWindowClass(ViewportWindowClass());
-        const bool visible = ImGui::Begin(slot.Title, m_ActiveViewport == 0 ? nullptr : &slot.Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::PopStyleVar();
-        if (!visible)
-        {
-            // Behind another tab: nothing of it is shown, hovered or picked.
-            m_ViewportFocused = m_ViewportHovered = false;
-            slot.Hovered = false;
-            slot.Size = { 0, 0 };
-            ImGui::End();
+            Notify(NoxUI::UINotificationSeverity::Error, "Scene not saved", fullPath.filename().string() + " could not be written -- see the Output Log.");
+            if (then)
+                then(false);
             return;
         }
-
-        auto viewportMinRegion = ImGui::GetWindowContentRegionMin();
-        auto viewportMaxRegion = ImGui::GetWindowContentRegionMax();
-        auto viewportOffset = ImGui::GetWindowPos();
-        m_ViewportBounds[0] = {viewportMinRegion.x + viewportOffset.x, viewportMinRegion.y + viewportOffset.y};
-        m_ViewportBounds[1] = {viewportMaxRegion.x + viewportOffset.x, viewportMaxRegion.y + viewportOffset.y};
-
-        m_ViewportFocused = ImGui::IsWindowFocused();
-        m_ViewportHovered = ImGui::IsWindowHovered();
-
-        ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-        m_ViewportSize = {viewportPanelSize.x, viewportPanelSize.y};
-
-        // A cancelled drag has no delivery callback, so remove its temporary entity here.
-        if (m_PlacementPreview.Active && !ImGui::IsDragDropActive())
-        {
-            if (m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
-                m_SceneHierarchyPanel.ClearSelection();
-            if (m_PlacementPreview.Root)
-                m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
-            m_PlacementPreview = {};
-        }
-
-        auto* texture = m_Renderer->GetSceneResource();
-        if (texture)
-        {
-            auto textureID = texture->getImTextureID();
-            if (textureID)
-            {
-                // !!! This is where the RenderTarget image is displayed !!!
-                // Whole pixels, like the render target: a fractional size resamples the image by a fraction of a pixel.
-                ImGui::Image(textureID, ImVec2(std::floor(viewportPanelSize.x), std::floor(viewportPanelSize.y)));
-                // (Play looks through the game's camera)
-                m_AxisIndicatorHovered = m_SceneState != SceneState::Play &&
-                                         DrawAxisIndicator(ImGui::GetWindowDrawList(), ImVec2(m_ViewportBounds[0].x, m_ViewportBounds[0].y),
-                                                           ImVec2(m_ViewportBounds[1].x, m_ViewportBounds[1].y), m_EditorCamera, true,
-                                                           m_Viewports[m_ActiveViewport].ShowCameraPosition);
-            }
-        }
-        ImVec2 mousePos = ImGui::GetMousePos();
-
-        // Only initiate box select when dragging on viewport and not using gizmos/alt-orbit
-        if (m_ViewportHovered && !ImGuizmo::IsUsing() && !m_AxisIndicatorHovered && !Input::IsKeyPressed(SDL_SCANCODE_LALT))
-        {
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            {
-                m_BoxSelectStart = { mousePos.x, mousePos.y };
-                m_BoxSelectEnd = m_BoxSelectStart;
-            }
-
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f) && !m_IsBoxSelecting)
-            {
-                if (!GizmoTakesMouse())
-                {
-                    m_IsBoxSelecting = true;
-                }
-            }
-        }
-
-        // Draw visual marquee box using ImGui DrawList while dragging
-        if (m_IsBoxSelecting)
-        {
-            m_BoxSelectEnd = { mousePos.x, mousePos.y };
-
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-            ImVec2 pMin = ImVec2(std::min(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::min(m_BoxSelectStart.y, m_BoxSelectEnd.y));
-            ImVec2 pMax = ImVec2(std::max(m_BoxSelectStart.x, m_BoxSelectEnd.x), std::max(m_BoxSelectStart.y, m_BoxSelectEnd.y));
-
-            // Semi-transparent box fill
-            drawList->AddRectFilled(pMin, pMax, IM_COL32(230, 140, 30, 40));
-            // Solid border outline
-            drawList->AddRect(pMin, pMax, IM_COL32(255, 160, 40, 220), 0.0f, 1.5f);
-        }
-
-        // Commit selection when mouse button is released
-        if (m_IsBoxSelecting && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-        {
-            m_IsBoxSelecting = false;
-
-            bool shift = Input::IsKeyPressed(SDL_SCANCODE_LSHIFT) || Input::IsKeyPressed(SDL_SCANCODE_RSHIFT);
-            bool ctrl = Input::IsKeyPressed(SDL_SCANCODE_LCTRL) || Input::IsKeyPressed(SDL_SCANCODE_RCTRL);
-
-            // If neither Shift nor Ctrl is held, clear previous selection
-            if (!shift && !ctrl)
-            {
-                m_SceneHierarchyPanel.ClearSelection();
-            }
-
-            // Read all unique entity IDs directly from the GPU entity resolve texture
-            std::vector<int32_t> pickedIDs = m_Renderer->getPickedEntityIDs();
-
-            for (int32_t id : pickedIDs)
-            {
-                if (id >= 0)
-                {
-                    Entity entity{ static_cast<entt::entity>(id), m_ActiveScene.get() };
-                    if (entity)
-                    {
-                        if (ctrl)
-                        {
-                            m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
-                        }
-                        else if (!m_SceneHierarchyPanel.IsSelected(entity))
-                        {
-                            auto& list = const_cast<std::vector<Entity>&>(m_SceneHierarchyPanel.GetSelectedEntities());
-                            list.push_back(entity);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (ImGui::BeginDragDropTarget())
-        {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
-                    "CONTENT_BROWSER_ITEM", ImGuiDragDropFlags_AcceptBeforeDelivery))
-            {
-                AssetHandle handle = *(const AssetHandle*)payload->Data;
-                auto type = AssetManager::GetAssetType(handle);
-                if (type == AssetType::Scene && payload->Delivery)
-                    OpenScene(handle);
-                else if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::MeshSource || type == AssetType::Prefab)
-                {
-                    if (!m_PlacementPreview.Active || m_PlacementPreview.Handle != handle)
-                    {
-                        if (m_PlacementPreview.Active &&
-                            m_SceneHierarchyPanel.GetSelectedEntity() == m_PlacementPreview.Root)
-                        {
-                            m_SceneHierarchyPanel.ClearSelection();
-                        }
-                        if (m_PlacementPreview.Active && m_PlacementPreview.Root)
-                            m_ActiveScene->DestroyEntity(m_PlacementPreview.Root);
-                        m_PlacementPreview = {};
-
-                        // The model instance appears at once; its nodes spawn once the model has loaded (and
-                        // been cooked, on a first import) in the background (§5.11.5).
-                        const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-                        std::string entityName = metadata.FilePath.filename().stem().string();
-                        if (entityName.empty())
-                            entityName = "Model";
-                        Entity root = m_ActiveScene->CreateEntity(entityName);
-                        if (type == AssetType::Prefab)
-                        {
-                            auto& prefabInstance = root.AddComponent<PrefabInstanceComponent>();
-                            prefabInstance.Prefab = handle;
-                            prefabInstance.InitTransform = true;
-                        }
-                        else
-                            root.AddComponent<ModelInstanceComponent>().Model = handle;
-                        // A mesh's import scale (static or skeletal) is baked into its cooked geometry, bind pose and animation
-                        // clips (MeshImporter::ApplyImportScale / ApplySkeletonScale / ApplyAnimationScale, like Unreal's Import
-                        // Uniform Scale): the entity starts at Scale 1.0, "as authored".
-                        AssetManager::RequestAsset(handle);
-                        m_SceneHierarchyPanel.SetSelectedEntity(root);
-                        m_PlacementPreview.Root = root;
-
-                        m_PlacementPreview.Handle = handle;
-                        if (m_PlacementPreview.Root)
-                        {
-                            m_PlacementPreview.InitialTranslation =
-                                m_PlacementPreview.Root.GetComponent<TransformComponent>().Translation;
-                        }
-                        m_PlacementPreview.Active = static_cast<bool>(m_PlacementPreview.Root);
-                    }
-
-                    if (m_PlacementPreview.Active && m_PlacementPreview.Root)
-                    {
-                        ImVec2 imguiMouse = ImGui::GetMousePos();
-                        glm::vec2 mouse = {
-                            imguiMouse.x - m_ViewportBounds[0].x,
-                            imguiMouse.y - m_ViewportBounds[0].y
-                        };
-                        glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
-
-                        if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
-                        {
-                            glm::vec2 ndc = {
-                                (mouse.x / viewportSize.x) * 2.0f - 1.0f,
-                                1.0f - (mouse.y / viewportSize.y) * 2.0f
-                            };
-
-                            glm::mat4 inverseViewProjection = glm::inverse(
-                                m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin()));
-                            glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
-                            glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
-                            nearPoint /= nearPoint.w;
-                            farPoint /= farPoint.w;
-
-                            glm::vec3 rayOrigin = glm::vec3(nearPoint);
-                            glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
-
-                            // Keep the preview on a plane facing the editor camera. A horizontal
-                            // ground plane becomes parallel to the ray in a level side view.
-                            glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
-                            float rayPlaneDenominator = glm::dot(rayDirection, planeNormal);
-                            if (std::abs(rayPlaneDenominator) > 0.0001f)
-                            {
-                                float distance = glm::dot(
-                                    m_Renderer->ToRenderSpace(m_PlacementPreview.InitialTranslation) - rayOrigin,
-                                    planeNormal
-                                ) / rayPlaneDenominator;
-                                if (distance >= 0.0f)
-                                {
-                                    auto& transform = m_PlacementPreview.Root.GetComponent<TransformComponent>();
-                                    transform.Translation = SnapLocation(m_Renderer->FromRenderSpace(rayOrigin + rayDirection * distance));
-                                    m_PlacementPreview.Root.MarkTransformDirty();
-                                }
-                            }
-                        }
-
-                        if (payload->Delivery)
-                        {
-                            m_SceneHierarchyPanel.SetSelectedEntity(m_PlacementPreview.Root);
-                            m_PlacementPreview = {};
-                        }
-                    }
-                }
-            }
-
-            // Several assets dragged together (Ctrl+A in the Content Browser): every model lands under one group at the
-            // drop point, each at the place its file had it (per-mesh assets carry the file's instance transforms).
-            if (const ImGuiPayload* multiPayload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEMS"))
-            {
-                const size_t count = multiPayload->DataSize / sizeof(AssetHandle);
-                const AssetHandle* handles = static_cast<const AssetHandle*>(multiPayload->Data);
-
-                glm::dvec3 dropPoint(0.0);
-                const glm::vec2 viewportSize = m_ViewportBounds[1] - m_ViewportBounds[0];
-                if (viewportSize.x > 0.0f && viewportSize.y > 0.0f)
-                {
-                    const ImVec2 imguiMouse = ImGui::GetMousePos();
-                    const glm::vec2 ndc = {
-                        ((imguiMouse.x - m_ViewportBounds[0].x) / viewportSize.x) * 2.0f - 1.0f,
-                        1.0f - ((imguiMouse.y - m_ViewportBounds[0].y) / viewportSize.y) * 2.0f
-                    };
-                    const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin()));
-                    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
-                    glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
-                    nearPoint /= nearPoint.w;
-                    farPoint /= farPoint.w;
-                    const glm::vec3 rayOrigin = glm::vec3(nearPoint);
-                    const glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
-
-                    // Same plane as a single drop: through the origin, facing the editor camera.
-                    const glm::vec3 planeNormal = m_EditorCamera.GetForwardDirection();
-                    const float denominator = glm::dot(rayDirection, planeNormal);
-                    if (std::abs(denominator) > 0.0001f)
-                    {
-                        const float distance = glm::dot(m_Renderer->ToRenderSpace(glm::dvec3(0.0)) - rayOrigin, planeNormal) / denominator;
-                        if (distance >= 0.0f)
-                            dropPoint = SnapLocation(m_Renderer->FromRenderSpace(rayOrigin + rayDirection * distance));
-                    }
-                }
-
-                // Like Unreal: no group entity, no folder -- every piece lands at the top level of the outliner.
-                PlaceAssets(std::vector<AssetHandle>(handles, handles + count), dropPoint, std::string());
-            }
-            ImGui::EndDragDropTarget();
-        }
-
-        // Gizmos
-        //maybe be a callback you subscribe to instead
-        Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-        if (selectedEntity && m_GizmoType != -1)
-        {
-            ImGuizmo::SetOrthographic(m_EditorCamera.IsOrthographic());
-            ImGuizmo::SetDrawlist();
-
-            ImGuizmo::SetRect(m_ViewportBounds[0].x, m_ViewportBounds[0].y, m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y);
-
-            // Camera
-
-            // Runtime camera from entity
-            // auto cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-            // const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
-            // const glm::mat4& cameraProjection = camera.GetProjection();
-            // glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
-
-            // Editor camera
-            const glm::mat4& cameraProjection = m_EditorCamera.GetGizmoProjection();
-            glm::mat4 cameraView = m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin());
-
-            // Grab the WORLD transform for ImGuizmo, in the renderer's space (large world coordinates: the view is relative to it too)
-            glm::mat4 worldTransform = m_Renderer->ToRenderSpace(selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix);
-
-            // Snapping
-            // The toolbar switch, inverted while Ctrl is held; the steps are the ones chosen there.
-            const bool snap = m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL);
-            float snapValue = LocationSnapWorldUnits();
-            if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
-                snapValue = kRotationSnaps[m_RotationSnapIndex];
-            else if (m_GizmoType == ImGuizmo::OPERATION::SCALE)
-                snapValue = kScaleSnaps[m_ScaleSnapIndex];
-
-            float snapValues[3] = {snapValue, snapValue, snapValue};
-
-            glm::mat4 deltaMatrix(1.0f);
-            const glm::mat4 beforeManipulate = worldTransform;
-
-            ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
-                                 static_cast<ImGuizmo::OPERATION>(m_GizmoType), ImGuizmo::LOCAL,
-                                 glm::value_ptr(worldTransform), glm::value_ptr(deltaMatrix), snap ? snapValues : nullptr);
-
-            // Snapping feedback while a translation is dragged (the drag's start is the pose in its first frame).
-            const bool usingGizmo = ImGuizmo::IsUsing();
-            if (usingGizmo && !m_GizmoWasUsing)
-                m_GizmoDragStart = beforeManipulate;
-            m_GizmoWasUsing = usingGizmo;
-            if (usingGizmo && snap && m_GizmoType == ImGuizmo::OPERATION::TRANSLATE)
-                DrawTranslationSnapFeedback(cameraView, cameraProjection, worldTransform);
-
-            if (ImGuizmo::IsUsing())
-            {
-                const auto& selectedEntities = m_SceneHierarchyPanel.GetSelectedEntities();
-                if (selectedEntities.size() > 1)
-                {
-                    for (auto entity : selectedEntities)
-                    {
-                        if (!entity) continue;
-
-                        // If this entity's parent is ALSO selected, skip it (the parent moving will already move it)
-                        if (entity.HasComponent<RelationshipComponent>())
-                        {
-                            UUID parentUUID = entity.GetComponent<RelationshipComponent>().Parent;
-                            if (parentUUID != 0)
-                            {
-                                Entity parent = m_ActiveScene->GetEntityByUUID(parentUUID);
-                                if (parent && m_SceneHierarchyPanel.IsSelected(parent))
-                                    continue;
-                            }
-                        }
-
-                        const glm::mat4 currentWorld = m_Renderer->ToRenderSpace(entity.GetComponent<WorldTransformComponent>().WorldMatrix);
-                        entity.SetWorldTransform(m_Renderer->FromRenderSpace(deltaMatrix * currentWorld));
-                    }
-                }
-                else
-                {
-                    // One single line does all the math, finds the parent, and marks it dirty!
-                    selectedEntity.SetWorldTransform(m_Renderer->FromRenderSpace(worldTransform));
-                }
-            }
-        }
-
-        UI_MeasureOverlay();
-
-        slot.Bounds[0] = m_ViewportBounds[0];
-        slot.Bounds[1] = m_ViewportBounds[1];
-        slot.Size = m_ViewportSize;
-        slot.Hovered = m_ViewportHovered;
-
-        // With more than one viewport the active one is framed (Unreal's highlight).
-        if (OpenViewportCount() > 1)
-        {
-            ImGui::GetWindowDrawList()->AddRect(ImVec2(m_ViewportBounds[0].x + 1.0f, m_ViewportBounds[0].y + 1.0f),
-                                                ImVec2(m_ViewportBounds[1].x - 1.0f, m_ViewportBounds[1].y - 1.0f), IM_COL32(255, 170, 40, 255), 0.0f, 2.0f);
-        }
-
-        ImGui::End(); // End viewport
+        AdoptStartSceneIfNone(fullPath);
+        CaptureProjectThumbnail();
+        m_SceneDirty = false;
+        m_HistoryPositionSeen = m_History.GetPosition();
+        Notify(NoxUI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
+        if (then)
+            then(true);
     }
 
-    void EditorLayer::UI_ExtraViewport(int index)
+    void EditorLayer::SaveSceneAs(std::function<void(bool saved)> then)
     {
-        ViewportSlot& slot = m_Viewports[index];
-        ImGui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::SetNextWindowClass(ViewportWindowClass());
-        const bool visible = ImGui::Begin(slot.Title, index == 0 ? nullptr : &slot.Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::PopStyleVar();
-        slot.Hovered = false;
-        if (!visible)
+        if (!m_ActiveScene || !Project::GetActive())
         {
-            slot.Size = { 0, 0 };
-            ImGui::End();
+            if (then)
+                then(false);
             return;
         }
-
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const ImVec2 available = ImGui::GetContentRegionAvail();
-        slot.Bounds[0] = { origin.x, origin.y };
-        slot.Bounds[1] = { origin.x + available.x, origin.y + available.y };
-        slot.Size = { static_cast<uint32_t>(std::max(available.x, 0.0f)), static_cast<uint32_t>(std::max(available.y, 0.0f)) };
-        // Also while something is dragged (an asset from the Content Browser activates the viewport it is dragged over).
-        slot.Hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-
-        // Rendered this frame by the renderer (SubmitExtraViewports, in OnUpdate) at the size the window had last frame.
-        auto* texture = slot.Submitted ? m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)) : nullptr;
-        if (texture && texture->getImTextureID() && available.x >= 1.0f && available.y >= 1.0f)
-            ImGui::Image(texture->getImTextureID(), ImVec2(std::floor(available.x), std::floor(available.y)));
-
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        if (texture) // (not clickable here: a click makes this the active viewport first)
-            DrawAxisIndicator(draw, origin, ImVec2(origin.x + available.x, origin.y + available.y), slot.Camera, false, slot.ShowCameraPosition);
-
-        // Where the gizmo of the selected entity is (its axes, not draggable here: a click makes this the active viewport, where it is).
-        Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-        if (texture && selectedEntity && m_GizmoType != -1 && m_SceneState != SceneState::Play && selectedEntity.HasComponent<WorldTransformComponent>())
+        if (m_PrefabMode.Active)
         {
-            const glm::mat4 world = m_Renderer->ToRenderSpace(selectedEntity.GetComponent<WorldTransformComponent>().WorldMatrix);
-            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
-            auto toScreen = [&](const glm::vec3& point, ImVec2& out) -> bool
-            {
-                const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
-                if (clip.w <= 1e-6f)
-                    return false;
-                const glm::vec2 ndc = glm::vec2(clip) / clip.w;
-                out = ImVec2(origin.x + (ndc.x * 0.5f + 0.5f) * available.x, origin.y + (0.5f - ndc.y * 0.5f) * available.y);
-                return true;
-            };
-            const glm::vec3 center = glm::vec3(world[3]);
-            ImVec2 centerOnScreen;
-            if (toScreen(center, centerOnScreen))
-            {
-                const ImU32 axisColors[3] = { IM_COL32(230, 60, 60, 220), IM_COL32(80, 210, 80, 220), IM_COL32(70, 120, 240, 220) };
-                const float length = std::min(available.x, available.y) * 0.09f;
-                const float probe = WorldUnits::FromMeters(0.01f);
-                for (int axis = 0; axis < 3; ++axis)
-                {
-                    const glm::vec3 direction = glm::length(glm::vec3(world[axis])) > 0.0f ? glm::normalize(glm::vec3(world[axis])) : glm::vec3(0.0f);
-                    ImVec2 probeOnScreen;
-                    if (!toScreen(center + direction * probe, probeOnScreen))
-                        continue;
-                    ImVec2 delta(probeOnScreen.x - centerOnScreen.x, probeOnScreen.y - centerOnScreen.y);
-                    const float deltaLength = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-                    if (deltaLength < 1e-4f)
-                        continue; // the axis points at the camera
-                    const ImVec2 end(centerOnScreen.x + delta.x / deltaLength * length, centerOnScreen.y + delta.y / deltaLength * length);
-                    draw->AddLine(centerOnScreen, end, axisColors[axis], 2.0f);
-                    if (m_GizmoType == ImGuizmo::OPERATION::SCALE)
-                        draw->AddRectFilled(ImVec2(end.x - 3.0f, end.y - 3.0f), ImVec2(end.x + 3.0f, end.y + 3.0f), axisColors[axis]);
-                    else if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
-                        draw->AddCircle(end, 4.0f, axisColors[axis], 0, 2.0f);
-                    else
-                        draw->AddCircleFilled(end, 3.5f, axisColors[axis]);
-                }
-                draw->AddCircleFilled(centerOnScreen, 3.0f, IM_COL32(255, 255, 255, 200));
-            }
+            const bool saved = SavePrefabMode(); // (a prefab is saved where it is; Duplicate in the Content Browser copies it)
+            if (then)
+                then(saved);
+            return;
         }
-
-        // Its view in the corner (with what it shows besides lit geometry). A click or a scroll in it makes it the active viewport
-        // (OnEvent), with every tool.
-        std::string viewLabel = kViewModeNames[static_cast<int>(slot.Camera.GetViewMode())];
-        if (slot.ShowFlags & Renderer::ExtraViewUnlit)
-            viewLabel += " | Unlit";
-        if (slot.ShowFlags & Renderer::ExtraViewWireframe)
-            viewLabel += " | Wireframe";
-        if (slot.ResolutionIndex > 0)
-            viewLabel += slot.ResolutionIndex == 1 ? " | 1/2 res" : " | 1/4 res";
-        if (!slot.Realtime)
-            viewLabel += " | Realtime off";
-        const char* viewName = viewLabel.c_str();
-        const ImVec2 textSize = ImGui::CalcTextSize(viewName);
-        const ImVec2 labelMin(origin.x + 8.0f, origin.y + 8.0f);
-        draw->AddRectFilled(labelMin, ImVec2(labelMin.x + textSize.x + 12.0f, labelMin.y + textSize.y + 6.0f), IM_COL32(0, 0, 0, 160), 3.0f);
-        draw->AddText(ImVec2(labelMin.x + 6.0f, labelMin.y + 3.0f), IM_COL32(230, 230, 230, 255), viewName);
-
-        ImGui::End();
+        // The dialog does not stop the editor (E7); the scene is written when it answers.
+        Utility::SaveFileAsync("Nox Scene *.nox\0nox\0", [this, then](std::string chosen)
+        {
+            const bool saved = !chosen.empty() && SaveSceneTo(chosen);
+            if (then)
+                then(saved);
+        });
     }
 
-    bool EditorLayer::DrawAxisIndicator(ImDrawList* draw, ImVec2 min, ImVec2 max, EditorCamera& camera, bool clickable, bool showPosition)
+    bool EditorLayer::SaveSceneTo(std::filesystem::path path)
     {
-        if (max.x - min.x < 90.0f || max.y - min.y < 90.0f)
+        if (!m_ActiveScene || !Project::GetActive() || path.empty() || m_PrefabMode.Active)
             return false;
-        clickable &= !camera.IsOrthographic(); // (an orthographic view's direction is its view mode's: Top, Front, ...)
-        // A turn under way (a letter clicked): eased over 0.2 s.
-        if (clickable && m_ViewTurn.Active)
+        m_AssetEditors.EndPreviews();
+        if (!path.has_extension())
+            path += ".nox";
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        m_ActiveScene->CopyWorldCellsTo(path);
+        SerializeScene(m_ActiveScene, path);
+        if (!std::filesystem::exists(path, error))
         {
-            m_ViewTurn.Time = std::min(m_ViewTurn.Time + ImGui::GetIO().DeltaTime / 0.2f, 1.0f);
-            const float t = m_ViewTurn.Time * m_ViewTurn.Time * (3.0f - 2.0f * m_ViewTurn.Time);
-            camera.SetOrientation(glm::mix(m_ViewTurn.FromPitch, m_ViewTurn.ToPitch, t), glm::mix(m_ViewTurn.FromYaw, m_ViewTurn.ToYaw, t));
-            m_ViewTurn.Active = m_ViewTurn.Time < 1.0f;
+            Notify(NoxUI::UINotificationSeverity::Error, "Scene not saved", path.filename().string() + " could not be written -- see the Output Log.");
+            return false;
         }
 
-        // Each world axis turned into the view (x right, y up, z toward the viewer), drawn back to front.
-        const glm::mat3 view(camera.GetGizmoView(camera.GetPosition()));
-        const ImVec2 center(min.x + 40.0f, max.y - 40.0f);
-        constexpr float kLength = 24.0f, kLabelRadius = 8.5f;
-        struct Axis { glm::vec3 World; glm::vec3 InView; ImU32 Color; const char* Name; };
-        Axis axes[3] = { { { 1, 0, 0 }, {}, IM_COL32(226, 74, 74, 255), "X" },
-                         { { 0, 1, 0 }, {}, IM_COL32(110, 196, 72, 255), "Y" },
-                         { { 0, 0, 1 }, {}, IM_COL32(74, 134, 232, 255), "Z" } };
-        for (Axis& axis : axes)
-            axis.InView = view * axis.World;
-        std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) { return a.InView.z < b.InView.z; });
-        const ImVec2 mouse = ImGui::GetMousePos();
-        const Axis* hovered = nullptr;
-        if (clickable && ImGui::IsWindowHovered())
-        {
-            float nearest = kLabelRadius + 2.0f;
-            for (const Axis& axis : axes)
-            {
-                const ImVec2 end(center.x + axis.InView.x * kLength, center.y - axis.InView.y * kLength);
-                const float distance = std::hypot(mouse.x - end.x, mouse.y - end.y);
-                if (distance < nearest)
-                {
-                    nearest = distance;
-                    hovered = &axis;
-                }
-            }
-        }
-        for (const Axis& axis : axes)
-        {
-            const ImVec2 end(center.x + axis.InView.x * kLength, center.y - axis.InView.y * kLength);
-            const bool isHovered = hovered == &axis;
-            // A thin shadow under each line keeps it readable over a bright sky.
-            draw->AddLine(ImVec2(center.x + 1.0f, center.y + 1.0f), ImVec2(end.x + 1.0f, end.y + 1.0f), IM_COL32(0, 0, 0, 110), 2.0f);
-            draw->AddLine(center, end, axis.Color, 2.0f);
-            const ImVec2 textSize = ImGui::CalcTextSize(axis.Name);
-            if (isHovered)
-                draw->AddCircleFilled(end, kLabelRadius, axis.Color, 20);
-            else
-                draw->AddCircleFilled(end, kLabelRadius - 1.5f, IM_COL32(20, 20, 22, 170), 20);
-            draw->AddText(ImVec2(end.x - textSize.x * 0.5f, end.y - textSize.y * 0.5f), isHovered ? IM_COL32(255, 255, 255, 255) : axis.Color, axis.Name);
-        }
+        const std::filesystem::path rel = std::filesystem::relative(path, Project::GetActiveAssetDirectory(), error);
+        if (!error && !rel.empty() && !rel.native().starts_with(std::filesystem::path("..").native()))
+            m_EditorScenePath = rel;
+        else
+            m_EditorScenePath = path;
 
-        if (hovered)
-        {
-            // View from the axis (looking back along it toward the origin); from the opposite side when already looking that way.
-            const glm::vec3 forward = glm::normalize(-glm::vec3(glm::inverse(view)[2]));
-            const bool fromOpposite = glm::dot(forward, -hovered->World) > 0.999f;
-            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-            ImGui::SetTooltip("View from %s%s (click again: from %s%s)", fromOpposite ? "-" : "+", hovered->Name, fromOpposite ? "+" : "-", hovered->Name);
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            {
-                const glm::vec3 target = fromOpposite ? hovered->World : -hovered->World;
-                // EditorCamera's orientation is quat(-pitch, -yaw, 0): forward = (-cos a sin b, sin a, -cos a cos b), a = -pitch, b = -yaw.
-                const float a = std::asin(std::clamp(target.y, -1.0f, 1.0f));
-                float b = std::abs(target.y) > 0.999f ? -camera.GetYaw() : std::atan2(-target.x, -target.z); // (straight up / down: the yaw kept)
-                const float fromYaw = camera.GetYaw();
-                float toYaw = -b;
-                toYaw = fromYaw + std::remainder(toYaw - fromYaw, glm::two_pi<float>()); // the short way round
-                m_ViewTurn = { true, camera.GetPitch(), fromYaw, -a, toYaw, 0.0f };
-            }
-        }
-
-        if (showPosition)
-        {
-            const glm::dvec3 position = camera.GetPosition();
-            const double meters = static_cast<double>(WorldUnits::ToMeters(1.0f));
-            char text[160];
-            std::snprintf(text, sizeof(text), "X %.0f  Y %.0f  Z %.0f  (%.1f, %.1f, %.1f m)", position.x, position.y, position.z,
-                          position.x * meters, position.y * meters, position.z * meters);
-            const ImVec2 textPos(center.x + kLength + 22.0f, max.y - 22.0f);
-            const ImVec2 size = ImGui::CalcTextSize(text);
-            draw->AddRectFilled(ImVec2(textPos.x - 5.0f, textPos.y - 3.0f), ImVec2(textPos.x + size.x + 5.0f, textPos.y + size.y + 3.0f), IM_COL32(20, 20, 22, 170), 3.0f);
-            draw->AddText(textPos, IM_COL32(225, 225, 225, 255), text);
-        }
-        return hovered != nullptr;
+        AdoptStartSceneIfNone(path);
+        CaptureProjectThumbnail();
+        m_ContentBrowserPanel.Refresh();
+        m_SceneDirty = false;
+        m_HistoryPositionSeen = m_History.GetPosition();
+        Notify(NoxUI::UINotificationSeverity::Success, "Scene saved", m_EditorScenePath.generic_string());
+        return true;
     }
 
-    bool EditorLayer::GizmoTakesMouse() const
+    void EditorLayer::SerializeScene(const Ref<Scene>& scene, const std::filesystem::path& path)
     {
-        if (m_AxisIndicatorHovered)
-            return true;
-        const Entity selected = m_SceneHierarchyPanel.GetSelectedEntity();
-        return selected && m_GizmoType != -1 && ImGuizmo::IsOver();
+        SceneImporter::SaveScene(scene, path);
     }
 
-    void EditorLayer::ApplyViewportLayout(ViewportLayout layout, ImGuiID dockSpace, ImVec2 size)
+    void EditorLayer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder)
     {
-        // Everything docked in the area is undocked, the area split for the layout, and each viewport docked into its cell. The
-        // first viewport keeps the area's central node (the splits put the new cells right / below), so it is never left empty.
-        int count = 1;
-        switch (layout)
-        {
-        case ViewportLayout::One: count = 1; break;
-        case ViewportLayout::TwoSideBySide:
-        case ViewportLayout::TwoStacked: count = 2; break;
-        case ViewportLayout::Three: count = 3; break;
-        case ViewportLayout::Four: count = 4; break;
-        }
-
-        ImGui::DockBuilderRemoveNode(dockSpace);
-        ImGui::DockBuilderAddNode(dockSpace, ImGuiDockNodeFlags_DockSpace);
-        ImGui::DockBuilderSetNodeSize(dockSpace, ImVec2(std::max(size.x, 64.0f), std::max(size.y, 64.0f)));
-
-        ImGuiID cells[kMaxViewports] = { dockSpace, 0, 0, 0 };
-        switch (layout)
-        {
-        case ViewportLayout::One:
-            break;
-        case ViewportLayout::TwoSideBySide:
-            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Right, 0.5f, &cells[1], &cells[0]);
-            break;
-        case ViewportLayout::TwoStacked:
-            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Down, 0.5f, &cells[1], &cells[0]);
-            break;
-        case ViewportLayout::Three:
-        {
-            // A big one on the left, two stacked on the right.
-            ImGuiID right = 0;
-            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Right, 0.4f, &right, &cells[0]);
-            ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &cells[2], &cells[1]);
-            break;
-        }
-        case ViewportLayout::Four:
-        {
-            // 2 x 2: 1 2 on top, 3 4 below.
-            ImGuiID left = 0, right = 0;
-            ImGui::DockBuilderSplitNode(dockSpace, ImGuiDir_Right, 0.5f, &right, &left);
-            ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.5f, &cells[2], &cells[0]);
-            ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &cells[3], &cells[1]);
-            break;
-        }
-        }
-
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            if (index < count)
-            {
-                OpenViewport(index);
-                ImGui::DockBuilderDockWindow(m_Viewports[index].Title, cells[index]);
-            }
-            else
-                m_Viewports[index].Open = false;
-        }
-        // A single viewport has no tab bar, like the editor always had.
-        if (layout == ViewportLayout::One)
-        {
-            if (ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockSpace))
-                node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
-        }
-        ImGui::DockBuilderFinish(dockSpace);
-    }
-
-    void EditorLayer::OpenViewport(int index)
-    {
-        ViewportSlot& slot = m_Viewports[index];
-        if (!slot.CameraSet)
-        {
-            // A new viewport starts from the active camera, in a view of its own: perspective, top, front, right (or the one it had
-            // last session).
-            slot.Camera = m_EditorCamera;
-            slot.Camera.SetViewMode(static_cast<EditorViewMode>(s_ViewportIni.View[index]));
-            slot.CameraSet = true;
-        }
-        slot.Open = true;
-    }
-
-    void EditorLayer::ActivateViewport(int index)
-    {
-        if (index < 0 || index >= kMaxViewports || index == m_ActiveViewport)
+        if (!m_ActiveScene || !Project::GetActive())
             return;
-
-        ViewportSlot& previous = m_Viewports[m_ActiveViewport];
-        ViewportSlot& next = m_Viewports[index];
-        if (!next.CameraSet)
-            OpenViewport(index);
-
-        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
-        previous.Camera = m_EditorCamera;
-        previous.CameraSet = true;
-        m_EditorCamera = next.Camera;
-        m_ActiveViewport = index;
-
-        // The tools follow at once: this frame's update runs before the window is drawn again.
-        m_ViewportBounds[0] = next.Bounds[0];
-        m_ViewportBounds[1] = next.Bounds[1];
-        if (next.Size.x > 0 && next.Size.y > 0)
+        m_Selection.Clear();
+        Entity lastCreated;
+        for (AssetHandle handle : handles)
         {
-            m_ViewportSize = next.Size;
-            m_EditorCamera.SetViewportSize(static_cast<float>(next.Size.x), static_cast<float>(next.Size.y));
-        }
-        m_ViewportHovered = next.Hovered;
-        m_HoveredEntity = Entity();
-        m_IsBoxSelecting = false;
-        SyncOrthoRenderSettings(wasOrthographic);
-        m_Renderer->ResetCameraHistory();
-    }
-
-    int EditorLayer::HoveredViewport() const
-    {
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            if (m_Viewports[index].Open && m_Viewports[index].Hovered)
-                return index;
-        }
-        return -1;
-    }
-
-    int EditorLayer::OpenViewportCount() const
-    {
-        int count = 0;
-        for (const ViewportSlot& slot : m_Viewports)
-            count += slot.Open ? 1 : 0;
-        return count;
-    }
-
-    void EditorLayer::SubmitExtraViewports(Timestep ts)
-    {
-        const float cell = std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
-        for (int index = 0; index < kMaxViewports; ++index)
-        {
-            ViewportSlot& slot = m_Viewports[index];
-            slot.Submitted = false;
-            if (index == m_ActiveViewport || !slot.Open || slot.Size.x == 0 || slot.Size.y == 0)
+            const AssetType type = AssetManager::GetAssetType(handle);
+            if (type == AssetType::Prefab && m_PrefabMode.Active && handle == m_PrefabMode.Prefab)
             {
-                slot.DrawnSize = { 0, 0 }; // drawn afresh when it is an extra view again
+                // (an instance of the prefab inside itself would spawn itself without end)
+                Notify(NoxUI::UINotificationSeverity::Warning, "Not placed", "A prefab cannot contain an instance of itself.");
                 continue;
             }
-
-            const float width = static_cast<float>(slot.Size.x);
-            const float height = static_cast<float>(slot.Size.y);
-            if (slot.Camera.GetAspectRatio() != width / height)
-                slot.Camera.SetViewportSize(width, height);
-            // Its own easing (an ortho zoom set before it was put aside); no mouse input reaches it.
-            slot.Camera.OnUpdate(ts, false);
-
-            // Lower resolution (M3): the image is drawn smaller and stretched over the window.
-            const uint32_t divisor = 1u << std::clamp(slot.ResolutionIndex, 0, 2);
-            const glm::uvec2 drawSize = glm::max(slot.Size / divisor, glm::uvec2(1));
-            uint32_t flags = slot.ShowFlags;
-
-            // Realtime off (UE's viewport option): drawn again only when what it shows changed -- its camera, size or options, the
-            // scene (an edit, undo or redo), the selection, a gizmo drag in progress -- and every two seconds (assets streaming in).
-            // In Play it is always realtime.
-            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
-            size_t selection = m_SceneHierarchyPanel.GetSelectedEntities().size();
-            for (const Entity& selected : m_SceneHierarchyPanel.GetSelectedEntities())
-                selection = selection * 31 + static_cast<uint32_t>(selected);
-            slot.SinceDrawn += ts.GetSeconds();
-            if (!slot.Realtime && m_SceneState == SceneState::Edit && slot.DrawnSize == drawSize && slot.DrawnFlags == flags &&
-                slot.DrawnViewProjection == viewProjection && slot.DrawnHistory == m_History.GetPosition() && slot.DrawnSelection == selection &&
-                !ImGuizmo::IsUsing() && slot.SinceDrawn < 2.0f && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+            if (type == AssetType::Prefab)
             {
-                slot.Submitted = true; // the last image stays on screen
+                const AssetMetadata& prefabMetadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+                std::string prefabName = prefabMetadata.FilePath.filename().stem().string();
+                Entity prefabRoot = m_ActiveScene->CreateEntity(prefabName.empty() ? "Prefab" : prefabName);
+                auto& prefabInstance = prefabRoot.AddComponent<PrefabInstanceComponent>();
+                prefabInstance.Prefab = handle;
+                prefabInstance.InitTransform = true;
+                prefabRoot.GetComponent<TransformComponent>().Translation = point;
+                if (!folder.empty())
+                    prefabRoot.AddComponent<FolderComponent>(folder);
+                prefabRoot.MarkTransformDirty();
+                AssetManager::RequestAsset(handle);
+                lastCreated = prefabRoot;
                 continue;
             }
-            slot.DrawnSize = drawSize;
-            slot.DrawnFlags = flags;
-            slot.DrawnViewProjection = viewProjection;
-            slot.DrawnHistory = m_History.GetPosition();
-            slot.DrawnSelection = selection;
-            slot.SinceDrawn = 0.0f;
+            if (type != AssetType::Mesh && type != AssetType::StaticMesh)
+                continue;
 
-            // The grid as DrawWorldGrid would draw it for this camera.
-            shaderio::PushConstantGrid grid{};
-            const bool showGrid = m_SceneState != SceneState::Play && m_ShowGrid && slot.ShowGrid;
-            if (showGrid)
-            {
-                const EditorViewMode mode = slot.Camera.GetViewMode();
-                const int axis = (mode == EditorViewMode::Front || mode == EditorViewMode::Back) ? 2 : (mode == EditorViewMode::Left || mode == EditorViewMode::Right) ? 0 : 1;
-                grid = slot.Camera.IsOrthographic() ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, axis, slot.Camera.GetOrthoHalfHeight())
-                                                    : Renderer2D::MakeGrid(slot.Camera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, slot.Camera.GetDistance());
-            }
-            if (m_SceneState == SceneState::Play)
-                flags &= ~Renderer::ExtraViewOutline;
-            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, nri::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
-            slot.Submitted = true;
+            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
+            std::string entityName = metadata.FilePath.filename().stem().string();
+            Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
+            auto& instance = root.AddComponent<ModelInstanceComponent>();
+            instance.Model = handle;
+            instance.AtFileLayout = true;
+            root.GetComponent<TransformComponent>().Translation = point;
+            if (!folder.empty())
+                root.AddComponent<FolderComponent>(folder);
+            root.MarkTransformDirty();
+            AssetManager::RequestAsset(handle);
+            lastCreated = root;
         }
+        if (lastCreated)
+            m_Selection.Select(lastCreated);
+        m_SceneHierarchyPanel.MarkDirty();
+        m_HistoryCheckRequested = true;
     }
 
-    void EditorLayer::UI_ViewportOptionsMenu(int index)
+    void EditorLayer::CreateShape(PrimitiveShape shape, const std::string& folder)
     {
-        ViewportSlot& slot = m_Viewports[index];
-        const std::string label = std::string(slot.Title) + " Options";
-        if (!ImGui::BeginMenu(label.c_str()))
+        if (!m_ActiveScene)
             return;
-        ImGui::TextDisabled("While it is not the active viewport (that one is the full render)");
-        auto flag = [&](const char* name, uint32_t bit, bool inverted, const char* tooltip)
-        {
-            bool on = ((slot.ShowFlags & bit) != 0) != inverted;
-            if (ImGui::MenuItem(name, nullptr, &on))
-                slot.ShowFlags = (on != inverted) ? (slot.ShowFlags | bit) : (slot.ShowFlags & ~bit);
-            ImGui::SetItemTooltip("%s", tooltip);
-        };
-        bool lit = (slot.ShowFlags & Renderer::ExtraViewUnlit) == 0;
-        if (ImGui::MenuItem("Lit", nullptr, lit))
-            slot.ShowFlags &= ~Renderer::ExtraViewUnlit;
-        if (ImGui::MenuItem("Unlit", nullptr, !lit))
-            slot.ShowFlags |= Renderer::ExtraViewUnlit;
-        ImGui::SetItemTooltip("Base colors without lighting or exposure.");
-        ImGui::Separator();
-        flag("Wireframe", Renderer::ExtraViewWireframe, false, "The triangles' edges over the image.");
-        flag("Sky", Renderer::ExtraViewNoSky, true, "The sky behind the geometry (off: black).");
-        flag("Particles", Renderer::ExtraViewNoParticles, true, "The scene's particle systems.");
-        flag("Selection Outline", Renderer::ExtraViewOutline, false, "The orange outline of the selected entities.");
-        ImGui::MenuItem("Grid", nullptr, &slot.ShowGrid);
-        ImGui::Separator();
-        const char* resolutions[] = { "Full Resolution", "Half Resolution", "Quarter Resolution" };
-        for (int resolution = 0; resolution < 3; ++resolution)
-        {
-            if (ImGui::MenuItem(resolutions[resolution], nullptr, slot.ResolutionIndex == resolution))
-                slot.ResolutionIndex = resolution;
-        }
-        ImGui::Separator();
-        ImGui::MenuItem("Camera Position", nullptr, &slot.ShowCameraPosition);
-        ImGui::SetItemTooltip("Where the camera is, next to the axis indicator in the lower-left corner (world units, as an entity's Translation).");
-        ImGui::MenuItem("Realtime", nullptr, &slot.Realtime);
-        ImGui::SetItemTooltip("Off: drawn again only when its camera, the scene or the selection change (always on in Play).");
-        ImGui::EndMenu();
-    }
-
-    void EditorLayer::SyncOrthoRenderSettings(bool wasOrthographic)
-    {
-        const bool isOrthographic = m_EditorCamera.IsOrthographic();
-        if (isOrthographic && !wasOrthographic)
-        {
-            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
-            m_Renderer->setDLSSEnabled(false);
-            m_Renderer->setRayTracingEnabled(false);
-            m_Renderer->setPathTracingEnabled(false);
-        }
-        else if (!isOrthographic && wasOrthographic && m_OrthoSaved.Valid)
-        {
-            m_Renderer->setDLSSEnabled(m_OrthoSaved.Dlss);
-            m_Renderer->setRayTracingEnabled(m_OrthoSaved.RayTracing);
-            m_Renderer->setPathTracingEnabled(m_OrthoSaved.PathTracing);
-            m_OrthoSaved.Valid = false;
-        }
-    }
-
-    void EditorLayer::UI_ViewportOverlay()
-    {
-        // On the active viewport, while it shows.
-        if (m_Viewports[m_ActiveViewport].Size.x == 0 || m_Viewports[m_ActiveViewport].Size.y == 0)
+        const AssetHandle mesh = GetShapeAsset(shape);
+        if (mesh == 0)
             return;
-        ImGui::SetNextWindowPos(ImVec2(m_ViewportBounds[0].x + 10.0f, m_ViewportBounds[0].y + 10.0f));
-        ImGui::SetNextWindowBgAlpha(0.65f);
-        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-                                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking;
-        if (!ImGui::Begin("##ViewportOverlay", nullptr, flags))
-        {
-            ImGui::End();
-            return;
-        }
-
-        // The gizmo mode: buttons, not Q/W/E/R (WASD-fly needs those keys for movement instead -- see EditorCamera::OnUpdate).
-        {
-            auto gizmoButton = [this](const char* label, const char* tooltip, int mode)
-            {
-                const bool active = m_GizmoType == mode;
-                if (active)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
-                if (ImGui::Button(label, ImVec2(28.0f, 0.0f)))
-                    m_GizmoType = mode;
-                if (active)
-                    ImGui::PopStyleColor();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", tooltip);
-                ImGui::SameLine();
-            };
-            gizmoButton("Sel", "Select only, no gizmo", -1);
-            gizmoButton("Mov", "Move", ImGuizmo::OPERATION::TRANSLATE);
-            gizmoButton("Rot", "Rotate", ImGuizmo::OPERATION::ROTATE);
-            gizmoButton("Scl", "Scale", ImGuizmo::OPERATION::SCALE);
-            ImGui::NewLine();
-        }
-
-        // A frozen culling view draws only what its old frustum held: never left on unnoticed (Render Graph panel).
-        if (m_Renderer->getFrozen())
-        {
-            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Culling view frozen");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Unfreeze"))
-                m_Renderer->setFrozen(false);
-            ImGui::SetItemTooltip("Only what was in view when it froze is drawn (Render Graph panel > Freeze Culling View)");
-        }
-
-        ImGui::Checkbox("Snap", &m_SnapEnabled);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Snap moving, rotating, scaling and placing to the steps on the right. Hold Ctrl to switch it for one move.");
-
-        auto stepCombo = [](const char* id, int& index, const auto& values, const char* format, float width)
-        {
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(width);
-            char preview[32];
-            snprintf(preview, sizeof(preview), format, values[index]);
-            if (ImGui::BeginCombo(id, preview))
-            {
-                for (int i = 0; i < static_cast<int>(std::size(values)); ++i)
-                {
-                    char label[32];
-                    snprintf(label, sizeof(label), format, values[i]);
-                    if (ImGui::Selectable(label, i == index))
-                        index = i;
-                }
-                ImGui::EndCombo();
-            }
-        };
-        stepCombo("##locationSnap", m_LocationSnapIndex, kLocationSnapsCm, "%g cm", 90.0f);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Location step");
-        stepCombo("##rotationSnap", m_RotationSnapIndex, kRotationSnaps, "%g deg", 80.0f);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Rotation step");
-        stepCombo("##scaleSnap", m_ScaleSnapIndex, kScaleSnaps, "%g", 60.0f);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Scale step");
-
-        {
-            const char* viewNames[] = { "Perspective", "Top", "Bottom", "Front", "Back", "Left", "Right" };
-            int view = static_cast<int>(m_EditorCamera.GetViewMode());
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(100.0f);
-            if (ImGui::Combo("##viewMode", &view, viewNames, 7))
-                SetViewMode(static_cast<EditorViewMode>(view));
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("View: Perspective, or an orthographic view along an axis (raster only). Numpad 7 / 1 / 3 (Ctrl: the opposite side), 5 = perspective");
-        }
-        ImGui::SameLine();
-        {
-            int figure = !m_ShowReferenceFigure ? 0 : m_ReferenceFigureAtCursor ? 2 : 1;
-            const char* figureModes[] = { "No Figure", "Figure at Origin", "Figure at Cursor" };
-            ImGui::SetNextItemWidth(120.0f);
-            if (ImGui::Combo("##figure", &figure, figureModes, 3))
-            {
-                m_ShowReferenceFigure = figure != 0;
-                m_ReferenceFigureAtCursor = figure == 2;
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("A 180 cm figure to judge sizes: at the world origin, or standing on the surface under the cursor");
-        }
-        ImGui::SameLine();
-        ImGui::Checkbox("Grid", &m_ShowGrid);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("The world grid, with the cells of the location step");
-        ImGui::SameLine();
-        bool wireframe = m_Renderer->getWireframeOverlay();
-        if (ImGui::Checkbox("Wireframe", &wireframe))
-            m_Renderer->setWireframeOverlay(wireframe);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Every mesh's triangle edges over the image (how dense the geometry is)");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("To Floor"))
-            SnapSelectionToFloor();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Drop the selection onto the surface below it (End)");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("To Grid"))
-            SnapSelectionToGrid();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Move the selection to the nearest grid point of the location step (its position, not its size)");
-
-        ImGui::SameLine();
-        if (ImGui::Checkbox("Measure", &m_MeasureTool) && !m_MeasureTool)
-            m_MeasureStage = 0;
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Measure (M): click two points, the distance is written on the line. Esc leaves it.");
-
-        // How lengths are written (sizes in the Inspector, the measure tool).
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(70.0f);
-        const char* displayNames[] = { "cm", "m", "auto" };
-        int display = static_cast<int>(WorldUnits::GetDisplayUnit());
-        if (ImGui::Combo("##displayUnit", &display, displayNames, 3))
-            WorldUnits::SetDisplayUnit(static_cast<WorldUnits::DisplayUnit>(display));
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Unit lengths are shown in");
-
-        ImGui::End();
-    }
-
-    void EditorLayer::DrawReferenceFigure(const glm::dvec3& worldPosition)
-    {
-        const glm::vec3 position = m_Renderer->ToRenderSpace(worldPosition);
-        // Sizes in cm, converted to world units; the figure stands on `position`, facing -Z, 180 cm tall.
-        auto cm = [](float centimeters) { return WorldUnits::FromCentimeters(centimeters); };
-        const glm::vec4 color(1.0f, 0.62f, 0.2f, 0.9f);
-
-        auto box = [&](float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
-        {
-            const glm::vec3 low = position + glm::vec3(cm(minX), cm(minY), cm(minZ));
-            const glm::vec3 high = position + glm::vec3(cm(maxX), cm(maxY), cm(maxZ));
-            const glm::vec3 corners[8] = {
-                { low.x, low.y, low.z }, { high.x, low.y, low.z }, { high.x, low.y, high.z }, { low.x, low.y, high.z },
-                { low.x, high.y, low.z }, { high.x, high.y, low.z }, { high.x, high.y, high.z }, { low.x, high.y, high.z } };
-            constexpr int edges[12][2] = { {0,1},{1,2},{2,3},{3,0}, {4,5},{5,6},{6,7},{7,4}, {0,4},{1,5},{2,6},{3,7} };
-            for (const auto& edge : edges)
-                m_Renderer2D->DrawThinLine(corners[edge[0]], corners[edge[1]], color);
-        };
-
-        box(-18.0f, -1.0f, 0.0f, 88.0f, -10.0f, 10.0f);   // legs
-        box(1.0f, 18.0f, 0.0f, 88.0f, -10.0f, 10.0f);
-        box(-22.0f, 22.0f, 88.0f, 143.0f, -11.0f, 11.0f); // torso
-        box(-31.0f, -22.0f, 83.0f, 143.0f, -5.0f, 5.0f);  // arms
-        box(22.0f, 31.0f, 83.0f, 143.0f, -5.0f, 5.0f);
-        box(-4.0f, 4.0f, 143.0f, 151.0f, -4.0f, 4.0f);    // neck
-        box(-10.0f, 10.0f, 151.0f, 180.0f, -12.0f, 12.0f); // head, the top at 180 cm
-    }
-
-    // Decomposes a world matrix's scale the same way JoltPhysics3DScene::CreateBody does, so a collider's wireframe here is sized
-    // exactly like the shape Jolt actually simulates (a non-uniform scale on a box collider shows as a non-uniform box; a sphere or
-    // a capsule's radius, which Jolt cannot scale non-uniformly, uses the largest axis, matching CreateBody's own formula).
-    static glm::vec3 DecomposeWorldScale(const glm::mat4& worldMatrix)
-    {
-        return glm::vec3(
-            glm::length(glm::vec3(worldMatrix[0])),
-            glm::length(glm::vec3(worldMatrix[1])),
-            glm::length(glm::vec3(worldMatrix[2])));
-    }
-
-    // The entity's world position and rotation, without its scale (a collider's own Offset is a fixed world-unit distance from the
-    // body's origin, not stretched by the entity's Scale -- JoltPhysics3DScene::CreateBody never multiplies Offset by worldScale,
-    // only the shape's own extents/radius). Assumes no shear (an ordinary Translate * Rotate * Scale world matrix).
-    static glm::mat4 RigidPart(const glm::mat4& worldMatrix)
-    {
-        glm::mat4 result = worldMatrix;
-        result[0] = glm::vec4(glm::normalize(glm::vec3(worldMatrix[0])), 0.0f);
-        result[1] = glm::vec4(glm::normalize(glm::vec3(worldMatrix[1])), 0.0f);
-        result[2] = glm::vec4(glm::normalize(glm::vec3(worldMatrix[2])), 0.0f);
-        return result;
-    }
-
-    void EditorLayer::DrawPhysicsColliders3D()
-    {
-        // Every collider drawn as the shape physics builds (JoltPhysics3DScene: ColliderShapeOf, CreateCharacter, MeshColliderShape),
-        // in the renderer's space. Green: part of a body (a Rigid Body 3D on the entity or above it). Red: part of none, so it does
-        // not collide (a collider alone is not in the physics world, like a Godot collision shape outside a body).
-        constexpr glm::vec4 kActiveColor(0.2f, 1.0f, 0.3f, 0.9f);
-        constexpr glm::vec4 kInactiveColor(1.0f, 0.3f, 0.25f, 0.9f);
-        constexpr glm::vec4 kCharacterColor(0.3f, 0.75f, 1.0f, 0.9f);
-        constexpr int kCircleSegments = 32;
-
-        auto colorOf = [this, kActiveColor, kInactiveColor](entt::entity handle)
-        {
-            for (Entity entity(handle, m_ActiveScene.get()); entity; entity = entity.GetParent())
-                if (entity.HasComponent<RigidBody3DComponent>())
-                    return kActiveColor;
-            return kInactiveColor;
-        };
-        auto line = [this](const glm::vec3& a, const glm::vec3& b, const glm::vec4& color) { m_Renderer2D->DrawXRayLine(a, b, color); };
-
-        // A circle around `centre` (shape space) in the plane across `axis`, through `transform` (the rigid part of the world matrix).
-        auto drawCircle = [&](const glm::mat4& transform, const glm::vec3& centre, float radius, int axis, const glm::vec4& color)
-        {
-            const int a = (axis + 1) % 3, b = (axis + 2) % 3;
-            glm::vec3 previous(0.0f);
-            for (int i = 0; i <= kCircleSegments; ++i)
-            {
-                const float t = glm::two_pi<float>() * static_cast<float>(i) / kCircleSegments;
-                glm::vec3 local = centre;
-                local[a] += std::cos(t) * radius;
-                local[b] += std::sin(t) * radius;
-                const glm::vec3 point = glm::vec3(transform * glm::vec4(local, 1.0f));
-                if (i > 0)
-                    line(previous, point, color);
-                previous = point;
-            }
-        };
-
-        // A capsule along Y: sphere centres at centre +- halfHeight, top radius `top`, bottom radius `bottom` (Jolt's tapered capsule
-        // when they differ). Its outline in the XY and ZY planes -- the two caps' arcs and the straight sides tangent to both -- and the
-        // rings where the sides meet the caps.
-        auto drawCapsule = [&](const glm::mat4& transform, const glm::vec3& centre, float halfHeight, float top, float bottom, const glm::vec4& color)
-        {
-            const float sine = halfHeight > 1e-6f ? std::clamp((bottom - top) / (2.0f * halfHeight), -1.0f, 1.0f) : 0.0f;
-            const float tangent = std::asin(sine); // the sides' tilt: the tangent points sit this far above each cap's equator
-            const glm::vec3 topCentre = centre + glm::vec3(0.0f, halfHeight, 0.0f);
-            const glm::vec3 bottomCentre = centre - glm::vec3(0.0f, halfHeight, 0.0f);
-            auto at = [&](const glm::vec3& c, float radius, const glm::vec3& across, float angle)
-            {
-                return glm::vec3(transform * glm::vec4(c + radius * (std::cos(angle) * across + std::sin(angle) * glm::vec3(0.0f, 1.0f, 0.0f)), 1.0f));
-            };
-            auto arc = [&](const glm::vec3& c, float radius, const glm::vec3& across, float from, float to)
-            {
-                constexpr int kSegments = 16;
-                glm::vec3 previous = at(c, radius, across, from);
-                for (int i = 1; i <= kSegments; ++i)
-                {
-                    const glm::vec3 point = at(c, radius, across, from + (to - from) * static_cast<float>(i) / kSegments);
-                    line(previous, point, color);
-                    previous = point;
-                }
-            };
-            for (const glm::vec3& across : { glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) })
-            {
-                arc(topCentre, top, across, tangent, glm::pi<float>() - tangent);                                  // over the top
-                arc(bottomCentre, bottom, across, glm::pi<float>() - tangent, glm::two_pi<float>() + tangent);    // under the bottom
-                line(at(topCentre, top, across, tangent), at(bottomCentre, bottom, across, tangent), color);
-                line(at(topCentre, top, across, glm::pi<float>() - tangent), at(bottomCentre, bottom, across, glm::pi<float>() - tangent), color);
-            }
-            drawCircle(transform, topCentre + glm::vec3(0.0f, top * sine, 0.0f), top * std::cos(tangent), 1, color);
-            drawCircle(transform, bottomCentre + glm::vec3(0.0f, bottom * sine, 0.0f), bottom * std::cos(tangent), 1, color);
-        };
-
-        // Box: a non-uniform Scale shears the half extents (matching Jolt's box shape, which can be non-uniform) but never the Offset.
-        auto boxView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider3DComponent>();
-        for (auto entity : boxView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
-            const glm::vec4 color = colorOf(entity);
-            const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            glm::vec3 corners[8];
-            for (int i = 0; i < 8; ++i)
-            {
-                const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
-                corners[i] = glm::vec3(transform * glm::vec4(box.Offset + sign * halfExtents, 1.0f));
-            }
-            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
-            for (const auto& edge : edges)
-                line(corners[edge[0]], corners[edge[1]], color);
-        }
-
-        // Sphere: Jolt's sphere shape is always uniform, sized by the largest axis of the entity's scale.
-        auto sphereView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, SphereCollider3DComponent>();
-        for (auto entity : sphereView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
-            const glm::vec4 color = colorOf(entity);
-            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const float radius = sphere.Radius * std::max({ worldScale.x, worldScale.y, worldScale.z });
-            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            for (int axis = 0; axis < 3; ++axis)
-                drawCircle(transform, sphere.Offset, radius, axis, color);
-        }
-
-        // Capsule (tapered when Bottom Radius is set): its whole outline, caps included.
-        auto capsuleView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CapsuleCollider3DComponent>();
-        for (auto entity : capsuleView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
-            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const float horizontal = std::max(worldScale.x, worldScale.z);
-            const float top = capsule.Radius * horizontal;
-            const float bottom = capsule.BottomRadius > 0.0f ? capsule.BottomRadius * horizontal : top;
-            drawCapsule(RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix)), capsule.Offset, capsule.HalfHeight * worldScale.y, top, bottom, colorOf(entity));
-        }
-
-        // Character controller: its own upright capsule (CreateCharacter), standing on the entity's origin, its size unscaled.
-        auto characterView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CharacterController3DComponent>();
-        for (auto entity : characterView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, controller] = characterView.get<WorldTransformComponent, CharacterController3DComponent>(entity);
-            const float radius = std::max(controller.Radius, WorldUnits::FromCentimeters(1.0f));
-            const float halfHeight = 0.5f * std::max(controller.Height, 0.0f);
-            const glm::mat4 transform = glm::translate(glm::mat4(1.0f), m_Renderer->ToRenderSpace(wtc.GetPosition()));
-            drawCapsule(transform, glm::vec3(0.0f, halfHeight + radius, 0.0f), halfHeight, radius, radius, kCharacterColor);
-        }
-
-        // Cylinder (or cone / frustum): its top and bottom circles and eight lines between them.
-        auto cylinderView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CylinderCollider3DComponent>();
-        for (auto entity : cylinderView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, cylinder] = cylinderView.get<WorldTransformComponent, CylinderCollider3DComponent>(entity);
-            const glm::vec4 color = colorOf(entity);
-            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const float halfHeight = cylinder.HalfHeight * worldScale.y;
-            const float horizontal = std::max(worldScale.x, worldScale.z);
-            const float top = cylinder.Radius * horizontal;
-            const float bottom = (cylinder.BottomRadius > 0.0f ? cylinder.BottomRadius : cylinder.Radius) * horizontal;
-            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const glm::vec3 topCentre = cylinder.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
-            const glm::vec3 bottomCentre = cylinder.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
-            if (top > 0.0f)
-                drawCircle(transform, topCentre, top, 1, color);
-            drawCircle(transform, bottomCentre, bottom, 1, color);
-            for (int i = 0; i < 8; ++i)
-            {
-                const float t = glm::quarter_pi<float>() * static_cast<float>(i);
-                const glm::vec3 direction(std::cos(t), 0.0f, std::sin(t));
-                line(glm::vec3(transform * glm::vec4(topCentre + direction * top, 1.0f)),
-                     glm::vec3(transform * glm::vec4(bottomCentre + direction * bottom, 1.0f)), color);
-            }
-        }
-
-        // Plane: a finite one's rectangle. An unbounded one (Half Size 0) is endless, so it is drawn as a 100 m grid on it around the
-        // point of the plane nearest the camera (on a 5 m step, so the lines stay put while the camera moves), with its normal.
-        glm::dvec3 viewPosition = m_EditorCamera.GetPosition();
-        if (m_SceneState == SceneState::Play)
-            if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity())
-                viewPosition = camera.GetComponent<WorldTransformComponent>().GetPosition();
-        const glm::vec3 eye = m_Renderer->ToRenderSpace(viewPosition);
-        auto planeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PlaneCollider3DComponent>();
-        for (auto entity : planeView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, plane] = planeView.get<WorldTransformComponent, PlaneCollider3DComponent>(entity);
-            const glm::vec4 color = colorOf(entity);
-            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
-            auto point = [&](float x, float y, float z) { return glm::vec3(transform * glm::vec4(plane.Offset + glm::vec3(x, y, z), 1.0f)); };
-            if (plane.HalfSize.x > 0.0f && plane.HalfSize.y > 0.0f)
-            {
-                const float x = plane.HalfSize.x * worldScale.x, z = plane.HalfSize.y * worldScale.z;
-                line(point(-x, 0, -z), point(x, 0, -z), color);
-                line(point(x, 0, -z), point(x, 0, z), color);
-                line(point(x, 0, z), point(-x, 0, z), color);
-                line(point(-x, 0, z), point(-x, 0, -z), color);
-                line(point(0, 0, 0), point(0, WorldUnits::FromMeters(1.0f), 0), color);
-                continue;
-            }
-            // Jolt has no endless plane on a dynamic body (JoltPhysics3DScene logs it and leaves the shape out): drawn as inactive.
-            glm::vec4 endlessColor = color;
-            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
-                if (owner.HasComponent<RigidBody3DComponent>())
-                {
-                    if (owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic)
-                        endlessColor = kInactiveColor;
-                    break;
-                }
-            const glm::vec3 origin = point(0, 0, 0);
-            const glm::vec3 alongX = glm::vec3(transform[0]), alongZ = glm::vec3(transform[2]);
-            const float step = WorldUnits::FromMeters(5.0f);
-            const float reach = WorldUnits::FromMeters(50.0f);
-            const float nearX = std::round(glm::dot(eye - origin, alongX) / step) * step;
-            const float nearZ = std::round(glm::dot(eye - origin, alongZ) / step) * step;
-            for (float offset = -reach; offset <= reach + 0.5f * step; offset += step)
-            {
-                line(point(nearX - reach, 0, nearZ + offset), point(nearX + reach, 0, nearZ + offset), endlessColor);
-                line(point(nearX + offset, 0, nearZ - reach), point(nearX + offset, 0, nearZ + reach), endlessColor);
-            }
-            line(origin, point(0, WorldUnits::FromMeters(1.0f), 0), endlessColor);
-        }
-
-        // Foot Placement's rays (Unreal's foot IK trace debug view), in Play / Simulate: each foot's ray from above it down, green to
-        // where it hit (with a cross there) and red where it found nothing.
-        auto animatorView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AnimatorComponent>();
-        for (auto entity : animatorView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue;
-            auto [wtc, animator] = animatorView.get<WorldTransformComponent, AnimatorComponent>(entity);
-            const AnimationGraphInstance& graph = animator.GraphInstance;
-            if (graph.FootProbes.empty())
-                continue;
-            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // the skeleton's model space is the entity's
-            const float meter = WorldUnits::FromMeters(1.0f);
-            for (const AnimFootProbe& probe : graph.FootProbes)
-            {
-                const glm::vec3 foot = glm::vec3(world * glm::vec4(probe.Position, 1.0f));
-                const glm::vec3 start = foot + glm::vec3(0.0f, probe.Up * meter, 0.0f);
-                const glm::vec3 end = foot - glm::vec3(0.0f, probe.Down * meter, 0.0f);
-                const auto ground = graph.FootGround.find(probe.Bone);
-                if (ground == graph.FootGround.end() || !ground->second.Hit)
-                {
-                    line(start, end, glm::vec4(1.0f, 0.25f, 0.2f, 1.0f));
-                    continue;
-                }
-                const glm::vec3 hit = glm::vec3(world * glm::vec4(ground->second.Point, 1.0f));
-                const glm::vec4 green(0.2f, 1.0f, 0.3f, 1.0f);
-                line(start, hit, green);
-                const float c = WorldUnits::FromCentimeters(4.0f);
-                line(hit - glm::vec3(c, 0, 0), hit + glm::vec3(c, 0, 0), green);
-                line(hit - glm::vec3(0, 0, c), hit + glm::vec3(0, 0, c), green);
-                line(hit, hit + glm::vec3(world * glm::vec4(ground->second.Normal, 0.0f)) * (3.0f * c), green); // the ground's normal
-            }
-        }
-
-        // Mesh: its triangles' edges, or with Convex (or on a dynamic body, which Jolt gives the hull) the hull physics builds.
-        auto meshView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, MeshCollider3DComponent>();
-        for (auto entity : meshView)
-        {
-            if (!m_ActiveScene->IsActiveInHierarchy(entity))
-                continue; // switched off: out of the physics world
-            auto [wtc, mesh] = meshView.get<WorldTransformComponent, MeshCollider3DComponent>(entity);
-            if (mesh.Mesh == 0)
-                continue;
-            bool dynamic = false;
-            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
-                if (owner.HasComponent<RigidBody3DComponent>())
-                {
-                    dynamic = owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic;
-                    break;
-                }
-            const std::vector<glm::vec3>& lines = MeshColliderWireframe(mesh, mesh.Convex || dynamic);
-            const glm::vec4 color = colorOf(entity);
-            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix); // the mesh scales with the entity (a scaled shape)
-            for (size_t i = 0; i + 1 < lines.size(); i += 2)
-                line(glm::vec3(world * glm::vec4(lines[i], 1.0f)), glm::vec3(world * glm::vec4(lines[i + 1], 1.0f)), color);
-        }
+        PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance()), folder);
     }
 
     void EditorLayer::FocusOnEntity(Entity entity)
     {
-        if (!entity)
+        if (!entity || !m_ActiveScene)
             return;
 
         glm::dvec3 centre;
-        float radius;
+        glm::vec3 boxSize{ 0.0f };
         const WorldBounds bounds = ComputeWorldBounds(*m_ActiveScene, entity);
         if (bounds.Valid)
         {
             centre = bounds.Center();
-            radius = glm::length(bounds.Size()) * 0.5f;
+            boxSize = bounds.Size();
         }
         else if (entity.HasComponent<WorldTransformComponent>())
         {
             centre = entity.GetComponent<WorldTransformComponent>().GetPosition();
-            radius = 0.0f; // Focus() floors this to a sensible minimum
         }
         else
+        {
             return;
+        }
 
-        m_EditorCamera.Focus(centre, radius);
-    }
+        m_ViewportTools.ViewTurn.Active = false;
 
-    void EditorLayer::DrawWorldGrid()
-    {
-        // Godot's editor grid (GridMesh.slang). Its smallest cell is one meter (Godot's 1 m) or the snap step when that is bigger, so a
-        // 10 cm snap does not turn the grid into a haze; the cell size does not change while you zoom (only in far jumps).
-        // In an ortho view the grid lies on the plane the view looks at and the level follows the ortho size (Godot does the same).
-        const float cell = std::max(LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
         if (m_EditorCamera.IsOrthographic())
-            m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
-        else
-            // The orbit distance, not the camera's height above the ground: height alone jumps just from tilting to look straight
-            // down (position.y then equals the orbit distance instead of ~0), which made the grid collapse to its coarsest cells
-            // on nothing more than a rotation. Orbit distance only changes when you actually zoom, so the grid now looks the same
-            // however you're angled at it, like UE5's.
-            m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, m_EditorCamera.GetDistance());
-    }
-
-    int EditorLayer::GridPlaneAxis() const
-    {
-        switch (m_EditorCamera.GetViewMode())
         {
-        case EditorViewMode::Front:
-        case EditorViewMode::Back: return 2;
-        case EditorViewMode::Left:
-        case EditorViewMode::Right: return 0;
-        default: return 1;
-        }
-    }
-
-    void EditorLayer::SetViewMode(EditorViewMode mode)
-    {
-        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
-        m_EditorCamera.SetViewMode(mode);
-        SyncOrthoRenderSettings(wasOrthographic);
-    }
-
-    void EditorLayer::DrawTranslationSnapFeedback(const glm::mat4& view, const glm::mat4& projection, const glm::mat4& current)
-    {
-        // A measuring line from where the drag began to where the object is now; it grows while dragging and jumps by the snap step.
-        DrawMeasureLine(view, projection, glm::vec3(m_GizmoDragStart[3]), glm::vec3(current[3]), LocationSnapWorldUnits() * 0.05f);
-    }
-
-    void EditorLayer::DrawMeasureLine(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& start, const glm::vec3& end, float minimumLength)
-    {
-        const float distance = glm::length(end - start);
-        if (distance < minimumLength)
+            const float orthoRadius = bounds.Valid
+                ? std::max({ boxSize.x, boxSize.y, boxSize.z }) * 0.5f
+                : 0.0f;
+            m_EditorCamera.Focus(centre, orthoRadius);
             return;
+        }
 
-        const glm::mat4 viewProjection = projection * view;
-        const float width = m_ViewportBounds[1].x - m_ViewportBounds[0].x;
-        const float height = m_ViewportBounds[1].y - m_ViewportBounds[0].y;
-        auto project = [&](const glm::vec3& point, ImVec2& out) -> bool
+        const float tanHalfFov = std::max(std::tan(glm::radians(m_EditorCamera.GetFOV()) * 0.5f), 0.01f);
+        const float aspect = std::max(m_EditorCamera.GetAspectRatio(), 0.25f);
+        float focusDist = WorldUnits::FromMeters(2.2f);
+        if (bounds.Valid)
         {
-            const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
-            if (clip.w <= 0.05f)
-                return false;
-            const glm::vec2 ndc = glm::vec2(clip.x, clip.y) / clip.w;
-            out = ImVec2(m_ViewportBounds[0].x + (ndc.x * 0.5f + 0.5f) * width, m_ViewportBounds[0].y + (1.0f - (ndc.y * 0.5f + 0.5f)) * height);
-            return true;
+            const float distV = (0.5f * boxSize.y * 1.18f) / tanHalfFov;
+            const float distH = (0.5f * std::max(boxSize.x, boxSize.z) * 1.18f) / (tanHalfFov * aspect);
+            focusDist = std::max({ distV, distH, WorldUnits::FromCentimeters(45.0f) });
+        }
+        const double entityRadius = bounds.Valid ? 0.5 * static_cast<double>(glm::length(boxSize)) : 0.0;
+
+        // Avoid placing the camera behind an occluding mesh (e.g. looking sideways through a nearby ramp/wall).
+        std::unordered_set<UUID> excluded;
+        std::function<void(Entity)> excludeSubtree = [&](Entity e)
+        {
+            excluded.insert(e.GetUUID());
+            if (!e.HasComponent<RelationshipComponent>())
+                return;
+            for (UUID cid : e.GetComponent<RelationshipComponent>().Children)
+            {
+                if (Entity c = m_ActiveScene->GetEntityByUUID(cid))
+                    excludeSubtree(c);
+            }
+        };
+        excludeSubtree(entity);
+
+        struct Occluder
+        {
+            glm::dmat4 InvWorld;
+            glm::vec3 LocalMin;
+            glm::vec3 LocalMax;
+        };
+        std::vector<Occluder> occluders;
+        auto meshView = m_ActiveScene->GetAllEntitiesWith<MeshComponent, WorldTransformComponent>();
+        for (auto handle : meshView)
+        {
+            Entity cand(handle, m_ActiveScene.get());
+            if (!cand || excluded.contains(cand.GetUUID()) || !m_ActiveScene->IsActiveInHierarchy(cand))
+                continue;
+            const WorldBounds wb = ComputeWorldBounds(*m_ActiveScene, cand, false);
+            if (!wb.Valid)
+                continue;
+            if (wb.Max.y <= (bounds.Valid ? bounds.Min.y + boxSize.y * 0.15 : centre.y))
+                continue;
+            glm::vec3 lMin, lMax;
+            if (!ComputeLocalMeshBounds(cand, lMin, lMax))
+                continue;
+            const glm::dmat4& w = cand.GetComponent<WorldTransformComponent>().WorldMatrix;
+            if (std::abs(glm::determinant(w)) < 1e-12)
+                continue;
+            occluders.push_back({ glm::inverse(w), lMin, lMax });
+        }
+
+        auto clearFraction = [&](float pitch, float yaw, float dist) -> double
+        {
+            const glm::quat q(glm::vec3(-pitch, -yaw, 0.0f));
+            const glm::vec3 fwd = glm::rotate(q, glm::vec3(0.0f, 0.0f, -1.0f));
+            const glm::dvec3 camPos = centre - glm::dvec3(fwd) * static_cast<double>(dist);
+            const double startT = (dist > 1e-3f) ? std::clamp((entityRadius * 0.55) / static_cast<double>(dist), 0.02, 0.5) : 0.02;
+
+            double bestT = 1.0;
+            for (const Occluder& occ : occluders)
+            {
+                const glm::dvec3 oA = glm::dvec3(occ.InvWorld * glm::dvec4(centre, 1.0));
+                const glm::dvec3 oB = glm::dvec3(occ.InvWorld * glm::dvec4(camPos, 1.0));
+                const glm::dvec3 oD = oB - oA;
+
+                double tMin = startT;
+                double tMax = bestT;
+                bool hit = true;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const double b0 = static_cast<double>(occ.LocalMin[axis]);
+                    const double b1 = static_cast<double>(occ.LocalMax[axis]);
+                    if (std::abs(oD[axis]) < 1e-9)
+                    {
+                        if (oA[axis] < b0 || oA[axis] > b1) { hit = false; break; }
+                    }
+                    else
+                    {
+                        double t1 = (b0 - oA[axis]) / oD[axis];
+                        double t2 = (b1 - oA[axis]) / oD[axis];
+                        if (t1 > t2) std::swap(t1, t2);
+                        tMin = std::max(tMin, t1);
+                        tMax = std::min(tMax, t2);
+                        if (tMin > tMax) { hit = false; break; }
+                    }
+                }
+                if (hit && tMin < bestT)
+                    bestT = tMin;
+            }
+            return bestT;
         };
 
-        ImVec2 a, b;
-        if (!project(start, a) || !project(end, b))
-            return;
-        ImVec2 direction(b.x - a.x, b.y - a.y);
-        const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
-        if (length < 1.0f)
-            return;
-        direction = ImVec2(direction.x / length, direction.y / length);
-        const ImVec2 across(-direction.y * 9.0f, direction.x * 9.0f);
-
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        const ImU32 color = IM_COL32(255, 225, 70, 255);
-        draw->AddLine(a, b, IM_COL32(0, 0, 0, 160), 4.0f);
-        draw->AddLine(a, b, color, 2.0f);
-        draw->AddLine(ImVec2(a.x - across.x, a.y - across.y), ImVec2(a.x + across.x, a.y + across.y), color, 2.0f);
-        draw->AddLine(ImVec2(b.x - across.x, b.y - across.y), ImVec2(b.x + across.x, b.y + across.y), color, 2.0f);
-
-        const std::string text = WorldUnits::Format(distance);
-        const ImVec2 size = ImGui::CalcTextSize(text.c_str());
-        const ImVec2 middle((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
-        const ImVec2 min(middle.x - size.x * 0.5f - 4.0f, middle.y - size.y * 0.5f - 2.0f);
-        const ImVec2 max(middle.x + size.x * 0.5f + 4.0f, middle.y + size.y * 0.5f + 2.0f);
-        draw->AddRectFilled(min, max, IM_COL32(0, 0, 0, 190), 3.0f);
-        draw->AddText(ImVec2(min.x + 4.0f, min.y + 2.0f), color, text.c_str());
-    }
-
-    // The world point under the cursor: the depth the renderer read back for the picked pixel (reverse-Z), unprojected like the lighting
-    // shaders do, else the ground plane.
-    bool EditorLayer::PickWorldPoint(glm::dvec3& out) const
-    {
-        // The pixel -> NDC mapping uses the size the renderer draws at (what the shaders divide the pixel by), not the ImGui panel.
-        const nri::Extent2D outputSize = m_Renderer->getViewPortSize();
-        const glm::vec2 viewportSize(static_cast<float>(outputSize.width), static_cast<float>(outputSize.height));
-        if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f)
-            return false;
-
-        int32_t pickedX = 0, pickedY = 0;
-        float depth = 0.0f;
-        const bool hasDepth = m_Renderer->getPickedDepth(pickedX, pickedY, depth, 4);
-
-        glm::vec2 pixel;
-        if (hasDepth)
-            pixel = glm::vec2(static_cast<float>(pickedX) + 0.5f, static_cast<float>(pickedY) + 0.5f);
-        else
+        float targetPitch = m_EditorCamera.GetPitch();
+        float targetYaw = m_EditorCamera.GetYaw();
+        double bestFrac = clearFraction(targetPitch, targetYaw, focusDist);
+        if (bestFrac < 0.999)
         {
-            const ImVec2 mouse = ImGui::GetMousePos();
-            pixel = glm::vec2(mouse.x - m_ViewportBounds[0].x, mouse.y - m_ViewportBounds[0].y);
-        }
-
-        const glm::vec2 ndc = glm::vec2((pixel.x / viewportSize.x) * 2.0f - 1.0f, 1.0f - (pixel.y / viewportSize.y) * 2.0f);
-        const glm::mat4 inverseViewProjection = glm::inverse(m_EditorCamera.GetGizmoProjection() * m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin()));
-        glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
-        glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndc, 1.0f, 1.0f);
-        nearPoint /= nearPoint.w;
-        farPoint /= farPoint.w;
-
-        const glm::vec3 origin = glm::vec3(nearPoint);
-        const glm::vec3 direction = glm::normalize(glm::vec3(farPoint - nearPoint));
-
-        if (hasDepth && depth > 0.0f)
-        {
-            // The way the lighting shaders do it: the pixel's NDC position with the stored depth through the inverse of the renderer's own
-            // projection * view (not the gizmo's), in double precision.
-            const glm::dmat4 inverse = glm::inverse(glm::dmat4(m_EditorCamera.GetProjection()) * glm::dmat4(m_EditorCamera.GetViewMatrix(m_Renderer->GetRenderOrigin())));
-            glm::dvec4 world = inverse * glm::dvec4(ndc.x, ndc.y, depth, 1.0);
-            if (std::abs(world.w) > 1e-12)
+            float frontYaw = targetYaw;
+            if (entity.HasComponent<WorldTransformComponent>())
             {
-                out = m_Renderer->GetRenderOrigin() + glm::dvec3(world / world.w); // (the inverse is in the renderer's space)
-                return true;
+                const glm::mat4 w = m_Renderer
+                    ? m_Renderer->ToRenderSpace(entity.GetComponent<WorldTransformComponent>().WorldMatrix)
+                    : glm::mat4(entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                const glm::vec3 entFwd = glm::vec3(w[2]);
+                if (glm::length(glm::vec2(entFwd.x, entFwd.z)) > 1e-4f)
+                    frontYaw = -std::atan2(entFwd.x, entFwd.z);
             }
-        }
 
-        // Nothing drawn: the plane the grid lies on (the world's, through its origin: in the renderer's space at minus the render origin).
-        const int axis = GridPlaneAxis();
-        if (std::abs(direction[axis]) > 1e-4f)
-        {
-            const float plane = static_cast<float>(-m_Renderer->GetRenderOrigin()[axis]);
-            const float distance = (plane - origin[axis]) / direction[axis];
-            if (distance > 0.0f)
+            const float candidatePitches[] = { std::clamp(targetPitch, 0.08f, 0.45f), 0.22f, 0.45f };
+            const float yawOffsets[] = { 0.0f, 0.55f, -0.55f, 1.1f, -1.1f, 1.57f, -1.57f, 2.2f, -2.2f, 3.14159f };
+            float bestCandidatePitch = targetPitch;
+            float bestCandidateYaw = targetYaw;
+            double bestCandidateFrac = bestFrac;
+
+            auto tryCandidates = [&](float baseYaw)
             {
-                out = m_Renderer->FromRenderSpace(origin + direction * distance);
-                return true;
-            }
-        }
-        return false;
-    }
+                for (float p : candidatePitches)
+                {
+                    for (float dy : yawOffsets)
+                    {
+                        const float y = baseYaw + dy;
+                        const double f = clearFraction(p, y, focusDist);
+                        if (f > bestCandidateFrac)
+                        {
+                            bestCandidateFrac = f;
+                            bestCandidatePitch = p;
+                            bestCandidateYaw = y;
+                            if (bestCandidateFrac >= 0.999)
+                                return true;
+                        }
+                    }
+                }
+                return false;
+            };
 
-    void EditorLayer::MeasureClick()
-    {
-        glm::dvec3 point;
-        if (!PickWorldPoint(point))
-            return;
-        if (m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL))
-        {
-            const double step = LocationSnapWorldUnits();
-            point = glm::round(point / step) * step;
-        }
+            if (!tryCandidates(targetYaw))
+                tryCandidates(frontYaw);
 
-        if (m_MeasureStage == 1)
-        {
-            m_MeasureB = point;
-            m_MeasureStage = 2;
-        }
-        else
-        {
-            m_MeasureA = point;
-            m_MeasureStage = 1;
-        }
-    }
-
-    // Inside the viewport window: the line being measured, a ring where the cursor's point is.
-    void EditorLayer::UI_MeasureOverlay()
-    {
-        if (!m_MeasureTool && m_MeasureStage == 0)
-            return;
-
-        const glm::mat4 view = m_EditorCamera.GetGizmoView(m_Renderer->GetRenderOrigin());
-        const glm::mat4 projection = m_EditorCamera.GetGizmoProjection();
-
-        glm::dvec3 worldCursor{ 0.0 };
-        bool hasCursor = false;
-        if (m_MeasureTool && m_ViewportHovered)
-        {
-            hasCursor = PickWorldPoint(worldCursor);
-            if (hasCursor && m_SnapEnabled != Input::IsKeyPressed(SDL_SCANCODE_LCTRL))
+            if (bestCandidateFrac > bestFrac + 0.05)
             {
-                const double step = LocationSnapWorldUnits();
-                worldCursor = glm::round(worldCursor / step) * step;
+                targetPitch = bestCandidatePitch;
+                targetYaw = bestCandidateYaw;
+                bestFrac = bestCandidateFrac;
+                m_EditorCamera.SetOrientation(targetPitch, targetYaw);
             }
+            if (bestFrac < 0.999)
+                focusDist = std::max(focusDist * static_cast<float>(bestFrac) * 0.88f, WorldUnits::FromCentimeters(40.0f));
         }
-        // Drawn in the renderer's space (the view is relative to its origin).
-        const glm::vec3 cursor = m_Renderer->ToRenderSpace(worldCursor);
-        const glm::vec3 measureA = m_Renderer->ToRenderSpace(m_MeasureA);
-        const glm::vec3 measureB = m_Renderer->ToRenderSpace(m_MeasureB);
 
-        if (m_MeasureStage == 1 && hasCursor)
-            DrawMeasureLine(view, projection, measureA, cursor, 0.0f);
-        else if (m_MeasureStage == 2)
-            DrawMeasureLine(view, projection, measureA, measureB, 0.0f);
-
-        if (hasCursor)
-        {
-            const glm::vec4 clip = projection * view * glm::vec4(cursor, 1.0f);
-            if (clip.w > 0.05f)
-            {
-                const glm::vec2 ndc = glm::vec2(clip.x, clip.y) / clip.w;
-                const float width = m_ViewportBounds[1].x - m_ViewportBounds[0].x;
-                const float height = m_ViewportBounds[1].y - m_ViewportBounds[0].y;
-                const ImVec2 screen(m_ViewportBounds[0].x + (ndc.x * 0.5f + 0.5f) * width, m_ViewportBounds[0].y + (1.0f - (ndc.y * 0.5f + 0.5f)) * height);
-                ImDrawList* draw = ImGui::GetWindowDrawList();
-                draw->AddCircle(screen, 6.0f, IM_COL32(0, 0, 0, 200), 16, 3.0f);
-                draw->AddCircle(screen, 6.0f, IM_COL32(255, 225, 70, 255), 16, 1.5f);
-
-            }
-        }
+        m_EditorCamera.SetFocalPoint(centre);
+        m_EditorCamera.SetDistance(focusDist);
     }
 
     void EditorLayer::SnapSelectionToFloor()
     {
-        const auto& selection = m_SceneHierarchyPanel.GetSelectedEntities();
+        if (!m_ActiveScene || !m_Renderer)
+            return;
+        const auto& selection = m_Selection.GetEntities();
         if (selection.empty())
             return;
 
-        // The tops of the selection (an entity whose parent is selected moves with it) and everything below them: none of it is floor.
         std::vector<Entity> tops;
         for (Entity entity : selection)
         {
             if (!entity)
                 continue;
-            const bool parentSelected = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0 &&
-                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+            const bool parentSelected = entity.HasComponent<RelationshipComponent>() &&
+                                        entity.GetComponent<RelationshipComponent>().Parent != 0 &&
+                                        m_Selection.Contains(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
             if (!parentSelected)
                 tops.push_back(entity);
         }
+
         std::unordered_set<UUID> excluded;
         std::function<void(Entity)> exclude = [&](Entity entity)
         {
@@ -5993,9 +1128,7 @@ namespace Nox
                 continue;
             const double centreY = 0.5 * (mover.Min.y + mover.Max.y);
 
-            // The surface below: the highest top of another mesh that overlaps this one in the ground plane and lies below its middle
-            // (bounding boxes: right for floors, tables, boxes; a slope or a curved surface counts as its flat top).
-            double floorY = 0.0; // nothing below: the world ground
+            double floorY = 0.0;
             bool found = false;
             for (auto handle : m_ActiveScene->GetAllEntitiesWith<MeshComponent, WorldTransformComponent>())
             {
@@ -6016,13 +1149,10 @@ namespace Nox
                 }
             }
 
-            // The real surface below (Renderer::RequestRaycast, a frame or two later): five rays down from just under the object,
-            // at its centre and towards its corners; the highest surface they find is the floor -- a slope, a curved rock, the
-            // inside of a bowl, not their bounding boxes. Nothing found (ray tracing off, nothing below): the boxes' answer.
             struct SnapRays
             {
-                UUID Entity;
-                double BoundsFloor = 0.0; // world (double precision)
+                UUID Entity = 0;
+                double BoundsFloor = 0.0;
                 double OriginY = 0.0;
                 int Pending = 0;
                 bool Hit = false;
@@ -6056,8 +1186,9 @@ namespace Nox
                         return;
                     const double floor = snap->Hit ? snap->OriginY - snap->NearestDistance : snap->BoundsFloor;
                     const double drop = floor - now.Min.y;
-                    entity.SetWorldTransform(glm::translate(glm::dmat4(1.0), glm::dvec3(0.0, drop, 0.0)) * entity.GetComponent<WorldTransformComponent>().WorldMatrix);
-                    m_HistoryCheckRequested = true; // one undo step
+                    entity.SetWorldTransform(glm::translate(glm::dmat4(1.0), glm::dvec3(0.0, drop, 0.0)) *
+                                             entity.GetComponent<WorldTransformComponent>().WorldMatrix);
+                    m_HistoryCheckRequested = true;
                 });
             }
         }
@@ -6065,16 +1196,18 @@ namespace Nox
 
     void EditorLayer::SnapSelectionToGrid()
     {
-        // Unreal's "Snap Origin to Grid": every selected entity whose parent is not selected too (children follow their parent).
-        const float step = LocationSnapWorldUnits();
+        if (!m_ActiveScene)
+            return;
+        const float step = m_ViewportTools.LocationSnapWorldUnits();
         if (step <= 0.0f)
             return;
-        for (Entity entity : m_SceneHierarchyPanel.GetSelectedEntities())
+        for (Entity entity : m_Selection.GetEntities())
         {
             if (!entity || !entity.HasComponent<WorldTransformComponent>())
                 continue;
-            const bool parentSelected = entity.HasComponent<RelationshipComponent>() && entity.GetComponent<RelationshipComponent>().Parent != 0 &&
-                                        m_SceneHierarchyPanel.IsSelected(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
+            const bool parentSelected = entity.HasComponent<RelationshipComponent>() &&
+                                        entity.GetComponent<RelationshipComponent>().Parent != 0 &&
+                                        m_Selection.Contains(m_ActiveScene->GetEntityByUUID(entity.GetComponent<RelationshipComponent>().Parent));
             if (parentSelected)
                 continue;
             glm::dmat4 world = entity.GetComponent<WorldTransformComponent>().WorldMatrix;
@@ -6086,119 +1219,12 @@ namespace Nox
         m_HistoryCheckRequested = true;
     }
 
-    AssetHandle EditorLayer::CreateVariant(AssetHandle baseHandle, const std::filesystem::path& relativeFolder)
-    {
-        Ref<Prefab> base = AssetManager::GetAsset<Prefab>(baseHandle);
-        if (!base)
-            return 0;
-
-        // "<Base> Variant": the name the Content Browser then lets the user change.
-        std::string name = base->Name + " Variant";
-        constexpr char forbidden[] = { 92, 47, 58, 42, 63, 34, 60, 62, 124, 0 }; // \ / : * ? " < > |
-        for (char& character : name)
-        {
-            if (std::strchr(forbidden, character) != nullptr)
-                character = '_';
-        }
-
-        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        std::filesystem::path relativePath = relativeFolder / (name + ".nprefab");
-        for (int suffix = 2; std::filesystem::exists(assetDirectory / relativePath); ++suffix)
-            relativePath = relativeFolder / (name + " " + std::to_string(suffix) + ".nprefab");
-
-        if (!PrefabImporter::CreateVariantFile(relativePath.stem().string(), base->Root, baseHandle, assetDirectory / relativePath))
-            return 0;
-        return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
-    }
-
-    AssetHandle EditorLayer::CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder)
-    {
-        Entity draggedEntity = m_ActiveScene->GetEntityByUUID(dragged);
-        if (!draggedEntity)
-            return 0;
-
-        // The dragged entity, or the whole selection when it is part of it. The dragged one goes first: it is the pivot the
-        // others are positioned against.
-        std::vector<Entity> entities{ draggedEntity };
-        if (m_SceneHierarchyPanel.IsSelected(draggedEntity))
-        {
-            for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
-            {
-                if (selected && !(selected == draggedEntity))
-                    entities.push_back(selected);
-            }
-        }
-
-        // The default name the Content Browser then lets the user change (like a new file in Windows).
-        std::string name = entities.size() == 1 ? draggedEntity.GetName() : std::string("New Prefab");
-        for (char& character : name)
-        {
-            if (std::strchr("\\/:*?\"<>|", character) != nullptr)
-                character = '_';
-        }
-        if (name.empty())
-            name = "New Prefab";
-
-        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
-        std::filesystem::path relativePath = relativeFolder / (name + ".nprefab");
-        for (int suffix = 2; std::filesystem::exists(assetDirectory / relativePath); ++suffix)
-            relativePath = relativeFolder / (name + " " + std::to_string(suffix) + ".nprefab");
-
-        if (!SceneSerializer::SerializePrefab(*m_ActiveScene, entities, relativePath.stem().string(), assetDirectory / relativePath))
-            return 0;
-        return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
-    }
-
-    void EditorLayer::PlaceAssets(const std::vector<AssetHandle>& handles, const glm::dvec3& point, const std::string& folder)
-    {
-        m_SceneHierarchyPanel.ClearSelection();
-        for (AssetHandle handle : handles)
-        {
-            const AssetType type = AssetManager::GetAssetType(handle);
-            if (type == AssetType::Prefab)
-            {
-                // A prefab instance: its entities spawn from the .nprefab once it is loaded (PrefabInstance::SpawnPending).
-                const AssetMetadata& prefabMetadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-                std::string prefabName = prefabMetadata.FilePath.filename().stem().string();
-                Entity prefabRoot = m_ActiveScene->CreateEntity(prefabName.empty() ? "Prefab" : prefabName);
-                auto& prefabInstance = prefabRoot.AddComponent<PrefabInstanceComponent>();
-                prefabInstance.Prefab = handle;
-                prefabInstance.InitTransform = true;
-                prefabRoot.GetComponent<TransformComponent>().Translation = point;
-                if (!folder.empty())
-                    prefabRoot.AddComponent<FolderComponent>(folder);
-                AssetManager::RequestAsset(handle);
-                continue;
-            }
-            if (type != AssetType::Mesh && type != AssetType::StaticMesh)
-                continue;
-
-            const AssetMetadata& metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-            std::string entityName = metadata.FilePath.filename().stem().string();
-            Entity root = m_ActiveScene->CreateEntity(entityName.empty() ? "Model" : entityName);
-            auto& instance = root.AddComponent<ModelInstanceComponent>();
-            instance.Model = handle;
-            // Several assets dragged together (this function): each keeps its own baked position from the source file,
-            // offset by the shared drop point (ModelInstance combines them: rootLocal * modelSpace) -- reconstructing
-            // the file's original relative layout, not stacking every dragged piece on the exact same point.
-            instance.AtFileLayout = true;
-            auto& rootTransform = root.GetComponent<TransformComponent>();
-            rootTransform.Translation = point;
-            // Baked into the cooked geometry now, static or skeletal alike (see the other drag-in path above).
-            if (!folder.empty())
-                root.AddComponent<FolderComponent>(folder);
-            AssetManager::RequestAsset(handle);
-        }
-    }
-
     AssetHandle EditorLayer::GetShapeAsset(PrimitiveShape shape)
     {
         Ref<Project> project = Project::GetActive();
         if (!project)
             return 0;
 
-        // Like UE's engine BasicShapes, but in the project: one asset per shape, shared by every placement, whose material can
-        // be edited like any imported one. A glTF already in the folder (made earlier) is imported again rather than rewritten.
         auto assetManager = project->GetEditorAssetManager();
         const std::string name = PrimitiveShapes::GetName(shape);
         const std::filesystem::path meshPath = std::filesystem::path("Shapes") / (name + ".nsmesh");
@@ -6216,519 +1242,219 @@ namespace Nox
         MeshImportSettings settings;
         settings.ImportSkeletalMeshes = false;
         settings.ImportAnimations = false;
-        settings.StaticCombine = MeshCombineMode::CombineAll; // one asset, registered right away (Do Not Combine registers when its cook ends)
-        settings.ImportScale = WorldUnits::PerSourceUnit(WorldUnits::SourceUnit::Meters); // the glTF is in meters, baked at cook time
+        settings.StaticCombine = MeshCombineMode::CombineAll;
+        settings.ImportScale = WorldUnits::PerSourceUnit(WorldUnits::SourceUnit::Meters);
         if (!assetManager->ImportModel(sourcePath, meshPath, settings))
             return 0;
         return assetManager->FindHandleByPath(meshPath, AssetType::StaticMesh);
     }
 
-    void EditorLayer::CreateShape(PrimitiveShape shape, const std::string& folder)
+    AssetHandle EditorLayer::RegisterSceneAsset(const std::filesystem::path& scenePath)
     {
-        if (!m_ActiveScene)
-            return;
-        const AssetHandle mesh = GetShapeAsset(shape);
-        if (mesh == 0)
-            return;
-        // Placed like a model dropped on the hierarchy: at the point the editor camera orbits. One mesh node, so it spawns as a
-        // plain mesh entity named after the shape once the asset has loaded.
-        PlaceAssets({ mesh }, m_EditorCamera.GetPosition() + glm::dvec3(m_EditorCamera.GetForwardDirection() * m_EditorCamera.GetDistance()), folder);
+        Ref<Project> project = Project::GetActive();
+        if (!project || scenePath.empty())
+            return 0;
+        auto assets = project->GetEditorAssetManager();
+        std::error_code error;
+        const std::filesystem::path relative = std::filesystem::relative(scenePath, Project::GetActiveAssetDirectory(), error);
+        if (error || relative.empty() || relative.native().starts_with(std::filesystem::path("..").native()))
+            return 0;
+        AssetHandle handle = assets->FindHandleByPath(relative, AssetType::Scene);
+        if (handle == 0)
+        {
+            assets->ImportAsset(relative, relative, AssetType::Scene);
+            handle = assets->FindHandleByPath(relative, AssetType::Scene);
+        }
+        return handle;
     }
 
-    void EditorLayer::UI_PackageGame()
+    void EditorLayer::AdoptStartSceneIfNone(const std::filesystem::path& scenePath)
     {
-        if (m_ShowPackageGame)
-        {
-            ImGui::OpenPopup("Package Game");
-            m_ShowPackageGame = false;
-        }
-        ImGui::SetNextWindowSize(ImVec2(620.0f, 0.0f), ImGuiCond_Appearing);
-        if (!ImGui::BeginPopupModal("Package Game", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        Ref<Project> project = Project::GetActive();
+        if (!project || project->GetConfig().StartScene != 0)
             return;
-
-        if (m_PackageServer)
-            ImGui::TextWrapped("A dedicated server (Unreal's server target): the runtime named <Project>Server -- it starts as a dedicated "
-                               "server, no window, GPU or sound, its console takes the server's commands -- with the scenes' cooked assets "
-                               "but no textures, fonts, sound clips, baked acoustics or shaders. Clients join it with --connect=<its address>.");
-        else
-            ImGui::TextWrapped("A folder that runs the game on its own: the runtime (NoxRuntime, renamed after the project), the engine's "
-                               "libraries, scripts and shaders, and only the assets the scenes need, cooked, without their sources.");
-        ImGui::Spacing();
-        ImGui::SetNextItemWidth(480.0f);
-        ImGui::InputText("Output folder", m_PackageOutput, sizeof(m_PackageOutput));
-        ImGui::Checkbox("Every scene (not only the start scene)", &m_PackageAllScenes);
-        ImGui::Checkbox("Pack files (Content.npak)", &m_PackagePackFiles);
-        ImGui::BeginDisabled(m_PackageServer);
-        ImGui::Checkbox("Precompiled shaders only (no Slang)", &m_PackagePrecompiledShaders);
-        ImGui::EndDisabled();
-        ImGui::Checkbox("Self-contained .NET", &m_PackageSelfContainedDotNet);
-        ImGui::SetItemTooltip("Copies the .NET 9 runtime into the game (about 70 MB): it runs where .NET is not installed.");
-        ImGui::SetItemTooltip("The game uses the shader cache the editor wrote (every pipeline it created) and ships without the\n"
-                              "shader compiler. A shader the editor never compiled would fail: off ships Slang to compile it.");
-        ImGui::SetItemTooltip("The assets in one pack file the game reads from (only its table of contents stays in memory).\n"
-                              "Off: a folder of loose files, easier to inspect.");
-        ImGui::SetItemTooltip("The start scene and what it uses is the game; tick this when scripts load other scenes.");
-        ImGui::Spacing();
-
-        if (ImGui::Button("Package", ImVec2(120.0f, 0.0f)))
+        if (const AssetHandle handle = RegisterSceneAsset(scenePath); handle != 0)
         {
-            EndTimelinePreviews();
-            SaveScene(); // the scene as edited is what ships
-            PackageSettings settings;
-            settings.OutputDirectory = std::filesystem::path(m_PackageOutput);
-            settings.AllScenes = m_PackageAllScenes;
-            settings.PackFiles = m_PackagePackFiles;
-            settings.PrecompiledShadersOnly = m_PackagePrecompiledShaders;
-            settings.SelfContainedDotNet = m_PackageSelfContainedDotNet;
-            settings.Server = m_PackageServer;
-            const PackageReport report = PackageGame(settings);
-            if (!report.Success)
-                m_PackageResult = "Failed: " + report.Error;
-            else
-            {
-                char summary[512];
-                snprintf(summary, sizeof(summary), "Done: %zu assets, %zu files, %.1f MB.\nRun %s", report.Assets, report.Files,
-                         static_cast<double>(report.Bytes) / (1024.0 * 1024.0), report.Executable.generic_string().c_str());
-                m_PackageResult = summary;
-                for (const std::string& warning : report.Warnings)
-                    m_PackageResult += "\n- " + warning;
-            }
+            project->GetConfig().StartScene = handle;
+            Project::SaveActive();
+            NOX_CORE_INFO("Start Scene: {} (the project opens with it; Settings > Start Scene changes it)", scenePath.filename().string());
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
-            ImGui::CloseCurrentPopup();
-        if (!m_PackageResult.empty())
-        {
-            ImGui::Separator();
-            ImGui::BeginChild("##package_result", ImVec2(600.0f, 160.0f), ImGuiChildFlags_Borders);
-            ImGui::TextWrapped("%s", m_PackageResult.c_str());
-            ImGui::EndChild();
-        }
-        ImGui::EndPopup();
     }
 
-    void EditorLayer::EndTimelinePreviews()
+    void EditorLayer::CreateBasicScene()
     {
-        for (auto& panel : m_TimelinePanels)
-            panel->EndPreview();
+        NewScene();
+        Scene& scene = *m_EditorScene;
+
+        const std::string lighting = "Lighting";
+        scene.AddFolder(lighting);
+
+        Entity sky = scene.CreateEntity("Sky");
+        sky.AddComponent<EnvironmentLightComponent>().Source = EnvironmentSource::ProceduralSky;
+        sky.AddComponent<FolderComponent>(lighting);
+
+        Entity sun = scene.CreateEntity("Sun");
+        sun.AddComponent<FolderComponent>(lighting);
+        sun.AddComponent<DirectionalLightComponent>().Intensity = DefaultSkySunIntensity;
+        sun.GetComponent<TransformComponent>().Rotation = glm::eulerAngles(DefaultSkySunRotation());
+        sun.MarkTransformDirty();
+
+        if (const AssetHandle plane = GetShapeAsset(PrimitiveShape::Plane); plane != 0)
+        {
+            Entity floor = scene.CreateEntity("Floor");
+            auto& instance = floor.AddComponent<ModelInstanceComponent>();
+            instance.Model = plane;
+            instance.AtFileLayout = true;
+            floor.GetComponent<TransformComponent>().Scale = glm::vec3(50.0f, 1.0f, 50.0f);
+            floor.MarkTransformDirty();
+            floor.AddComponent<RigidBody3DComponent>().Type = RigidBody3DComponent::BodyType::Static;
+            auto& box = floor.AddComponent<BoxCollider3DComponent>();
+            box.HalfExtents = glm::vec3(WorldUnits::FromMeters(0.5f), WorldUnits::FromMeters(0.05f), WorldUnits::FromMeters(0.5f));
+            box.Offset = glm::vec3(0.0f, -WorldUnits::FromMeters(0.05f), 0.0f);
+            AssetManager::RequestAsset(plane);
+        }
+
+        Entity camera = scene.CreateEntity("Camera");
+        camera.AddComponent<CameraComponent>().Primary = true;
+        auto& cameraTransform = camera.GetComponent<TransformComponent>();
+        cameraTransform.Translation = glm::dvec3(0.0, WorldUnits::FromMeters(2.0f), WorldUnits::FromMeters(8.0f));
+        cameraTransform.Rotation = glm::vec3(glm::radians(-12.0f), 0.0f, 0.0f);
+        camera.MarkTransformDirty();
+
+        const std::filesystem::path path = Project::GetActiveAssetDirectory() / "Scenes" / "Main.nox";
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        SerializeScene(m_EditorScene, path);
+        m_EditorScenePath = path;
+        AdoptStartSceneIfNone(path);
+        SetSceneContext(m_ActiveScene);
+        m_HistoryCheckRequested = true;
+        m_ApplyBasicSceneView = true;
+        ApplyBasicSceneView();
     }
 
-    void EditorLayer::UpdateHistory()
+    void EditorLayer::ApplyBasicSceneView()
     {
-        // An interaction ends when the ImGui item that was held (a drag, a text field, a button, a menu item, a drag-drop source)
-        // lets go, when the gizmo is released, or when a shortcut ran: that is when an edit is complete and becomes one step.
-        const bool itemActive = ImGui::IsAnyItemActive();
-        const bool gizmoUsing = ImGuizmo::IsUsing();
-        EditorHistory::FrameInfo frame;
-        frame.InteractionActive = itemActive || gizmoUsing;
-        frame.GizmoEnded = m_HistoryGizmoWasUsing && !gizmoUsing;
-        // A key pressed during a drag (Ctrl toggles snapping) waits for the drag to end, so the drag stays one step.
-        frame.InteractionEnded = !frame.InteractionActive &&
-                                 ((m_HistoryItemWasActive && !itemActive) || frame.GizmoEnded || m_HistoryCheckRequested);
-        m_HistoryItemWasActive = itemActive;
-        m_HistoryGizmoWasUsing = gizmoUsing;
-        if (!frame.InteractionActive)
-            m_HistoryCheckRequested = false;
+        m_EditorCamera.SetFocalPoint(glm::dvec3(0.0));
+        m_EditorCamera.SetDistance(WorldUnits::FromMeters(15.0f));
+        m_EditorCamera.SetOrientation(glm::radians(25.0f), glm::radians(35.0f));
+    }
 
-        // Play and Simulate change a copy of the scene that is thrown away on Stop: nothing to undo there.
-        if (m_SceneState != SceneState::Edit || !m_ActiveScene || !Project::GetActive())
+    void EditorLayer::CaptureProjectThumbnail()
+    {
+        Ref<Project> project = Project::GetActive();
+        Ref<Texture2D> image = m_Renderer ? m_Renderer->GetSceneResourceRef() : nullptr;
+        if (!project || !image || image->GetWidth() < 16 || image->GetHeight() < 16)
             return;
-
-        // A timeline preview poses its targets without editing the scene: nothing to record until it ends (and puts them back).
-        for (const auto& panel : m_TimelinePanels)
+        const std::filesystem::path file = ProjectLibrary::ThumbnailPath(Project::GetActiveProjectDirectory());
+        const bool bgra = m_Renderer->IsSurfaceFormatBGRA();
+        m_Renderer->ReadbackTexture(std::move(image), [file, bgra](std::vector<uint8_t> pixels, uint32_t width, uint32_t height)
         {
-            if (panel->IsPreviewing())
+            if (pixels.size() != static_cast<size_t>(width) * height * 4 || width == 0 || height == 0)
                 return;
-        }
-
-        // A world's cells loading or unloading by hand: not a step (undoing it would take a loaded cell's entities away). The history
-        // waits, and starts again from the scene with them once they are done.
-        const bool cellsBusy = m_ActiveScene->IsWorldStreamingBusy();
-        if (cellsBusy || m_WorldCellsBusy)
-        {
-            if (!cellsBusy)
-                m_History.Clear();
-            m_WorldCellsBusy = cellsBusy;
-            if (cellsBusy)
-                return;
-        }
-
-        frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
-        if (Entity selected = m_SceneHierarchyPanel.GetSelectedEntity())
-            frame.Watched = selected.GetUUID();
-        // An edit from outside the UI (an MCP tool) this frame: its own named step (not during a drag: it waits for the drag to end).
-        if (!frame.InteractionActive && !m_HistoryExternalStep.empty())
-        {
-            frame.ExternalStep = std::move(m_HistoryExternalStep);
-            m_HistoryExternalStep.clear();
-        }
-        m_History.Update(m_ActiveScene, frame);
-    }
-
-    void EditorLayer::Undo()
-    {
-        // Not in the middle of a drag: the step being dragged is not taken yet.
-        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy || m_HLODBuild)
-            return;
-        const std::string name = m_History.GetUndoName();
-        RestoreHistoryState(m_History.StepBack());
-        NOX_CORE_INFO("Undo: {}", name);
-    }
-
-    void EditorLayer::Redo()
-    {
-        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || ImGuizmo::IsUsing() || ImGui::IsAnyItemActive() || m_WorldCellsBusy || m_HLODBuild)
-            return;
-        const std::string name = m_History.GetRedoName();
-        RestoreHistoryState(m_History.StepForward());
-        NOX_CORE_INFO("Redo: {}", name);
-    }
-
-    void EditorLayer::RestoreHistoryState(const std::string& text)
-    {
-        NOX_PROFILE_SCOPE("Undo Restore");
-
-        // Loaded like a scene file into a new scene, which replaces the edited one (what OpenScene does): every entity keeps its
-        // UUID, model and prefab instances spawn again from their (already loaded) assets.
-        Ref<Scene> restored = CreateRef<Scene>();
-        SceneSerializer serializer(restored);
-        if (!serializer.DeserializeText(text))
-        {
-            NOX_CORE_ERROR("Undo / redo: the history state could not be read; the scene is left as it is");
-            return;
-        }
-
-        std::vector<UUID> selection;
-        for (Entity selected : m_SceneHierarchyPanel.GetSelectedEntities())
-        {
-            if (selected)
-                selection.push_back(selected.GetUUID());
-        }
-
-        m_HoveredEntity = Entity();
-        restored->OnViewportResize(static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
-        restored->AdoptWorldState(*m_EditorScene); // which cells are loaded is not part of an undo step
-        m_EditorScene = restored;
-        m_ActiveScene = restored;
-        m_SceneHierarchyPanel.SetContext(restored);
-        for (UUID id : selection)
-        {
-            if (Entity entity = restored->GetEntityByUUID(id))
-                m_SceneHierarchyPanel.ToggleSelectedEntity(entity);
-        }
-        m_UnloadUnusedAssetsRequested = true;
-        m_History.OnSceneRestored(restored);
-    }
-
-    void EditorLayer::SaveScene()
-    {
-        if (AudioMixer::IsDirty())
-            AudioMixer::Save(); // Ctrl+S saves the project's mixer too (Unity's Save Project)
-        EndTimelinePreviews(); // the scene as it is, not posed by a preview (which resumes next frame)
-        if (m_PrefabMode.Active)
-        {
-            SavePrefabMode(); // Ctrl+S in Prefab Mode saves the prefab, never the level
-            return;
-        }
-        if (!m_EditorScenePath.empty())
-        {
-            SerializeScene(m_ActiveScene, m_EditorScenePath);
-            AdoptStartSceneIfNone(m_EditorScenePath);
-            CaptureProjectThumbnail(); // (Unreal takes its project screenshot on save too)
-        }
-        else
-        {
-            SaveSceneAs();
-        }
-    }
-
-    void EditorLayer::SaveSceneAs()
-    {
-        EndTimelinePreviews();
-        if (m_PrefabMode.Active)
-        {
-            SavePrefabMode();
-            return;
-        }
-        std::string filepath = Utility::SaveFile("Nox Scene *.nox\0nox\0");
-        if (!filepath.empty())
-        {
-            // A world: the copy gets cells of its own (the two scenes must not write each other's cell files).
-            m_ActiveScene->CopyWorldCellsTo(filepath);
-            SerializeScene(m_ActiveScene, filepath);
-            m_EditorScenePath = filepath;
-            AdoptStartSceneIfNone(filepath);
-            CaptureProjectThumbnail();
-        }
-    }
-
-    void EditorLayer::SerializeScene(Ref<Scene> scene, const std::filesystem::path& path)
-    {
-        SceneImporter::SaveScene(scene, path);
-    }
-
-    void EditorLayer::OpenPrefabMode(AssetHandle handle)
-    {
-        CancelHLODBuild("prefab editing");
-        CancelAcousticBake("prefab editing");
-        if (m_PrefabMode.Active)
-        {
-            NOX_CORE_WARN("Prefab Mode is already open for '{}': exit it first", m_PrefabMode.Name);
-            return;
-        }
-        if (m_SceneState != SceneState::Edit)
-            OnSceneStop();
-
-        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(handle);
-        Ref<Prefab> prefab = PrefabImporter::ImportPrefab(handle, metadata);
-        if (!prefab)
-            return;
-
-        Ref<Scene> prefabScene = CreateRef<Scene>();
-        // A variant is edited as an instance of its base carrying the variant's changes; any other prefab as its own entities.
-        const bool isVariant = prefab->Base != 0;
-        Entity root = isVariant ? PrefabInstance::LoadVariantForEditing(*prefabScene, *prefab) : PrefabInstance::LoadForEditing(*prefabScene, *prefab);
-        if (!root)
-        {
-            NOX_CORE_ERROR("Prefab '{}' has no root entity", metadata.FilePath.generic_string());
-            return;
-        }
-
-        // Light for the isolated scene: the level's environment and sun, as preview entities. They are not below the root, so
-        // they are never saved into the prefab. A level without an environment gets the project's default one.
-        bool hasEnvironment = false;
-        if (m_EditorScene)
-        {
-            for (auto handleInLevel : m_EditorScene->GetAllEntitiesWith<EnvironmentLightComponent>())
+            constexpr uint32_t outWidth = 384, outHeight = 216;
+            uint32_t cropWidth = width, cropHeight = static_cast<uint32_t>(width * 9ull / 16ull);
+            if (cropHeight > height)
             {
-                Entity source(handleInLevel, m_EditorScene.get());
-                Entity preview = prefabScene->CreateEntity("Preview Environment");
-                preview.AddComponent<EnvironmentLightComponent>(source.GetComponent<EnvironmentLightComponent>());
-                hasEnvironment = true;
+                cropHeight = height;
+                cropWidth = static_cast<uint32_t>(height * 16ull / 9ull);
             }
-            for (auto handleInLevel : m_EditorScene->GetAllEntitiesWith<DirectionalLightComponent>())
+            const uint32_t x0 = (width - cropWidth) / 2, y0 = (height - cropHeight) / 2;
+            std::vector<uint8_t> out(static_cast<size_t>(outWidth) * outHeight * 4);
+            for (uint32_t y = 0; y < outHeight; ++y)
             {
-                Entity source(handleInLevel, m_EditorScene.get());
-                Entity preview = prefabScene->CreateEntity("Preview Sun");
-                preview.GetComponent<TransformComponent>() = source.GetComponent<TransformComponent>();
-                preview.AddComponent<DirectionalLightComponent>(source.GetComponent<DirectionalLightComponent>());
+                for (uint32_t x = 0; x < outWidth; ++x)
+                {
+                    const uint32_t sx0 = x0 + x * cropWidth / outWidth, sx1 = std::max(sx0 + 1, x0 + (x + 1) * cropWidth / outWidth);
+                    const uint32_t sy0 = y0 + y * cropHeight / outHeight, sy1 = std::max(sy0 + 1, y0 + (y + 1) * cropHeight / outHeight);
+                    uint32_t sum[3] = { 0, 0, 0 }, count = 0;
+                    for (uint32_t sy = sy0; sy < sy1 && sy < height; ++sy)
+                    {
+                        for (uint32_t sx = sx0; sx < sx1 && sx < width; ++sx)
+                        {
+                            const uint8_t* texel = &pixels[(static_cast<size_t>(sy) * width + sx) * 4];
+                            sum[0] += texel[0];
+                            sum[1] += texel[1];
+                            sum[2] += texel[2];
+                            ++count;
+                        }
+                    }
+                    uint8_t* target = &out[(static_cast<size_t>(y) * outWidth + x) * 4];
+                    count = std::max(count, 1u);
+                    target[0] = static_cast<uint8_t>(sum[bgra ? 2 : 0] / count);
+                    target[1] = static_cast<uint8_t>(sum[1] / count);
+                    target[2] = static_cast<uint8_t>(sum[bgra ? 0 : 2] / count);
+                    target[3] = 255;
+                }
             }
-        }
-        if (!hasEnvironment)
-        {
-            Entity preview = prefabScene->CreateEntity("Preview Environment");
-            preview.AddComponent<EnvironmentLightComponent>().TexturePath = "EnvironmentMaps/shanghai_bund_4k_cube_bc6u.dds";
-        }
-
-        m_PrefabMode.Active = true;
-        m_PrefabMode.Variant = isVariant;
-        m_PrefabMode.Prefab = handle;
-        m_PrefabMode.Name = metadata.FilePath.stem().string();
-        m_PrefabMode.ReturnScene = m_EditorScene;
-        m_PrefabMode.ReturnScenePath = m_EditorScenePath;
-        m_PrefabMode.Root = root.GetUUID();
-
-        m_HoveredEntity = Entity();
-        m_EditorScene = prefabScene;
-        m_ActiveScene = prefabScene;
-        // Prefab Mode gets its own history; the level's waits until it is back.
-        m_LevelHistory = std::move(m_History);
-        m_History.Clear();
-        m_EditorScenePath.clear(); // nothing saves the level over the prefab
-        m_SceneHierarchyPanel.SetContext(m_EditorScene);
-        m_SceneHierarchyPanel.SetSelectedEntity(root);
-        m_UnloadUnusedAssetsRequested = true;
+            std::error_code error;
+            std::filesystem::create_directories(file.parent_path(), error);
+            if (!stbi_write_png(file.string().c_str(), outWidth, outHeight, 4, out.data(), outWidth * 4))
+                NOX_CORE_WARN("Project thumbnail: cannot write {}", file.generic_string());
+        });
     }
 
-    void EditorLayer::SavePrefabMode()
+    void EditorLayer::SaveEditorCameras()
     {
-        if (!m_PrefabMode.Active)
+        if (!Project::GetActive() || m_EditorScenePath.empty())
             return;
-        Entity root = m_EditorScene->GetEntityByUUID(m_PrefabMode.Root);
-        if (!root)
+        const std::string scene = m_EditorScenePath.generic_string();
+        std::vector<std::string> lines = ReadEditorCameraLines();
+        std::erase_if(lines, [&](const std::string& line) { return line.rfind(scene + "|", 0) == 0; });
+        for (int index = 0; index < kMaxViewports; ++index)
         {
-            NOX_CORE_ERROR("Prefab '{}': its root entity was deleted, nothing to save", m_PrefabMode.Name);
-            return;
+            const ViewportSlot& slot = m_Viewports[index];
+            if (index != m_ActiveViewport && !slot.CameraSet)
+                continue;
+            const EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : slot.Camera;
+            const glm::dvec3 focal = camera.GetFocalPoint();
+            char line[512];
+            std::snprintf(line, sizeof(line), "%s|%d|%.17g %.17g %.17g %.6g %.6g %.6g %d %.6g",
+                          scene.c_str(), index, focal.x, focal.y, focal.z,
+                          camera.GetDistance(), camera.GetPitch(), camera.GetYaw(),
+                          static_cast<int>(camera.GetViewMode()), camera.GetOrthoHalfHeight());
+            lines.push_back(line);
         }
-
-        const AssetMetadata metadata = Project::GetActive()->GetEditorAssetManager()->GetMetadata(m_PrefabMode.Prefab);
-        if (m_PrefabMode.Variant)
-        {
-            // The variant file holds what this instance of its base differs in, and the entities added below it.
-            Ref<Prefab> variantFile = PrefabImporter::ImportPrefab(m_PrefabMode.Prefab, metadata);
-            if (!variantFile || !PrefabInstance::SaveVariant(*m_EditorScene, root, *variantFile, Project::GetActiveAssetDirectory() / metadata.FilePath))
-            {
-                NOX_CORE_ERROR("Could not save the variant '{}' (its base has to be loaded)", m_PrefabMode.Name);
-                return;
-            }
-        }
-        else if (!SceneSerializer::SerializePrefab(*m_EditorScene, { root }, m_PrefabMode.Name, Project::GetActiveAssetDirectory() / metadata.FilePath))
-        {
-            return;
-        }
-
-        // The instances take their differences from the prefab first (they are told apart against the old content), then the loaded
-        // asset takes the new content (spawns read it on the main thread) and every instance in the level spawns again from it.
-        if (m_PrefabMode.ReturnScene)
-            PrefabInstance::CaptureOverrides(*m_PrefabMode.ReturnScene, m_PrefabMode.Prefab);
-        if (Ref<Prefab> fresh = PrefabImporter::ImportPrefab(m_PrefabMode.Prefab, metadata))
-        {
-            if (Prefab* loaded = AssetManager::FindLoadedAsset<Prefab>(m_PrefabMode.Prefab))
-            {
-                loaded->Name = fresh->Name;
-                loaded->Root = fresh->Root;
-                loaded->Entities = fresh->Entities;
-                loaded->Base = fresh->Base;
-                loaded->Overrides = fresh->Overrides;
-                loaded->Structure = fresh->Structure;
-                loaded->Nested = fresh->Nested;
-            }
-        }
-        if (m_PrefabMode.ReturnScene)
-            PrefabInstance::RespawnAll(*m_PrefabMode.ReturnScene, m_PrefabMode.Prefab);
-
-        // Its Content Browser thumbnail is drawn again.
-        AssetPreviewRenderer::Get().Invalidate(m_PrefabMode.Prefab);
-
-        // Saved: what is in the scene now is the reference.
-        m_PrefabMode.Snapshot = CurrentPrefabText();
-        m_PrefabMode.SnapshotTaken = !m_PrefabMode.Snapshot.empty();
-        m_PrefabMode.Dirty = false;
+        std::error_code error;
+        std::filesystem::create_directories(EditorCamerasFile().parent_path(), error);
+        std::ofstream out(EditorCamerasFile(), std::ios::trunc);
+        for (const std::string& entry : lines)
+            out << entry << "\n";
     }
 
-    std::string EditorLayer::CurrentPrefabText()
+    bool EditorLayer::RestoreEditorCameras()
     {
-        if (!m_PrefabMode.Active)
-            return {};
-        Entity root = m_EditorScene->GetEntityByUUID(m_PrefabMode.Root);
-        if (!root)
-            return {};
-
-        if (m_PrefabMode.Variant)
+        bool activeRestored = false;
+        if (!Project::GetActive() || m_EditorScenePath.empty())
+            return activeRestored;
+        const std::string prefix = m_EditorScenePath.generic_string() + "|";
+        for (const std::string& line : ReadEditorCameraLines())
         {
-            Prefab variant;
-            variant.Name = m_PrefabMode.Name;
-            return PrefabInstance::BuildVariant(*m_EditorScene, root, variant) ? PrefabImporter::PrefabToText(variant) : std::string();
+            if (line.rfind(prefix, 0) != 0)
+                continue;
+            int index = -1, mode = 0;
+            glm::dvec3 focal(0.0);
+            float distance = 0.0f, pitch = 0.0f, yaw = 0.0f, orthoHalfHeight = 10.0f;
+            if (sscanf(line.c_str() + prefix.size(), "%d|%lf %lf %lf %f %f %f %d %f",
+                       &index, &focal.x, &focal.y, &focal.z, &distance, &pitch, &yaw,
+                       &mode, &orthoHalfHeight) != 9 || index < 0 || index >= kMaxViewports ||
+                mode < 0 || mode > static_cast<int>(EditorViewMode::Right))
+                continue;
+            EditorCamera& camera = index == m_ActiveViewport ? m_EditorCamera : m_Viewports[index].Camera;
+            camera.SetViewMode(static_cast<EditorViewMode>(mode));
+            camera.SetFocalPoint(focal);
+            camera.SetDistance(distance);
+            camera.SetOrientation(pitch, yaw);
+            if (camera.IsOrthographic())
+                camera.SetOrthoHalfHeight(orthoHalfHeight);
+            m_Viewports[index].CameraSet = true;
+            activeRestored |= (index == m_ActiveViewport);
         }
-        return SceneSerializer::PrefabToText(*m_EditorScene, { root }, m_PrefabMode.Name);
-    }
-
-    // Every frame in Prefab Mode: the reference text is taken once everything in the scene has spawned (an instance spawns a frame after
-    // it is placed, the ones inside it a frame later); after that the text is compared every few frames for the "modified" mark.
-    void EditorLayer::UpdatePrefabModeDirty()
-    {
-        if (!m_PrefabMode.Active)
-            return;
-
-        if (!m_PrefabMode.SnapshotTaken)
-        {
-            // A few frames pass first: components settle in their first updates (a camera takes the viewport's aspect ratio).
-            if (m_PrefabMode.FramesSinceCheck++ < 5)
-                return;
-            for (auto handle : m_EditorScene->GetAllEntitiesWith<PrefabInstanceComponent>())
-            {
-                if (!m_EditorScene->GetAllEntitiesWith<PrefabInstanceComponent>().get<PrefabInstanceComponent>(handle).Spawned)
-                    return;
-            }
-            m_PrefabMode.Snapshot = CurrentPrefabText();
-            m_PrefabMode.SnapshotTaken = !m_PrefabMode.Snapshot.empty();
-            m_PrefabMode.FramesSinceCheck = 0;
-            return;
-        }
-
-        if (++m_PrefabMode.FramesSinceCheck >= 20)
-        {
-            m_PrefabMode.FramesSinceCheck = 0;
-            m_PrefabMode.Dirty = CurrentPrefabText() != m_PrefabMode.Snapshot;
-        }
-    }
-
-    void EditorLayer::RequestExitPrefabMode(std::function<void()> afterwards)
-    {
-        if (!m_PrefabMode.Active)
-        {
-            if (afterwards)
-                afterwards();
-            return;
-        }
-
-        // Compared now, not by the last periodic check: a change made a moment ago counts.
-        const bool dirty = m_PrefabMode.SnapshotTaken && CurrentPrefabText() != m_PrefabMode.Snapshot;
-        if (!dirty)
-        {
-            ExitPrefabMode();
-            if (afterwards)
-                afterwards();
-            return;
-        }
-        m_AfterPrefabExit = std::move(afterwards);
-        m_ShowPrefabExitPrompt = true;
-    }
-
-    void EditorLayer::UI_PrefabExitPrompt()
-    {
-        if (m_ShowPrefabExitPrompt)
-        {
-            ImGui::OpenPopup("Unsaved prefab changes");
-            m_ShowPrefabExitPrompt = false;
-        }
-        if (!ImGui::BeginPopupModal("Unsaved prefab changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-            return;
-
-        ImGui::Text("'%s' has changes that are not saved.", m_PrefabMode.Name.c_str());
-        ImGui::Separator();
-        if (ImGui::Button("Save"))
-        {
-            SavePrefabMode();
-            ExitPrefabMode();
-            std::function<void()> afterwards = std::move(m_AfterPrefabExit);
-            m_AfterPrefabExit = nullptr;
-            ImGui::CloseCurrentPopup();
-            if (afterwards)
-                afterwards();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Don't Save"))
-        {
-            ExitPrefabMode();
-            std::function<void()> afterwards = std::move(m_AfterPrefabExit);
-            m_AfterPrefabExit = nullptr;
-            ImGui::CloseCurrentPopup();
-            if (afterwards)
-                afterwards();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
-        {
-            m_AfterPrefabExit = nullptr;
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    void EditorLayer::ExitPrefabMode()
-    {
-        if (!m_PrefabMode.Active)
-            return;
-
-        m_HoveredEntity = Entity();
-        m_EditorScene = m_PrefabMode.ReturnScene;
-        m_ActiveScene = m_EditorScene;
-        m_History = std::move(m_LevelHistory);
-        m_LevelHistory.Clear();
-        m_EditorScenePath = m_PrefabMode.ReturnScenePath;
-        m_PrefabMode = {};
-        m_SceneHierarchyPanel.SetContext(m_EditorScene);
-        m_SceneHierarchyPanel.ClearSelection();
-        m_UnloadUnusedAssetsRequested = true;
+        return activeRestored;
     }
 
     void EditorLayer::WriteMaterialShaderEditorSettings()
     {
-        // What a code editor needs to check a Material Shader on its own (its `#include "CustomLit.slang"`): the engine's shader folder as
-        // a Slang search path -- in <project>/slangdconfig.json (the Slang language server's own file, read from a file's folder or a
-        // parent) and in <project>/.vscode/settings.json (VS Code's Slang extension, "slang.additionalSearchPaths", when the project's
-        // folder is the one opened). Absolute: per machine.
         const std::filesystem::path projectDirectory = Project::GetActiveProjectDirectory();
         const std::filesystem::path shaderFolder = std::filesystem::absolute("assets/shaders").lexically_normal();
         CustomLitShaders::WriteCodeEditorConfig(projectDirectory, shaderFolder);
@@ -6742,14 +1468,9 @@ namespace Nox
             std::ifstream file(settingsPath, std::ios::binary);
             std::stringstream text;
             text << file.rdbuf();
-            // Rewritten only when it is plain JSON: a settings file with comments (VS Code allows them) is left as the user wrote it.
             settings = nlohmann::json::parse(text.str(), nullptr, false);
             if (settings.is_discarded() || !settings.is_object())
-            {
-                NOX_CORE_INFO("Material Shaders: {} has comments or is not plain JSON, left as it is -- for VS Code to find CustomLit.slang add "
-                              "\"slang.additionalSearchPaths\": [\"{}\"] to it", settingsPath.generic_string(), folder);
                 return;
-            }
         }
         nlohmann::json& paths = settings["slang.additionalSearchPaths"];
         if (!paths.is_array())
@@ -6757,18 +1478,16 @@ namespace Nox
         for (const nlohmann::json& path : paths)
         {
             if (path.is_string() && path.get<std::string>() == folder)
-                return; // (there already)
+                return;
         }
         paths.push_back(folder);
         std::filesystem::create_directories(settingsPath.parent_path(), error);
         std::ofstream out(settingsPath, std::ios::binary | std::ios::trunc);
         out << settings.dump(4) << "\n";
-        NOX_CORE_INFO("Material Shaders: added the engine's shader folder to {} (VS Code's Slang extension finds CustomLit.slang)", settingsPath.generic_string());
     }
 
     std::string EditorLayer::CustomLitSignature() const
     {
-        // Every Material Shader's and material graph's path, size and last write: what changes when one is saved, added, moved or removed.
         std::string signature;
         const Ref<Project> project = Project::GetActive();
         if (!project)
@@ -6782,7 +1501,8 @@ namespace Nox
             const std::filesystem::path file = assetDirectory / metadata.FilePath;
             const auto written = std::filesystem::last_write_time(file, error);
             const auto size = error ? 0 : std::filesystem::file_size(file, error);
-            signature += metadata.FilePath.generic_string() + '|' + std::to_string(error ? 0 : written.time_since_epoch().count()) + '|' +
+            signature += metadata.FilePath.generic_string() + '|' +
+                         std::to_string(error ? 0 : written.time_since_epoch().count()) + '|' +
                          std::to_string(size) + '\n';
         }
         return signature;
@@ -6796,8 +1516,6 @@ namespace Nox
         if (signature == m_CustomLitSignature)
             return;
         m_CustomLitSignature = std::move(signature);
-        // The Slang language server's config at the project's root (VS Code's / Visual Studio's Slang extensions): the engine's shader
-        // folder as a search path, so a Material Shader's `#include "CustomLit.slang"` resolves in the code editor too.
         bool complete = true;
         const std::vector<CustomLitSource> sources = CustomLitShaders::GatherProjectSources(complete);
         if (!sources.empty())
@@ -6808,174 +1526,267 @@ namespace Nox
         m_Renderer->SetCustomLitShaders(sources, graphs);
     }
 
-    void EditorLayer::OpenAsset(AssetHandle handle)
+    void EditorLayer::UpdateHistory()
     {
-        auto opener = m_AssetOpeners.find(AssetManager::GetAssetType(handle));
-        if (opener != m_AssetOpeners.end())
-            opener->second(handle);
+        if (m_SceneState != SceneState::Edit || !m_ActiveScene || !Project::GetActive())
+            return;
+        EditorHistory::FrameInfo frame;
+        frame.InteractionActive = m_ViewportTools.GizmoUsing;
+        frame.InteractionEnded = m_HistoryCheckRequested || (m_ViewportTools.GizmoWasUsing && !m_ViewportTools.GizmoUsing);
+        // A timeline preview poses its targets (not edits): nothing is taken while it runs; when it ends (what they had back) the
+        // scene is checked once, so an edit made meanwhile to something else becomes a step then.
+        const bool previewing = m_AssetEditors.AnyPreviewing();
+        if (previewing)
+        {
+            frame.InteractionActive = true;
+            frame.InteractionEnded = false;
+        }
+        else if (m_TimelinePreviewWasOn)
+            frame.InteractionEnded = true;
+        m_TimelinePreviewWasOn = previewing;
+        m_ViewportTools.GizmoWasUsing = m_ViewportTools.GizmoUsing;
+        m_HistoryCheckRequested = false;
+        frame.AssetsLoading = Project::GetActive()->GetEditorAssetManager()->GetLoadingCount() > 0;
+        if (Entity watched = m_Selection.GetPrimary())
+            frame.Watched = watched.GetUUID();
+        frame.ExternalStep = std::move(m_HistoryExternalStep); // (an MCP edit this frame: one step with its name)
+        m_HistoryExternalStep.clear();
+        m_History.Update(m_ActiveScene, frame);
+        UpdateSceneDirtyState();
     }
 
-    void EditorLayer::OpenNodeGraphEditor(AssetHandle handle)
+    void EditorLayer::UpdateSceneDirtyState()
     {
-        for (auto& panel : m_NodeGraphEditors)
+        const size_t position = m_History.GetPosition();
+        if (m_SceneCleanPending)
         {
-            if (panel->GetGraphAsset() == handle)
+            m_SceneCleanPending = false;
+            m_SceneDirty = false;
+            m_HistoryPositionSeen = position;
+        }
+        else if (position != m_HistoryPositionSeen)
+        {
+            m_SceneDirty = true;
+            m_HistoryPositionSeen = position;
+        }
+        UpdatePrefabMode();
+        // The window's title: project, scene, and * while there is something unsaved (as every editor does).
+        if (auto win = Application::Get().getWindow(); win && win->getHandle() && Project::GetActive())
+        {
+            const std::string scene = m_PrefabMode.Active ? "Prefab: " + m_PrefabMode.Name
+                                    : m_EditorScenePath.empty() ? std::string("Untitled") : m_EditorScenePath.stem().string();
+            const std::string title = "Nox Editor - " + Project::GetActive()->GetConfig().Name + " - " + scene + (HasUnsavedChanges() ? " *" : "");
+            if (title != m_WindowTitleShown)
             {
-                panel->SetOpen(true);
-                return;
+                m_WindowTitleShown = title;
+                SDL_SetWindowTitle(win->getHandle(), title.c_str());
             }
         }
-        m_NodeGraphEditors.push_back(CreateScope<NodeGraphEditorPanel>(handle));
     }
 
-    void EditorLayer::OpenMaterialEditor(AssetHandle handle)
+    void EditorLayer::SetSceneContext(const Ref<Scene>& scene)
     {
-        for (auto& panel : m_MaterialEditors)
+        // The selection first: the panels read it for the new scene (same ids kept: undo / redo, Play; others dropped).
+        m_Selection.SetScene(scene);
+        m_SceneHierarchyPanel.SetContext(scene);
+        m_InspectorPanel.SetContext(scene);
+    }
+
+    bool EditorLayer::HasUnsavedChanges(uint32_t scope) const
+    {
+        if ((scope & UnsavedScene) && (m_SceneDirty || (m_PrefabMode.Active && m_PrefabMode.ReturnDirty)))
+            return true;
+        if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
+            return true;
+        return (scope & UnsavedAssets) && (m_AssetEditors.HasUnsaved() || MaterialEdits::Any());
+    }
+
+    void EditorLayer::ShowSaveChangesDialog(const std::string& text, std::function<void()> save, std::function<void()> dontSave)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+        Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, 14.0f));
+        label->WordWrap = true;
+        label->WidthMode = NoxUI::UISizeMode::Fill;
+        std::vector<NoxUI::UIModal::Button> buttons;
+        buttons.push_back({ "Save", std::move(save), true });
+        buttons.push_back({ "Don't Save", std::move(dontSave) });
+        buttons.push_back({ "Cancel", {} });
+        NoxUI::UIModal::ShowCustom(uiLayer->GetContext(), "Save changes?", label, std::move(buttons), 480.0f);
+    }
+
+    void EditorLayer::ConfirmUnsavedChanges(const std::string& action, std::function<void()> proceed, uint32_t scope)
+    {
+        // Everything that asks about the scene replaces the level: Prefab Mode is left first (asked about on its own), then the level
+        // waiting behind it is asked about as usual.
+        if (m_PrefabMode.Active && (scope & UnsavedScene))
         {
-            if (panel->GetMaterial() == handle)
+            RequestExitPrefabMode([this, action, proceed, scope]() { ConfirmUnsavedChanges(action, proceed, scope); });
+            return;
+        }
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!HasUnsavedChanges(scope) || !uiLayer)
+        {
+            if (proceed)
+                proceed();
+            return;
+        }
+        // What is unsaved, by name.
+        std::vector<std::string> unsaved;
+        if ((scope & UnsavedScene) && m_SceneDirty)
+            unsaved.push_back("the scene " + (m_EditorScenePath.empty() ? std::string("(untitled)") : m_EditorScenePath.filename().string()));
+        if (scope & UnsavedAssets)
+        {
+            for (std::string& name : m_AssetEditors.UnsavedNames())
+                unsaved.push_back(std::move(name));
+            for (AssetHandle material : MaterialEdits::Unsaved()) // (edited in the Inspector, no window open)
+                if (!m_AssetEditors.Find(material))
+                    unsaved.push_back("the material " + AssetDisplayName(material));
+        }
+        if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
+            unsaved.push_back("the audio mixer");
+        std::string list;
+        for (size_t i = 0; i < unsaved.size(); ++i)
+            list += (i == 0 ? "" : i + 1 == unsaved.size() ? " and " : ", ") + unsaved[i];
+
+        ShowSaveChangesDialog("You have unsaved changes in " + list + ".\nSave them before " + action + "?",
+            [this, proceed, scope]()
             {
-                ImGui::SetWindowFocus(panel->GetTitle().c_str()); // already open: bring it to the front
-                return;
-            }
-        }
-        m_MaterialEditors.push_back(CreateScope<MaterialEditorPanel>(handle));
-    }
-
-    void EditorLayer::StartHLODBuild()
-    {
-        if (m_HLODBuild || m_SceneLoad || m_SceneState != SceneState::Edit || m_PrefabMode.Active || !m_EditorScene || !m_EditorScene->IsWorldPartitioned())
-            return;
-        if (m_EditorScenePath.empty())
-        {
-            NOX_CORE_WARN("Build HLODs: save the scene first (its cells are built from their files)");
-            return;
-        }
-        SaveScene(); // the cells' files are what is built
-        m_HLODBuild = CreateScope<HLODBuilder>(m_EditorScene);
-        if (m_HLODBuild->Failed())
-            m_HLODBuild.reset();
-    }
-
-    void EditorLayer::CancelHLODBuild(const char* reason)
-    {
-        if (!m_HLODBuild)
-            return;
-        NOX_CORE_WARN("Build HLODs cancelled ({}): the HLODs built so far are imported, the HLOD grid is not written", reason);
-        m_HLODBuild.reset();
-    }
-
-    void EditorLayer::StartAcousticBake(UUID only)
-    {
-        if (m_AcousticBake || m_SceneLoad || m_SceneState != SceneState::Edit || m_PrefabMode.Active || !m_EditorScene || !SpatialAudio::IsAvailable())
-            return;
-        std::vector<AcousticBakeVolume> volumes;
-        auto view = m_EditorScene->GetAllEntitiesWith<AcousticProbeVolumeComponent, WorldTransformComponent>();
-        for (auto handle : view)
-        {
-            Entity entity(handle, m_EditorScene.get());
-            if (entity.HasComponent<InactiveInHierarchyComponent>() || (only != 0 && entity.GetUUID() != only))
-                continue;
-            const auto& [volume, wtc] = view.get<AcousticProbeVolumeComponent, WorldTransformComponent>(handle);
-            AcousticBakeVolume bake;
-            bake.Key = static_cast<uint64_t>(entity.GetUUID());
-            bake.Name = entity.GetName();
-            bake.Box = wtc.WorldMatrix * glm::scale(glm::dmat4(1.0), glm::dvec3(volume.HalfExtents) * 2.0);
-            bake.Settings = volume.Settings;
-            volumes.push_back(std::move(bake));
-        }
-        if (volumes.empty())
-        {
-            NOX_CORE_WARN("Bake acoustics: no (visible) Acoustic Probe Volume to bake");
-            return;
-        }
-        std::vector<AcousticInstance> instances;
-        if (const uint32_t loading = m_EditorScene->GatherAcousticInstances(instances); loading > 0)
-            NOX_CORE_WARN("Bake acoustics: {} meshes are still loading and are left out (bake again once they are in)", loading);
-        NOX_CORE_INFO("Bake acoustics: {} volume(s) against {} static meshes", volumes.size(), instances.size());
-        m_AcousticBake = CreateScope<AcousticBaker>();
-        m_AcousticBakeScene = m_EditorScene;
-        m_AcousticBake->Start(instances, {}, std::move(volumes));
-    }
-
-    void EditorLayer::FinishAcousticBake()
-    {
-        std::vector<AcousticBaker::Result> results = m_AcousticBake->TakeResults();
-        const bool cancelled = m_AcousticBake->WasCancelled();
-        m_AcousticBake.reset();
-        m_AcousticBakeScene = nullptr;
-        // (applied to the scene being edited, by the volumes' ids: an undo while baking replaced the scene object, not its entities)
-        if (cancelled || !m_EditorScene || !Project::GetActive())
-            return;
-        auto assets = Project::GetActive()->GetEditorAssetManager();
-        // Assets/Acoustics/<scene>/<volume>_<id>.nacoustics: one file per volume, rebaked in place.
-        const std::string sceneName = m_EditorScenePath.empty() ? std::string("Untitled") : m_EditorScenePath.stem().string();
-        auto fileName = [](std::string name)
-        {
-            for (char& c : name)
-                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_')
-                    c = '_';
-            return name.empty() ? std::string("Volume") : name;
-        };
-        size_t baked = 0;
-        for (const AcousticBaker::Result& result : results)
-        {
-            Entity entity = m_EditorScene->GetEntityByUUID(result.Key);
-            const std::string name = entity ? entity.GetName() : std::string("(deleted volume)");
-            if (!result.Data)
+                const auto finish = [this, proceed, scope]()
+                {
+                    if (scope & UnsavedAssets)
+                    {
+                        m_AssetEditors.SaveAll();
+                        MaterialEdits::SaveAll();
+                    }
+                    if ((scope & UnsavedMixer) && AudioMixer::IsDirty())
+                        AudioMixer::Save();
+                    // Still unsaved (Save As was cancelled, a file could not be written): nothing is dropped.
+                    if (HasUnsavedChanges(scope))
+                    {
+                        Notify(NoxUI::UINotificationSeverity::Warning, "Not everything was saved", "Nothing was closed: save again or choose Don't Save.");
+                        return;
+                    }
+                    if (proceed)
+                        proceed();
+                };
+                // The scene first: an untitled one asks for its name, and the rest goes on when that dialog answers.
+                if ((scope & UnsavedScene) && m_SceneDirty)
+                    SaveScene([finish](bool) { finish(); });
+                else
+                    finish();
+            },
+            [this, proceed, scope]()
             {
-                NOX_CORE_ERROR("Bake acoustics: {}: {}", name, result.Error);
-                continue;
-            }
-            if (!entity || !entity.HasComponent<AcousticProbeVolumeComponent>())
-                continue;
-            const std::filesystem::path relative = std::filesystem::path("Acoustics") / sceneName / (fileName(name) + "_" + std::to_string(result.Key) + ".nacoustics");
-            if (!SaveAcousticData(Project::GetActiveAssetDirectory() / relative, *result.Data))
-            {
-                NOX_CORE_ERROR("Bake acoustics: {}: could not write {}", name, relative.generic_string());
-                continue;
-            }
-            AssetHandle handle = assets->FindHandleByPath(relative, AssetType::AcousticData);
-            if (handle == 0)
-            {
-                assets->ImportAsset(relative, relative, AssetType::AcousticData);
-                handle = assets->FindHandleByPath(relative, AssetType::AcousticData);
-            }
-            else
-                assets->ReimportAsset(handle, true); // (the loaded copy replaced by the new bake)
-            entity.GetComponent<AcousticProbeVolumeComponent>().BakedData = handle;
-            NOX_CORE_INFO("Bake acoustics: {}: {} probes, {:.1f} MB -> {}", name, result.Data->ProbeCount,
-                          static_cast<double>(result.Data->ProbeBatch.size()) / (1024.0 * 1024.0), relative.generic_string());
-            ++baked;
-        }
-        if (baked > 0 && !m_EditorScenePath.empty())
-            SaveScene(); // (the volumes name their new data)
-        else if (baked > 0)
-            NOX_CORE_WARN("Bake acoustics: save the scene to keep the volumes' baked data");
+                if (scope & UnsavedScene)
+                    m_SceneDirty = false; // (what follows replaces it; the title must not keep the *)
+                // The asset editors' edits are dropped: back to their files (a playing scene runs what is saved again).
+                if (scope & UnsavedAssets)
+                {
+                    m_AssetEditors.RevertAll();
+                    MaterialEdits::RevertAll();
+                }
+                if (proceed)
+                    proceed();
+            });
     }
 
-    void EditorLayer::CancelAcousticBake(const char* reason)
+    void EditorLayer::Undo()
     {
-        if (!m_AcousticBake)
+        if (m_SceneState != SceneState::Edit || !m_History.CanUndo() || m_HLODBuild) // (an HLOD build reads the scene it started from)
             return;
-        NOX_CORE_WARN("Bake acoustics cancelled ({})", reason);
-        m_AcousticBake->Cancel();
-        m_AcousticBake.reset(); // (waits for the baker's thread: Steam Audio's bake stops within moments of the cancel)
-        m_AcousticBakeScene = nullptr;
+        m_AssetEditors.EndPreviews(); // (a timeline's poses come off first; it poses again from the restored scene)
+        const std::string name = m_History.GetUndoName();
+        RestoreHistoryState(m_History.StepBack());
+        NOX_CORE_INFO("Undo: {}", name);
+    }
+
+    void EditorLayer::Redo()
+    {
+        if (m_SceneState != SceneState::Edit || !m_History.CanRedo() || m_HLODBuild)
+            return;
+        m_AssetEditors.EndPreviews();
+        const std::string name = m_History.GetRedoName();
+        RestoreHistoryState(m_History.StepForward());
+        NOX_CORE_INFO("Redo: {}", name);
+    }
+
+    void EditorLayer::RestoreHistoryState(const std::string& text)
+    {
+        NOX_PROFILE_SCOPE("Undo Restore");
+        Ref<Scene> restored = CreateRef<Scene>();
+        SceneSerializer serializer(restored);
+        if (!serializer.DeserializeText(text))
+        {
+            NOX_CORE_ERROR("Undo / redo: the history state could not be read; the scene is left as it is");
+            return;
+        }
+
+        if (m_ViewportImage)
+        {
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+            const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+            if (w > 0 && h > 0)
+                restored->OnViewportResize(w, h);
+        }
+        m_HoveredEntity = Entity();
+        restored->AdoptWorldState(*m_EditorScene);
+        m_EditorScene = restored;
+        m_ActiveScene = restored;
+        SetSceneContext(restored); // (the selection carries over by id)
+        m_UnloadUnusedAssetsRequested = true;
+        m_History.OnSceneRestored(restored);
+    }
+
+    void EditorLayer::UnloadUnusedAssets()
+    {
+        if (!Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
+            return;
+        std::unordered_set<AssetHandle> referencedAssets;
+        if (m_EditorScene && m_ActiveScene != m_EditorScene)
+        {
+            if (!m_EditorSceneReferencesValid)
+            {
+                m_EditorSceneReferences.clear();
+                m_EditorScene->CollectAssetReferences(m_EditorSceneReferences);
+                m_EditorSceneReferencesValid = true;
+            }
+            referencedAssets = m_EditorSceneReferences;
+        }
+        else if (m_EditorScene)
+        {
+            m_EditorScene->CollectAssetReferences(referencedAssets);
+            m_EditorSceneReferencesValid = false;
+        }
+        if (m_ActiveScene && m_ActiveScene != m_EditorScene)
+            m_ActiveScene->CollectAssetReferences(referencedAssets);
+        if (m_PrefabMode.ReturnScene) // (the level waits while a prefab is edited: its assets stay)
+            m_PrefabMode.ReturnScene->CollectAssetReferences(referencedAssets);
+        AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the thumbnails draw right now
+        m_ContentBrowserPanel.CollectAssetReferences(referencedAssets);       // textures shown as tile pictures
+        if (m_HLODBuild)                                                       // the cell being built waits for its models and prefabs
+            m_HLODBuild->CollectAssetReferences(referencedAssets);
+        Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
     }
 
     void EditorLayer::OnScenePlay()
     {
-        m_EditorSceneReferencesValid = false; // (collected again for this session)
+        if (m_PrefabMode.Active)
+        {
+            Notify(NoxUI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to play the level.");
+            return;
+        }
         CancelHLODBuild("Play");
-        CancelAcousticBake("Play");
-        EndTimelinePreviews(); // Play copies the scene as it is
+        m_AssetEditors.EndPreviews(); // (Play copies the scene: without the timeline's poses)
+        m_EditorSceneReferencesValid = false;
         SetViewMode(EditorViewMode::Perspective);
         if (m_SceneState == SceneState::Simulate)
             OnSceneStop();
 
         if (m_PlayNet.Mode != PlayNetMode::Standalone)
         {
-            // The other players load the scene from disk: saved first (asked, unless the Play settings say not to).
             if (!m_PlayNet.SaveWithoutAsking)
             {
                 m_OpenSaveAndPlay = true;
@@ -6983,26 +1794,34 @@ namespace Nox
             }
             SaveScene();
             BeginMultiplayerPlay();
+            RefreshToolBar();
             return;
         }
 
         m_SceneState = SceneState::Play;
         StartPlayScene(Scene::NetMode::Standalone);
+        RefreshToolBar();
     }
 
     void EditorLayer::StartPlayScene(Scene::NetMode netMode)
     {
-        m_HoveredEntity = Entity(); // points into the scene being replaced
+        m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
-        // Its part in the game before it starts (a client's replicated entities become proxies; its scripts see their role in OnCreate).
         m_ActiveScene->SetNetMode(netMode);
         if (m_PlaySession && m_PlaySession->GetReplication())
             m_PlaySession->GetReplication()->SetScene(m_ActiveScene.get());
         m_ActiveScene->SetRenderer(m_Renderer);
-        m_ActiveScene->SetRenderer2D(m_Renderer->getRenderer2D());
-        m_ActiveScene->OnViewportResize(static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
+        m_ActiveScene->SetRenderer2D(m_Renderer2D);
+        if (m_ViewportImage)
+        {
+            const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
+            const uint32_t w = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+            const uint32_t h = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+            if (w > 0 && h > 0)
+                m_ActiveScene->OnViewportResize(w, h);
+        }
         m_ActiveScene->OnRuntimeStart();
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
     }
 
     bool EditorLayer::LaunchPlayer(const std::vector<std::string>& arguments, bool console, const char* what)
@@ -7036,8 +1855,6 @@ namespace Nox
             return {};
         if (!m_EditorScenePath.is_absolute())
             return m_EditorScenePath.lexically_normal();
-        // Absolute: under the asset directory, compared as the file system sees both (on Windows the case and the separators of the
-        // two may differ: "Facerun\\assets\\Scenes/NetDemo.nox" against ".../Facerun/Assets").
         std::error_code error;
         const std::filesystem::path relative = std::filesystem::relative(m_EditorScenePath, Project::GetActiveAssetDirectory(), error);
         if (error || relative.empty() || *relative.begin() == "..")
@@ -7050,7 +1867,6 @@ namespace Nox
         const std::filesystem::path relative = EditorSceneAssetPath();
         if (relative.empty())
             return 0;
-        // (Registered on first use when the editor has not seen the file yet: a scene saved as a new file.)
         return Project::GetActive()->GetEditorAssetManager()->ResolvePath(relative, AssetType::Scene);
     }
 
@@ -7061,15 +1877,16 @@ namespace Nox
             NOX_CORE_WARN("Multiplayer Play: save the scene first (the other players load it from disk)");
             return;
         }
-        // What the other players run: NoxRuntime on this project and this scene.
         std::filesystem::path projectFile;
         std::error_code error;
         for (const auto& entry : std::filesystem::directory_iterator(Project::GetProjectDirectory(), error))
+        {
             if (entry.is_regular_file(error) && entry.path().extension() == ".nproj")
             {
                 projectFile = entry.path();
                 break;
             }
+        }
         const std::string scene = EditorSceneAssetPath().generic_string();
         const AssetHandle sceneHandle = EditorSceneHandle();
         if (projectFile.empty())
@@ -7079,85 +1896,41 @@ namespace Nox
         }
         if (scene.empty() || sceneHandle == 0)
         {
-            NOX_CORE_ERROR("Multiplayer Play: the scene '{}' is not an asset of the project (save it under {})", m_EditorScenePath.generic_string(),
-                           Project::GetActiveAssetDirectory().generic_string());
+            NOX_CORE_ERROR("Multiplayer Play: the scene '{}' is not an asset of the project (save it under {})",
+                           m_EditorScenePath.generic_string(), Project::GetActiveAssetDirectory().generic_string());
             return;
         }
+
         static const char* emulationNames[] = { "off", "average", "bad" };
         const std::string emulation = emulationNames[std::clamp(m_PlayNet.Emulation, 0, 2)];
         Net::NetEmulation emulationValues;
         Net::NetEmulation::FromPreset(emulation, emulationValues);
         const uint16_t port = static_cast<uint16_t>(std::clamp(m_PlayNet.Port, 1, 65535));
 
-        // The other players' windows tiled over the primary display (two by two), like Unreal's new-window players.
         SDL_Rect usable{ 0, 0, 1920, 1080 };
         SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable);
-        const int windowWidth = std::min(usable.w / 2, 1280), windowHeight = std::min(usable.h / 2, 720);
+        const int windowWidth = std::min(usable.w / 2, 1280);
+        const int windowHeight = std::min(usable.h / 2, 720);
         auto playerArguments = [&](int player)
         {
             const int slot = (player - 2) % 4;
-            return std::vector<std::string>{ projectFile.string(), "--connect=127.0.0.1:" + std::to_string(port), "--connect-retry=30", "--windowed",
-                                             "--name=Player" + std::to_string(player), "--scene=" + scene, "--net-emulation=" + emulation,
-                                             std::format("--window-size={},{}", windowWidth, windowHeight),
-                                             std::format("--window-pos={},{}", usable.x + (slot % 2) * windowWidth, usable.y + (slot / 2) * windowHeight) };
+            return std::vector<std::string>{
+                projectFile.string(),
+                "--connect=127.0.0.1:" + std::to_string(port),
+                "--connect-retry=30",
+                "--windowed",
+                "--name=Player" + std::to_string(player),
+                "--scene=" + scene,
+                "--net-emulation=" + emulation,
+                std::format("--window-size={},{}", windowWidth, windowHeight),
+                std::format("--window-pos={},{}", usable.x + (slot % 2) * windowWidth, usable.y + (slot / 2) * windowHeight)
+            };
         };
         auto withDebug = [this](std::vector<std::string> arguments)
         {
             if (m_PlayNet.DebugTrace)
                 arguments.push_back("--net-debug");
             return arguments;
-        };
-        // MCP5, the Play setting "Players' MCP servers": each game it starts runs an MCP server on the editor's MCP port + 1 (the
-        // dedicated server) / + n (player n), with the project's token (made here once, before the games start: they would each make
-        // one otherwise) and the editor's access level.
-        m_PlayRuntimes.clear();
-        uint16_t mcpBasePort = 0;
-        std::string mcpAccess = "write";
-        std::string mcpToken;
-#if NOX_WITH_MCP
-        if (m_PlayNet.PlayerMcp)
-        {
-            std::string& token = mcpToken;
-            if (!Mcp::LoadOrCreateToken(Mcp::NoxFolder(), false, token))
-                NOX_CORE_ERROR("Multiplayer Play: the MCP token could not be made in the project's .nox folder; the players start without MCP servers");
-            else
-            {
-                ConsoleVariable* portVariable = Console::Get().FindVariable("mcp.Port");
-                ConsoleVariable* accessVariable = Console::Get().FindVariable("mcp.Access");
-                const int base = portVariable ? std::atoi(portVariable->GetString().c_str()) : 8765;
-                mcpBasePort = static_cast<uint16_t>(std::clamp(base, 1024, 65535 - 9));
-                const int access = accessVariable ? std::atoi(accessVariable->GetString().c_str()) : 1;
-                mcpAccess = access <= 0 ? "read" : access == 1 ? "write" : "execute";
-            }
-        }
-#endif
-        auto withMcp = [&](std::vector<std::string> arguments, int player)
-        {
-            if (mcpBasePort != 0)
-            {
-                arguments.push_back("--mcp");
-                arguments.push_back(std::format("--mcp-port={}", mcpBasePort + (player == 0 ? 1 : player)));
-                arguments.push_back("--mcp-access=" + mcpAccess);
-            }
-            return arguments;
-        };
-        auto noteRuntime = [&](int player)
-        {
-            if (mcpBasePort == 0 || m_PlayProcesses.empty())
-                return;
-            const uint16_t mcpPort = static_cast<uint16_t>(mcpBasePort + (player == 0 ? 1 : player));
-            PlayRuntime runtime;
-            runtime.Name = player == 0 ? std::string("dedicated server") : std::format("player {}", player);
-            runtime.Player = player;
-            runtime.McpPort = mcpPort;
-            runtime.Process = m_PlayProcesses.size() - 1;
-#if NOX_WITH_MCP
-            // Asked for, not yet there: the probe says once the game's server answers (or that it never did -- an old NoxRuntime ignores
-            // --mcp). 60 s: a game's start-up (shaders, scene) comes first.
-            runtime.Probe = NoxMcp::ServerProbe::Start(runtime.Name, mcpPort, mcpToken, 60.0);
-#endif
-            NOX_CORE_INFO("Multiplayer Play: {} started with --mcp on port {} (its server answers once the game is up)", runtime.Name, mcpPort);
-            m_PlayRuntimes.push_back(std::move(runtime));
         };
 
         Net::NetSessionConfig config;
@@ -7166,9 +1939,9 @@ namespace Nox
         config.PlayerName = "Player1";
         config.DebugTrace = m_PlayNet.DebugTrace;
         m_PlaySessionEnded = false;
+
         if (m_PlayNet.Mode == PlayNetMode::ListenServer)
         {
-            // The editor is the listen server: its Play scene is the authority, the others join it.
             config.Role = Net::SessionRole::ListenServer;
             m_PlaySession = std::make_unique<Net::NetSession>(config);
             m_PlaySession->FillWelcome = [this, sceneHandle](Net::NetWelcome& welcome)
@@ -7188,13 +1961,10 @@ namespace Nox
         }
         else
         {
-            // The editor is a client of a dedicated server it starts (its console takes the server's commands); its Play scene starts
-            // when the server lets it in.
-            if (!LaunchPlayer(withMcp(withDebug({ projectFile.string(), "--server", "--port=" + std::to_string(port), "--scene=" + scene,
-                                                 "--net-emulation=" + emulation }), 0),
+            if (!LaunchPlayer(withDebug({ projectFile.string(), "--server", "--port=" + std::to_string(port),
+                                          "--scene=" + scene, "--net-emulation=" + emulation }),
                               true, "the dedicated server"))
                 return;
-            noteRuntime(0);
             config.Role = Net::SessionRole::Client;
             config.Address = "127.0.0.1:" + std::to_string(port);
             config.ConnectRetrySeconds = 30.0;
@@ -7217,50 +1987,302 @@ namespace Nox
             if (!m_PlaySession->Start())
                 m_PlaySessionEnded = true;
         }
+
         for (int player = 2; player <= std::clamp(m_PlayNet.Players, 1, 8); ++player)
-            if (LaunchPlayer(withMcp(withDebug(playerArguments(player)), player), false, std::format("player {}", player).c_str()))
-                noteRuntime(player);
+            LaunchPlayer(withDebug(playerArguments(player)), false, std::format("player {}", player).c_str());
     }
 
     void EditorLayer::EndMultiplayerPlay()
     {
-        // The other players' windows and the dedicated server close (not left to return to their start scene), then the session.
         m_PlayProcesses.clear();
-#if NOX_WITH_MCP
-        for (PlayRuntime& runtime : m_PlayRuntimes)
-            if (runtime.Probe)
-                runtime.Probe->Cancel();
-#endif
-        m_PlayRuntimes.clear();
         m_PlaySession.reset();
         m_PlaySessionEnded = false;
     }
 
+    void EditorLayer::ShowPlaySettingsOverlay(NoxUI::UIElement* anchor)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !anchor)
+            return;
+
+        NoxUI::UIContext& ctx = uiLayer->GetContext();
+        auto backdrop = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+        backdrop->WidthMode = NoxUI::UISizeMode::Fill;
+        backdrop->HeightMode = NoxUI::UISizeMode::Fill;
+        backdrop->HitTestMode = NoxUI::UIHitTestMode::Self;
+
+        auto card = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 8.0f);
+        card->StyleClass = "Surface";
+        card->DrawBackground = true;
+        card->HitTestMode = NoxUI::UIHitTestMode::Self;
+        card->Padding = NoxUI::UIThickness::All(12.0f);
+        card->WidthMode = NoxUI::UISizeMode::Fixed;
+        card->HeightMode = NoxUI::UISizeMode::Auto;
+        card->FixedSize = { 310.0f, 0.0f };
+
+        const NoxUI::UIRect anchorBounds = anchor->GetBounds();
+        float leftX = anchorBounds.Min.x;
+        float topY = anchorBounds.Max.y + 4.0f;
+        if (const auto& root = ctx.GetRoot())
+        {
+            const NoxUI::UIRect& rootBounds = root->GetBounds();
+            if (rootBounds.Width() > 330.0f)
+                leftX = std::clamp(leftX, 8.0f, rootBounds.Max.x - 320.0f);
+            if (rootBounds.Height() > 360.0f)
+                topY = std::clamp(topY, 8.0f, rootBounds.Max.y - 340.0f);
+        }
+        card->AnchorMin = { 0.0f, 0.0f };
+        card->AnchorMax = { 0.0f, 0.0f };
+        card->AnchorOffsets = { leftX, topY, 0.0f, 0.0f };
+
+        auto title = NoxUI::Label("Multiplayer Play Settings").Get();
+        card->AddChild(title);
+        card->AddChild(NoxUI::Separator().Get());
+
+        auto modeLabel = NoxUI::Label("Net Mode").Get();
+        card->AddChild(modeLabel);
+        std::array<Ref<NoxUI::UIButton>, 3> modeBtns;
+        std::array<Ref<NoxUI::UIButton>, 3> emuBtns;
+        Ref<NoxUI::UISlider> playersSlider;
+        Ref<NoxUI::UILabel> playersLabel;
+        Ref<NoxUI::UITextInput> portInput;
+        Ref<NoxUI::UICheckBox> saveCheck;
+        Ref<NoxUI::UICheckBox> debugCheck;
+
+        auto syncControls = [this, &modeBtns, &emuBtns, &playersSlider, &playersLabel, &portInput, &saveCheck, &debugCheck]() mutable
+        {
+            const bool netEnabled = m_PlayNet.Mode != PlayNetMode::Standalone;
+            for (int i = 0; i < 3; ++i)
+            {
+                if (modeBtns[i])
+                    modeBtns[i]->StyleVariant = (static_cast<int>(m_PlayNet.Mode) == i) ? "primary" : "";
+                if (emuBtns[i])
+                {
+                    emuBtns[i]->StyleVariant = (m_PlayNet.Emulation == i) ? "primary" : "";
+                    emuBtns[i]->SetEnabled(netEnabled);
+                }
+            }
+            if (playersLabel)
+                playersLabel->Text = std::format("Number of Players: {}", m_PlayNet.Players);
+            if (playersSlider)
+                playersSlider->SetEnabled(netEnabled);
+            if (portInput)
+                portInput->SetEnabled(netEnabled);
+            if (saveCheck)
+                saveCheck->SetEnabled(netEnabled);
+            if (debugCheck)
+                debugCheck->SetEnabled(netEnabled);
+        };
+
+        const char* modeLabels[3] = { "Standalone", "Listen Server", "Client" };
+        auto modeRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+        modeRow->WidthMode = NoxUI::UISizeMode::Fill;
+        modeRow->HeightMode = NoxUI::UISizeMode::Auto;
+        for (int i = 0; i < 3; ++i)
+        {
+            modeBtns[i] = NoxUI::MakeUI<NoxUI::UIButton>(modeLabels[i]);
+            modeBtns[i]->WidthMode = NoxUI::UISizeMode::Fill;
+            modeBtns[i]->Padding = NoxUI::UIThickness::Symmetric(6.0f, 4.0f);
+            modeRow->AddChild(modeBtns[i]);
+        }
+        card->AddChild(modeRow);
+
+        playersLabel = NoxUI::Label(std::format("Number of Players: {}", m_PlayNet.Players)).Get();
+        card->AddChild(playersLabel);
+        playersSlider = NoxUI::MakeUI<NoxUI::UISlider>(static_cast<float>(m_PlayNet.Players), 1.0f, 8.0f);
+        playersSlider->Step = 1.0f;
+        playersSlider->Format = "{:.0f}";
+        playersSlider->WidthMode = NoxUI::UISizeMode::Fill;
+        playersSlider->OnChanged = [this, playersLabel](float value)
+        {
+            m_PlayNet.Players = std::clamp(static_cast<int>(std::round(value)), 1, 8);
+            if (playersLabel)
+                playersLabel->Text = std::format("Number of Players: {}", m_PlayNet.Players);
+        };
+        card->AddChild(playersSlider);
+
+        card->AddChild(NoxUI::Label("Network Emulation").Get());
+        const char* emuLabels[3] = { "Off", "Average", "Bad" };
+        auto emuRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+        emuRow->WidthMode = NoxUI::UISizeMode::Fill;
+        emuRow->HeightMode = NoxUI::UISizeMode::Auto;
+        for (int i = 0; i < 3; ++i)
+        {
+            emuBtns[i] = NoxUI::MakeUI<NoxUI::UIButton>(emuLabels[i]);
+            emuBtns[i]->WidthMode = NoxUI::UISizeMode::Fill;
+            emuBtns[i]->Padding = NoxUI::UIThickness::Symmetric(6.0f, 4.0f);
+            emuRow->AddChild(emuBtns[i]);
+        }
+        card->AddChild(emuRow);
+
+        auto portRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 8.0f);
+        portRow->WidthMode = NoxUI::UISizeMode::Fill;
+        portRow->HeightMode = NoxUI::UISizeMode::Auto;
+        portRow->AddChild(NoxUI::Label("Port").VAlign(NoxUI::UIAlignment::Center).Get());
+        portInput = NoxUI::MakeUI<NoxUI::UITextInput>(std::to_string(m_PlayNet.Port), "7777");
+        portInput->WidthMode = NoxUI::UISizeMode::Fill;
+        portInput->OnChanged = [this](const std::string& txt)
+        {
+            const int parsed = std::atoi(txt.c_str());
+            if (parsed > 0)
+                m_PlayNet.Port = std::clamp(parsed, 1, 65535);
+        };
+        portRow->AddChild(portInput);
+        card->AddChild(portRow);
+
+        saveCheck = NoxUI::MakeUI<NoxUI::UICheckBox>("Save the scene without asking", m_PlayNet.SaveWithoutAsking);
+        saveCheck->OnChanged = [this](bool v) { m_PlayNet.SaveWithoutAsking = v; };
+        card->AddChild(saveCheck);
+
+        debugCheck = NoxUI::MakeUI<NoxUI::UICheckBox>("Network debug log (--net-debug)", m_PlayNet.DebugTrace);
+        debugCheck->OnChanged = [this](bool v) { m_PlayNet.DebugTrace = v; };
+        card->AddChild(debugCheck);
+
+        auto closeRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 6.0f);
+        closeRow->WidthMode = NoxUI::UISizeMode::Fill;
+        closeRow->HeightMode = NoxUI::UISizeMode::Auto;
+        auto closeSpacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        closeSpacer->WidthMode = NoxUI::UISizeMode::Fill;
+        auto closeBtn = NoxUI::MakeUI<NoxUI::UIButton>("Done", [&ctx]() { ctx.ClearOverlay(); });
+        closeBtn->Padding = NoxUI::UIThickness::Symmetric(12.0f, 4.0f);
+        closeRow->AddChild(closeSpacer);
+        closeRow->AddChild(closeBtn);
+        card->AddChild(closeRow);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            modeBtns[i]->OnClick = [this, i, modeBtns, emuBtns, playersSlider, playersLabel, portInput, saveCheck, debugCheck]()
+            {
+                m_PlayNet.Mode = static_cast<PlayNetMode>(i);
+                const bool netEnabled = m_PlayNet.Mode != PlayNetMode::Standalone;
+                for (int j = 0; j < 3; ++j)
+                {
+                    modeBtns[j]->StyleVariant = (i == j) ? "primary" : "";
+                    emuBtns[j]->StyleVariant = (m_PlayNet.Emulation == j) ? "primary" : "";
+                    emuBtns[j]->SetEnabled(netEnabled);
+                }
+                playersLabel->Text = std::format("Number of Players: {}", m_PlayNet.Players);
+                playersSlider->SetEnabled(netEnabled);
+                portInput->SetEnabled(netEnabled);
+                saveCheck->SetEnabled(netEnabled);
+                debugCheck->SetEnabled(netEnabled);
+            };
+            emuBtns[i]->OnClick = [this, i, emuBtns]()
+            {
+                m_PlayNet.Emulation = i;
+                for (int j = 0; j < 3; ++j)
+                    emuBtns[j]->StyleVariant = (i == j) ? "primary" : "";
+            };
+        }
+
+        syncControls();
+
+        NoxUI::UIElement* cardPtr = card.get();
+        backdrop->OnMouseDown = [cardPtr, &ctx](const NoxUI::UIPointerEvent& e)
+        {
+            if (!cardPtr->GetBounds().Contains(e.Position))
+            {
+                ctx.ClearOverlay();
+                return true;
+            }
+            return false;
+        };
+        backdrop->AddChild(card);
+        ctx.SetOverlay(backdrop);
+    }
+
+    void EditorLayer::ShowSaveAndPlayOverlay()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+
+        NoxUI::UIContext& ctx = uiLayer->GetContext();
+        auto backdrop = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+        backdrop->WidthMode = NoxUI::UISizeMode::Fill;
+        backdrop->HeightMode = NoxUI::UISizeMode::Fill;
+        backdrop->HitTestMode = NoxUI::UIHitTestMode::Self;
+        backdrop->DrawBackground = true;
+        backdrop->StyleClass = "Backdrop";
+
+        auto card = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 10.0f);
+        card->StyleClass = "Surface";
+        card->DrawBackground = true;
+        card->HitTestMode = NoxUI::UIHitTestMode::Self;
+        card->Padding = NoxUI::UIThickness::All(16.0f);
+        card->WidthMode = NoxUI::UISizeMode::Fixed;
+        card->HeightMode = NoxUI::UISizeMode::Auto;
+        card->FixedSize = { 390.0f, 0.0f };
+        card->AnchorMin = { 0.5f, 0.5f };
+        card->AnchorMax = { 0.5f, 0.5f };
+        card->AnchorOffsets = { -195.0f, -95.0f, 195.0f, 95.0f };
+
+        card->AddChild(NoxUI::Label("Save and Play").Get());
+        auto desc = NoxUI::Label("Multiplayer Play starts the other players (NoxRuntime) on the saved scene: the scene is saved first.").Get();
+        desc->WordWrap = true;
+        card->AddChild(desc);
+
+        auto dontAsk = NoxUI::CheckBox("Don't ask again (this session)", m_PlayNet.SaveWithoutAsking,
+                                    [this](bool checked) { m_PlayNet.SaveWithoutAsking = checked; }).Get();
+        card->AddChild(dontAsk);
+
+        auto btnRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 8.0f);
+        btnRow->WidthMode = NoxUI::UISizeMode::Fill;
+        btnRow->HeightMode = NoxUI::UISizeMode::Auto;
+        auto spacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        spacer->WidthMode = NoxUI::UISizeMode::Fill;
+        auto saveBtn = NoxUI::MakeUI<NoxUI::UIButton>("Save and Play", [this, &ctx]()
+        {
+            ctx.ClearOverlay();
+            SaveScene();
+            BeginMultiplayerPlay();
+            RefreshToolBar();
+        });
+        saveBtn->StyleVariant = "primary";
+        saveBtn->Padding = NoxUI::UIThickness::Symmetric(12.0f, 5.0f);
+
+        auto cancelBtn = NoxUI::MakeUI<NoxUI::UIButton>("Cancel", [this, &ctx]()
+        {
+            m_PlayNet.SaveWithoutAsking = false;
+            ctx.ClearOverlay();
+        });
+        cancelBtn->Padding = NoxUI::UIThickness::Symmetric(12.0f, 5.0f);
+
+        btnRow->AddChild(spacer);
+        btnRow->AddChild(saveBtn);
+        btnRow->AddChild(cancelBtn);
+        card->AddChild(btnRow);
+
+        backdrop->AddChild(card);
+        ctx.SetOverlay(backdrop);
+    }
+
     void EditorLayer::OnSceneSimulate()
     {
-        m_EditorSceneReferencesValid = false; // (collected again for this session)
+        if (m_PrefabMode.Active)
+        {
+            Notify(NoxUI::UINotificationSeverity::Info, "Not in Prefab Mode", "Exit Prefab Mode (toolbar) to simulate the level.");
+            return;
+        }
         CancelHLODBuild("Simulate");
-        CancelAcousticBake("Simulate");
-        EndTimelinePreviews();
+        m_AssetEditors.EndPreviews();
+        m_EditorSceneReferencesValid = false;
         if (m_SceneState == SceneState::Play)
             OnSceneStop();
-
         m_SceneState = SceneState::Simulate;
-
-        m_HoveredEntity = Entity(); // points into the scene being replaced
+        m_HoveredEntity = Entity();
         m_ActiveScene = Scene::Copy(m_EditorScene);
+        SetSceneContext(m_ActiveScene);
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer2D);
         const glm::dvec3 streamingSource = m_EditorCamera.GetPosition();
         m_ActiveScene->OnSimulationStart(&streamingSource);
-
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        RefreshToolBar();
     }
 
     void EditorLayer::OnSceneStop()
     {
-        NOX_CORE_ASSERT(m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate, "OnSceneStop failed no sceneState match");
-
-        // Multiplayer Play: the other players and the session end first (the replication refers to the Play scene).
-        const bool started = !(m_SceneState == SceneState::Play && m_PlayWaitingForServer); // (a client still waiting has no Play scene)
+        const bool started = !(m_SceneState == SceneState::Play && m_PlayWaitingForServer);
         EndMultiplayerPlay();
         m_PlayWaitingForServer = false;
         if (m_SceneState == SceneState::Play && started)
@@ -7269,68 +2291,2693 @@ namespace Nox
             m_ActiveScene->OnSimulationStop();
 
         m_SceneState = SceneState::Edit;
-        if (Input::IsRelativeMouseMode()) // a script's locked cursor (Input.CursorLocked) is the session's, not the editor's
+        if (Input::IsRelativeMouseMode())
             Input::SetRelativeMouseMode(false);
-        Input::ClearInjected(); // (automation input -- MCP inject_input -- belongs to the session too)
-
-        m_HoveredEntity = Entity(); // points into the play scene that is destroyed here
+        Input::ClearInjected();
+        m_HoveredEntity = Entity();
         m_ActiveScene = m_EditorScene;
-
-        m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+        SetSceneContext(m_ActiveScene);
         m_UnloadUnusedAssetsRequested = true;
-    }
-
-    void EditorLayer::UnloadUnusedAssets()
-    {
-        std::unordered_set<AssetHandle> referencedAssets;
-        if (m_EditorScene && m_ActiveScene != m_EditorScene)
-        {
-            // Play / Simulate: the edited scene waits as it was, so its references are collected once (half of a streamed world's
-            // sweep was walking its entities again every time).
-            if (!m_EditorSceneReferencesValid)
-            {
-                m_EditorSceneReferences.clear();
-                m_EditorScene->CollectAssetReferences(m_EditorSceneReferences);
-                m_EditorSceneReferencesValid = true;
-            }
-            referencedAssets = m_EditorSceneReferences;
-        }
-        else if (m_EditorScene)
-        {
-            m_EditorScene->CollectAssetReferences(referencedAssets);
-            m_EditorSceneReferencesValid = false;
-        }
-        if (m_ActiveScene && m_ActiveScene != m_EditorScene)
-            m_ActiveScene->CollectAssetReferences(referencedAssets);
-        if (m_PrefabMode.ReturnScene) // the level waits while a prefab is edited: its assets stay
-            m_PrefabMode.ReturnScene->CollectAssetReferences(referencedAssets);
-        if (m_HLODBuild) // the cell being built waits for its models and prefabs
-            m_HLODBuild->CollectAssetReferences(referencedAssets);
-        AssetPreviewRenderer::Get().CollectAssetReferences(referencedAssets); // what the asset previews draw right now
-
-        Project::GetActive()->GetEditorAssetManager()->UnloadUnusedAssets(referencedAssets);
+        RefreshToolBar();
     }
 
     void EditorLayer::OnScenePause()
     {
-        if (m_SceneState == SceneState::Edit)
-            return;
-
-        m_ActiveScene->SetPaused(true);
+        if (m_SceneState != SceneState::Edit && m_ActiveScene)
+            m_ActiveScene->SetPaused(true);
     }
 
-    void EditorLayer::OnDuplicateEntity()
+    void EditorLayer::LoadViewportPrefs()
     {
-        if (m_SceneState != SceneState::Edit)
+        if (LayoutDirectory().empty())
+            return;
+        std::ifstream in(LayoutDirectory() / kViewportPrefsFile);
+        if (!in.is_open())
+            return;
+        for (std::string line; std::getline(in, line);)
         {
+            int index = 0, open = 0, view = 0, grid = 1, resolution = 0, realtime = 1, cameraPos = 0;
+            unsigned flags = Renderer::ExtraViewOutline;
+            const int read = sscanf(line.c_str(), "Viewport%d=%d,%d,%u,%d,%d,%d,%d",
+                                    &index, &open, &view, &flags, &grid, &resolution, &realtime, &cameraPos);
+            if (read >= 3 && index >= 0 && index < kMaxViewports && view >= 0 && view <= static_cast<int>(EditorViewMode::Right))
+            {
+                ViewportSlot& slot = m_Viewports[index];
+                slot.Open = (index == 0) || (open != 0);
+                slot.Camera.SetViewMode(static_cast<EditorViewMode>(view));
+                if (read >= 7)
+                {
+                    slot.ShowFlags = flags;
+                    slot.ShowGrid = (grid != 0);
+                    slot.ResolutionIndex = std::clamp(resolution, 0, 2);
+                    slot.Realtime = (realtime != 0);
+                    slot.ShowCameraPosition = (read == 8 && cameraPos != 0);
+                }
+                if (index == 0)
+                    m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(view));
+            }
+        }
+    }
+
+    void EditorLayer::SaveViewportPrefs() const
+    {
+        if (LayoutDirectory().empty())
+            return;
+        std::error_code error;
+        std::filesystem::create_directories(LayoutDirectory(), error);
+        std::ofstream out(LayoutDirectory() / kViewportPrefsFile, std::ios::trunc);
+        if (!out.is_open())
+            return;
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            const ViewportSlot& slot = m_Viewports[index];
+            const int view = static_cast<int>(index == m_ActiveViewport ? m_EditorCamera.GetViewMode() : slot.Camera.GetViewMode());
+            out << "Viewport" << index << "="
+                << (slot.Open ? 1 : 0) << ","
+                << view << ","
+                << slot.ShowFlags << ","
+                << (slot.ShowGrid ? 1 : 0) << ","
+                << slot.ResolutionIndex << ","
+                << (slot.Realtime ? 1 : 0) << ","
+                << (slot.ShowCameraPosition ? 1 : 0) << "\n";
+        }
+    }
+
+    void EditorLayer::OpenViewport(int index)
+    {
+        if (index < 0 || index >= kMaxViewports)
+            return;
+        ViewportSlot& slot = m_Viewports[index];
+        if (!slot.CameraSet)
+        {
+            const EditorViewMode keepMode = slot.Camera.GetViewMode();
+            slot.Camera = m_EditorCamera;
+            slot.Camera.SetViewMode(keepMode);
+            slot.CameraSet = true;
+        }
+        slot.Open = true;
+
+        if (index > 0)
+        {
+            if (m_ViewportSlotRoots[index] && m_ExtraViewportHosts[index] && index != m_ActiveViewport)
+            {
+                m_ViewportSlotRoots[index]->ClearChildren();
+                m_ViewportSlotRoots[index]->AddChild(m_ExtraViewportHosts[index]);
+            }
+            if (m_ViewportDockSpace && !m_ViewportDockSpace->FindNodeByPanelTitle(slot.Title))
+            {
+                const NoxUI::UIDockDropZone zone = (index == 2) ? NoxUI::UIDockDropZone::Bottom : NoxUI::UIDockDropZone::Right;
+                const std::string target = (index == 3 && m_Viewports[1].Open) ? std::string(m_Viewports[1].Title) : std::string("Viewport");
+                const NoxUI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? NoxUI::UIDockDropZone::Bottom : zone;
+                m_ViewportDockSpace->AddPanel(slot.Title, m_ViewportSlotRoots[index], useZone, target, 0.5f);
+            }
+        }
+        SyncViewportTabBars();
+    }
+
+    void EditorLayer::CloseViewport(int index)
+    {
+        if (index <= 0 || index >= kMaxViewports)
+            return;
+        if (m_ActiveViewport == index)
+            ActivateViewport(0);
+
+        ViewportSlot& slot = m_Viewports[index];
+        slot.Open = false;
+        slot.Hovered = false;
+        slot.Size = { 0, 0 };
+        slot.DrawnSize = { 0, 0 };
+        if (m_Renderer && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+            m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
+        if (m_ExtraViewportImages[index])
+            m_ExtraViewportImages[index]->TextureId = ~0u;
+
+        if (m_ViewportDockSpace)
+            m_ViewportDockSpace->RemovePanel(slot.Title);
+        SyncViewportTabBars();
+    }
+
+    void EditorLayer::ActivateViewport(int index)
+    {
+        if (index < 0 || index >= kMaxViewports || index == m_ActiveViewport)
+            return;
+
+        ViewportSlot& previous = m_Viewports[m_ActiveViewport];
+        ViewportSlot& next = m_Viewports[index];
+        if (!next.Open)
+            OpenViewport(index);
+        if (!next.CameraSet)
+        {
+            const EditorViewMode keepMode = next.Camera.GetViewMode();
+            next.Camera = m_EditorCamera;
+            next.Camera.SetViewMode(keepMode);
+            next.CameraSet = true;
+        }
+
+        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
+        const int prevIdx = m_ActiveViewport;
+        previous.Camera = m_EditorCamera;
+        previous.CameraSet = true;
+        previous.DrawnSize = { 0, 0 };
+        m_EditorCamera = next.Camera;
+        m_ActiveViewport = index;
+
+        if (m_ViewportSlotRoots[prevIdx] && m_ExtraViewportHosts[prevIdx])
+        {
+            m_ViewportSlotRoots[prevIdx]->ClearChildren();
+            m_ViewportSlotRoots[prevIdx]->AddChild(m_ExtraViewportHosts[prevIdx]);
+        }
+        if (m_ViewportSlotRoots[index] && m_ActiveViewportHost)
+        {
+            m_ViewportSlotRoots[index]->ClearChildren();
+            m_ViewportSlotRoots[index]->AddChild(m_ActiveViewportHost);
+            const NoxUI::UIRect& b = m_ViewportSlotRoots[index]->GetBounds();
+            if (b.Width() > 1.0f && b.Height() > 1.0f)
+                m_EditorCamera.SetViewportSize(b.Width(), b.Height());
+        }
+
+        m_HoveredEntity = Entity();
+        m_ViewportTools.IsBoxSelecting = false;
+        SyncOrthoRenderSettings(wasOrthographic);
+        if (m_Renderer)
+            m_Renderer->ResetCameraHistory();
+        m_ViewportToolbar.Sync();
+    }
+
+    void EditorLayer::ApplyViewportLayout(ViewportLayout layout)
+    {
+        if (!m_ViewportDockSpace)
+            return;
+
+        const auto& dock = m_ViewportDockSpace;
+        int count = 1;
+        switch (layout)
+        {
+        case ViewportLayout::One: count = 1; break;
+        case ViewportLayout::TwoSideBySide:
+        case ViewportLayout::TwoStacked: count = 2; break;
+        case ViewportLayout::Three: count = 3; break;
+        case ViewportLayout::Four: count = 4; break;
+        }
+
+        if (m_ActiveViewport >= count)
+            ActivateViewport(0);
+
+        for (int index = 1; index < kMaxViewports; ++index)
+        {
+            dock->RemovePanel(m_Viewports[index].Title);
+            m_Viewports[index].Open = false;
+            m_Viewports[index].Hovered = false;
+            m_Viewports[index].Size = { 0, 0 };
+            m_Viewports[index].DrawnSize = { 0, 0 };
+            if (m_Renderer && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+                m_Renderer->ReleaseExtraView(static_cast<uint32_t>(index));
+            if (m_ExtraViewportImages[index])
+                m_ExtraViewportImages[index]->TextureId = ~0u;
+        }
+
+        if (!dock->FindNodeByPanelTitle("Viewport") && m_ViewportSlotRoots[0])
+        {
+            const NoxUI::UIDockNodeFlags vpFlags = (count > 1)
+                ? NoxUI::UIDockNodeFlags::NoUndocking
+                : (NoxUI::UIDockNodeFlags::NoUndocking | NoxUI::UIDockNodeFlags::NoTabBar);
+            dock->AddPanel("Viewport", m_ViewportSlotRoots[0], NoxUI::UIDockDropZone::Center, {}, 0.5f, vpFlags);
+        }
+
+        auto prepareSlot = [this](int index)
+        {
+            ViewportSlot& slot = m_Viewports[index];
+            if (!slot.CameraSet)
+            {
+                const EditorViewMode keepMode = slot.Camera.GetViewMode();
+                slot.Camera = m_EditorCamera;
+                slot.Camera.SetViewMode(keepMode);
+                slot.CameraSet = true;
+            }
+            slot.Open = true;
+            if (index != m_ActiveViewport && m_ViewportSlotRoots[index] && m_ExtraViewportHosts[index])
+            {
+                m_ViewportSlotRoots[index]->ClearChildren();
+                m_ViewportSlotRoots[index]->AddChild(m_ExtraViewportHosts[index]);
+            }
+        };
+
+        for (int i = 1; i < count; ++i)
+            prepareSlot(i);
+
+        switch (layout)
+        {
+        case ViewportLayout::One:
+            break;
+        case ViewportLayout::TwoSideBySide:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Right, "Viewport", 0.5f);
+            break;
+        case ViewportLayout::TwoStacked:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Bottom, "Viewport", 0.5f);
+            break;
+        case ViewportLayout::Three:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Right, "Viewport", 0.4f);
+            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], NoxUI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
+            break;
+        case ViewportLayout::Four:
+            dock->AddPanel(m_Viewports[1].Title, m_ViewportSlotRoots[1], NoxUI::UIDockDropZone::Right, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[2].Title, m_ViewportSlotRoots[2], NoxUI::UIDockDropZone::Bottom, "Viewport", 0.5f);
+            dock->AddPanel(m_Viewports[3].Title, m_ViewportSlotRoots[3], NoxUI::UIDockDropZone::Bottom, m_Viewports[1].Title, 0.5f);
+            break;
+        }
+        SyncViewportTabBars();
+    }
+
+    void EditorLayer::SyncViewportTabBars()
+    {
+        if (!m_ViewportDockSpace)
+            return;
+        const bool multi = (OpenViewportCount() > 1);
+        const NoxUI::UIDockNodeFlags vpFlags = multi
+            ? NoxUI::UIDockNodeFlags::NoUndocking
+            : (NoxUI::UIDockNodeFlags::NoUndocking | NoxUI::UIDockNodeFlags::NoTabBar);
+        m_ViewportDockSpace->SetPanelFlags("Viewport", vpFlags);
+    }
+
+    int EditorLayer::HoveredViewport() const
+    {
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (m_Viewports[index].Open && m_Viewports[index].Hovered)
+                return index;
+        }
+        return -1;
+    }
+
+    int EditorLayer::OpenViewportCount() const
+    {
+        int count = 0;
+        for (const ViewportSlot& slot : m_Viewports)
+            count += slot.Open ? 1 : 0;
+        return count;
+    }
+
+    void EditorLayer::SubmitExtraViewports(Timestep ts)
+    {
+        if (!m_Renderer)
+            return;
+        const float cell = std::max(m_ViewportTools.LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            ViewportSlot& slot = m_Viewports[index];
+            slot.Submitted = false;
+            if (index == m_ActiveViewport || !slot.Open || slot.Size.x == 0 || slot.Size.y == 0)
+            {
+                slot.DrawnSize = { 0, 0 };
+                continue;
+            }
+
+            const float width = static_cast<float>(slot.Size.x);
+            const float height = static_cast<float>(slot.Size.y);
+            if (slot.Camera.GetAspectRatio() != width / height)
+                slot.Camera.SetViewportSize(width, height);
+            slot.Camera.OnUpdate(ts, false);
+
+            const uint32_t divisor = 1u << std::clamp(slot.ResolutionIndex, 0, 2);
+            const glm::uvec2 drawSize = glm::max(slot.Size / divisor, glm::uvec2(1));
+            uint32_t flags = slot.ShowFlags;
+
+            const glm::mat4 viewProjection = slot.Camera.GetProjection() * slot.Camera.GetViewMatrix(m_Renderer->GetRenderOrigin());
+            size_t selection = m_Selection.GetEntities().size();
+            for (const Entity& selected : m_Selection.GetEntities())
+                selection = selection * 31 + static_cast<uint32_t>(selected);
+            slot.SinceDrawn += ts.GetSeconds();
+            if (!slot.Realtime && m_SceneState == SceneState::Edit && slot.DrawnSize == drawSize && slot.DrawnFlags == flags &&
+                slot.DrawnViewProjection == viewProjection && slot.DrawnHistory == m_History.GetPosition() && slot.DrawnSelection == selection &&
+                !m_ViewportTools.GizmoUsing && slot.SinceDrawn < 2.0f && m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index)))
+            {
+                slot.Submitted = true;
+                continue;
+            }
+
+            slot.DrawnSize = drawSize;
+            slot.DrawnFlags = flags;
+            slot.DrawnViewProjection = viewProjection;
+            slot.DrawnHistory = m_History.GetPosition();
+            slot.DrawnSelection = selection;
+            slot.SinceDrawn = 0.0f;
+
+            shaderio::PushConstantGrid grid{};
+            const bool showGrid = (m_SceneState != SceneState::Play && m_ViewportTools.ShowGrid && slot.ShowGrid);
+            if (showGrid)
+            {
+                const EditorViewMode mode = slot.Camera.GetViewMode();
+                const int axis = (mode == EditorViewMode::Front || mode == EditorViewMode::Back) ? 2 :
+                                 (mode == EditorViewMode::Left || mode == EditorViewMode::Right) ? 0 : 1;
+                grid = slot.Camera.IsOrthographic()
+                    ? Renderer2D::MakeGrid(slot.Camera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, axis, slot.Camera.GetOrthoHalfHeight())
+                    : Renderer2D::MakeGrid(slot.Camera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, slot.Camera.GetDistance());
+            }
+            if (m_SceneState == SceneState::Play)
+                flags &= ~Renderer::ExtraViewOutline;
+
+            m_Renderer->SubmitExtraView(static_cast<uint32_t>(index), slot.Camera, nri::Extent2D{ drawSize.x, drawSize.y }, showGrid ? &grid : nullptr, false, flags);
+            slot.Submitted = true;
+        }
+    }
+
+    std::vector<NoxUI::UIMenuItem> EditorLayer::BuildViewportOptionsItems(int index)
+    {
+        ViewportSlot& slot = m_Viewports[index];
+        auto toggleFlag = [&slot](uint32_t bit, bool inverted)
+        {
+            const bool on = ((slot.ShowFlags & bit) != 0) != inverted;
+            slot.ShowFlags = (!on != inverted) ? (slot.ShowFlags | bit) : (slot.ShowFlags & ~bit);
+        };
+        const bool lit = (slot.ShowFlags & Renderer::ExtraViewUnlit) == 0;
+        const bool wf = (slot.ShowFlags & Renderer::ExtraViewWireframe) != 0;
+        const bool sky = (slot.ShowFlags & Renderer::ExtraViewNoSky) == 0;
+        const bool particles = (slot.ShowFlags & Renderer::ExtraViewNoParticles) == 0;
+        const bool outline = (slot.ShowFlags & Renderer::ExtraViewOutline) != 0;
+
+        return {
+            {"While it is not the active viewport (full render)", "", {}, false, false, false, true},
+            {"Lit", "", [&slot]() { slot.ShowFlags &= ~Renderer::ExtraViewUnlit; }, false, true, lit},
+            {"Unlit", "", [&slot]() { slot.ShowFlags |= Renderer::ExtraViewUnlit; }, false, true, !lit, false,
+             "Base colors without lighting or exposure."},
+            {"", "", {}, true},
+            {"Wireframe", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewWireframe, false); }, false, true, wf, false,
+             "The triangles' edges over the image."},
+            {"Sky", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewNoSky, true); }, false, true, sky, false,
+             "The sky behind the geometry (off: black)."},
+            {"Particles", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewNoParticles, true); }, false, true, particles, false,
+             "The scene's particle systems."},
+            {"Selection Outline", "", [toggleFlag]() mutable { toggleFlag(Renderer::ExtraViewOutline, false); }, false, true, outline, false,
+             "The orange outline of the selected entities."},
+            {"Grid", "", [&slot]() { slot.ShowGrid = !slot.ShowGrid; }, false, true, slot.ShowGrid},
+            {"", "", {}, true},
+            {"Full Resolution", "", [&slot]() { slot.ResolutionIndex = 0; }, false, true, slot.ResolutionIndex == 0},
+            {"Half Resolution", "", [&slot]() { slot.ResolutionIndex = 1; }, false, true, slot.ResolutionIndex == 1},
+            {"Quarter Resolution", "", [&slot]() { slot.ResolutionIndex = 2; }, false, true, slot.ResolutionIndex == 2},
+            {"", "", {}, true},
+            {"Camera Position", "", [&slot]() { slot.ShowCameraPosition = !slot.ShowCameraPosition; }, false, true, slot.ShowCameraPosition, false,
+             "Show world-unit coordinates next to the axis indicator."},
+            {"Realtime", "", [&slot]() { slot.Realtime = !slot.Realtime; }, false, true, slot.Realtime, false,
+             "Off: drawn again only when its camera, the scene or the selection change."}
+        };
+    }
+
+    int EditorLayer::GridPlaneAxis() const
+    {
+        switch (m_EditorCamera.GetViewMode())
+        {
+        case EditorViewMode::Front:
+        case EditorViewMode::Back: return 2;
+        case EditorViewMode::Left:
+        case EditorViewMode::Right: return 0;
+        default: return 1;
+        }
+    }
+
+    void EditorLayer::SetViewMode(EditorViewMode mode)
+    {
+        const bool wasOrthographic = m_EditorCamera.IsOrthographic();
+        m_EditorCamera.SetViewMode(mode);
+        SyncOrthoRenderSettings(wasOrthographic);
+    }
+
+    void EditorLayer::SyncOrthoRenderSettings(bool wasOrthographic)
+    {
+        if (!m_Renderer)
+            return;
+        const bool isOrthographic = m_EditorCamera.IsOrthographic();
+        if (isOrthographic && !wasOrthographic)
+        {
+            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+            m_Renderer->setDLSSEnabled(false);
+            m_Renderer->setRayTracingEnabled(false);
+            m_Renderer->setPathTracingEnabled(false);
+        }
+        else if (!isOrthographic && wasOrthographic && m_OrthoSaved.Valid)
+        {
+            m_Renderer->setDLSSEnabled(m_OrthoSaved.Dlss);
+            m_Renderer->setRayTracingEnabled(m_OrthoSaved.RayTracing);
+            m_Renderer->setPathTracingEnabled(m_OrthoSaved.PathTracing);
+            m_OrthoSaved.Valid = false;
+        }
+    }
+
+    void EditorLayer::DrawWorldGrid()
+    {
+        if (!m_Renderer2D || !m_Renderer)
+            return;
+        const float cell = std::max(m_ViewportTools.LocationSnapWorldUnits(), WorldUnits::FromMeters(1.0f));
+        if (m_EditorCamera.IsOrthographic())
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetFocalPoint(), m_Renderer->GetRenderOrigin(), cell, GridPlaneAxis(), m_EditorCamera.GetOrthoHalfHeight());
+        else
+            m_Renderer2D->DrawGrid(m_EditorCamera.GetPosition(), m_Renderer->GetRenderOrigin(), cell, 1, m_EditorCamera.GetDistance());
+    }
+
+    void EditorLayer::DrawReferenceFigure(const glm::dvec3& worldPosition)
+    {
+        if (!m_Renderer2D || !m_Renderer)
+            return;
+        const glm::vec3 position = m_Renderer->ToRenderSpace(worldPosition);
+        auto cm = [](float centimeters) { return WorldUnits::FromCentimeters(centimeters); };
+        const glm::vec4 color(1.0f, 0.62f, 0.2f, 0.9f);
+
+        auto box = [&](float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
+        {
+            const glm::vec3 low = position + glm::vec3(cm(minX), cm(minY), cm(minZ));
+            const glm::vec3 high = position + glm::vec3(cm(maxX), cm(maxY), cm(maxZ));
+            const glm::vec3 corners[8] = {
+                { low.x, low.y, low.z }, { high.x, low.y, low.z }, { high.x, low.y, high.z }, { low.x, low.y, high.z },
+                { low.x, high.y, low.z }, { high.x, high.y, low.z }, { high.x, high.y, high.z }, { low.x, high.y, high.z }
+            };
+            constexpr int edges[12][2] = { {0,1},{1,2},{2,3},{3,0}, {4,5},{5,6},{6,7},{7,4}, {0,4},{1,5},{2,6},{3,7} };
+            for (const auto& edge : edges)
+                m_Renderer2D->DrawThinLine(corners[edge[0]], corners[edge[1]], color);
+        };
+
+        box(-18.0f, -1.0f, 0.0f, 88.0f, -10.0f, 10.0f);
+        box(1.0f, 18.0f, 0.0f, 88.0f, -10.0f, 10.0f);
+        box(-22.0f, 22.0f, 88.0f, 143.0f, -11.0f, 11.0f);
+        box(-31.0f, -22.0f, 83.0f, 143.0f, -5.0f, 5.0f);
+        box(22.0f, 31.0f, 83.0f, 143.0f, -5.0f, 5.0f);
+        box(-4.0f, 4.0f, 143.0f, 151.0f, -4.0f, 4.0f);
+        box(-10.0f, 10.0f, 151.0f, 180.0f, -12.0f, 12.0f);
+    }
+
+    namespace
+    {
+        glm::vec3 DecomposeWorldScale(const glm::mat4& worldMatrix)
+        {
+            return glm::vec3(
+                glm::length(glm::vec3(worldMatrix[0])),
+                glm::length(glm::vec3(worldMatrix[1])),
+                glm::length(glm::vec3(worldMatrix[2])));
+        }
+
+        glm::mat4 RigidPart(const glm::mat4& worldMatrix)
+        {
+            glm::mat4 result = worldMatrix;
+            for (int c = 0; c < 3; ++c)
+            {
+                const float l = glm::length(glm::vec3(worldMatrix[c]));
+                if (l > 1e-6f)
+                    result[c] = glm::vec4(glm::vec3(worldMatrix[c]) / l, 0.0f);
+            }
+            return result;
+        }
+    }
+
+    void EditorLayer::DrawPhysicsColliders3D()
+    {
+        if (!m_ActiveScene || !m_Renderer || !m_Renderer2D)
+            return;
+
+        constexpr glm::vec4 kActiveColor(0.2f, 1.0f, 0.3f, 0.9f);
+        constexpr glm::vec4 kInactiveColor(1.0f, 0.3f, 0.25f, 0.9f);
+        constexpr glm::vec4 kCharacterColor(0.3f, 0.75f, 1.0f, 0.9f);
+        constexpr int kCircleSegments = 32;
+
+        auto colorOf = [this, kActiveColor, kInactiveColor](entt::entity handle)
+        {
+            for (Entity entity(handle, m_ActiveScene.get()); entity; entity = entity.GetParent())
+            {
+                if (entity.HasComponent<RigidBody3DComponent>())
+                    return kActiveColor;
+            }
+            return kInactiveColor;
+        };
+        auto line = [this](const glm::vec3& a, const glm::vec3& b, const glm::vec4& color) { m_Renderer2D->DrawXRayLine(a, b, color); };
+
+        auto drawCircle = [&](const glm::mat4& transform, const glm::vec3& centre, float radius, int axis, const glm::vec4& color)
+        {
+            const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+            glm::vec3 previous(0.0f);
+            for (int i = 0; i <= kCircleSegments; ++i)
+            {
+                const float t = glm::two_pi<float>() * static_cast<float>(i) / kCircleSegments;
+                glm::vec3 local = centre;
+                local[a] += std::cos(t) * radius;
+                local[b] += std::sin(t) * radius;
+                const glm::vec3 point = glm::vec3(transform * glm::vec4(local, 1.0f));
+                if (i > 0)
+                    line(previous, point, color);
+                previous = point;
+            }
+        };
+
+        auto drawCapsule = [&](const glm::mat4& transform, const glm::vec3& centre, float halfHeight, float top, float bottom, const glm::vec4& color)
+        {
+            const float sine = halfHeight > 1e-6f ? std::clamp((bottom - top) / (2.0f * halfHeight), -1.0f, 1.0f) : 0.0f;
+            const float tangent = std::asin(sine);
+            const glm::vec3 topCentre = centre + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = centre - glm::vec3(0.0f, halfHeight, 0.0f);
+            auto at = [&](const glm::vec3& c, float radius, const glm::vec3& across, float angle)
+            {
+                return glm::vec3(transform * glm::vec4(c + radius * (std::cos(angle) * across + std::sin(angle) * glm::vec3(0.0f, 1.0f, 0.0f)), 1.0f));
+            };
+            auto arc = [&](const glm::vec3& c, float radius, const glm::vec3& across, float from, float to)
+            {
+                constexpr int kSegments = 16;
+                glm::vec3 previous = at(c, radius, across, from);
+                for (int i = 1; i <= kSegments; ++i)
+                {
+                    const glm::vec3 point = at(c, radius, across, from + (to - from) * static_cast<float>(i) / kSegments);
+                    line(previous, point, color);
+                    previous = point;
+                }
+            };
+            for (const glm::vec3& across : { glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) })
+            {
+                arc(topCentre, top, across, tangent, glm::pi<float>() - tangent);
+                arc(bottomCentre, bottom, across, glm::pi<float>() - tangent, glm::two_pi<float>() + tangent);
+                line(at(topCentre, top, across, tangent), at(bottomCentre, bottom, across, tangent), color);
+                line(at(topCentre, top, across, glm::pi<float>() - tangent), at(bottomCentre, bottom, across, glm::pi<float>() - tangent), color);
+            }
+            drawCircle(transform, topCentre + glm::vec3(0.0f, top * sine, 0.0f), top * std::cos(tangent), 1, color);
+            drawCircle(transform, bottomCentre + glm::vec3(0.0f, bottom * sine, 0.0f), bottom * std::cos(tangent), 1, color);
+        };
+
+        auto boxView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider3DComponent>();
+        for (auto entity : boxView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, box] = boxView.get<WorldTransformComponent, BoxCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 halfExtents = box.HalfExtents * DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            glm::vec3 corners[8];
+            for (int i = 0; i < 8; ++i)
+            {
+                const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                corners[i] = glm::vec3(transform * glm::vec4(box.Offset + sign * halfExtents, 1.0f));
+            }
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            for (const auto& edge : edges)
+                line(corners[edge[0]], corners[edge[1]], color);
+        }
+
+        auto sphereView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, SphereCollider3DComponent>();
+        for (auto entity : sphereView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, sphere] = sphereView.get<WorldTransformComponent, SphereCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float radius = sphere.Radius * std::max({ worldScale.x, worldScale.y, worldScale.z });
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            for (int axis = 0; axis < 3; ++axis)
+                drawCircle(transform, sphere.Offset, radius, axis, color);
+        }
+
+        auto capsuleView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CapsuleCollider3DComponent>();
+        for (auto entity : capsuleView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, capsule] = capsuleView.get<WorldTransformComponent, CapsuleCollider3DComponent>(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float horizontal = std::max(worldScale.x, worldScale.z);
+            const float top = capsule.Radius * horizontal;
+            const float bottom = capsule.BottomRadius > 0.0f ? capsule.BottomRadius * horizontal : top;
+            drawCapsule(RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix)), capsule.Offset, capsule.HalfHeight * worldScale.y, top, bottom, colorOf(entity));
+        }
+
+        auto characterView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CharacterController3DComponent>();
+        for (auto entity : characterView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, controller] = characterView.get<WorldTransformComponent, CharacterController3DComponent>(entity);
+            const float radius = std::max(controller.Radius, WorldUnits::FromCentimeters(1.0f));
+            const float halfHeight = 0.5f * std::max(controller.Height, 0.0f);
+            const glm::mat4 transform = glm::translate(glm::mat4(1.0f), m_Renderer->ToRenderSpace(wtc.GetPosition()));
+            drawCapsule(transform, glm::vec3(0.0f, halfHeight + radius, 0.0f), halfHeight, radius, radius, kCharacterColor);
+        }
+
+        auto cylinderView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CylinderCollider3DComponent>();
+        for (auto entity : cylinderView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, cylinder] = cylinderView.get<WorldTransformComponent, CylinderCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const float halfHeight = cylinder.HalfHeight * worldScale.y;
+            const float horizontal = std::max(worldScale.x, worldScale.z);
+            const float top = cylinder.Radius * horizontal;
+            const float bottom = (cylinder.BottomRadius > 0.0f ? cylinder.BottomRadius : cylinder.Radius) * horizontal;
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::vec3 topCentre = cylinder.Offset + glm::vec3(0.0f, halfHeight, 0.0f);
+            const glm::vec3 bottomCentre = cylinder.Offset - glm::vec3(0.0f, halfHeight, 0.0f);
+            if (top > 0.0f)
+                drawCircle(transform, topCentre, top, 1, color);
+            drawCircle(transform, bottomCentre, bottom, 1, color);
+            for (int i = 0; i < 8; ++i)
+            {
+                const float t = glm::quarter_pi<float>() * static_cast<float>(i);
+                const glm::vec3 direction(std::cos(t), 0.0f, std::sin(t));
+                line(glm::vec3(transform * glm::vec4(topCentre + direction * top, 1.0f)),
+                     glm::vec3(transform * glm::vec4(bottomCentre + direction * bottom, 1.0f)), color);
+            }
+        }
+
+        glm::dvec3 viewPosition = m_EditorCamera.GetPosition();
+        if (m_SceneState == SceneState::Play)
+        {
+            if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity())
+                viewPosition = camera.GetComponent<WorldTransformComponent>().GetPosition();
+        }
+        const glm::vec3 eye = m_Renderer->ToRenderSpace(viewPosition);
+        auto planeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PlaneCollider3DComponent>();
+        for (auto entity : planeView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, plane] = planeView.get<WorldTransformComponent, PlaneCollider3DComponent>(entity);
+            const glm::vec4 color = colorOf(entity);
+            const glm::vec3 worldScale = DecomposeWorldScale(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            const glm::mat4 transform = RigidPart(m_Renderer->ToRenderSpace(wtc.WorldMatrix));
+            auto point = [&](float x, float y, float z) { return glm::vec3(transform * glm::vec4(plane.Offset + glm::vec3(x, y, z), 1.0f)); };
+            if (plane.HalfSize.x > 0.0f && plane.HalfSize.y > 0.0f)
+            {
+                const float x = plane.HalfSize.x * worldScale.x, z = plane.HalfSize.y * worldScale.z;
+                line(point(-x, 0, -z), point(x, 0, -z), color);
+                line(point(x, 0, -z), point(x, 0, z), color);
+                line(point(x, 0, z), point(-x, 0, z), color);
+                line(point(-x, 0, z), point(-x, 0, -z), color);
+                line(point(0, 0, 0), point(0, WorldUnits::FromMeters(1.0f), 0), color);
+                continue;
+            }
+            glm::vec4 endlessColor = color;
+            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
+            {
+                if (owner.HasComponent<RigidBody3DComponent>())
+                {
+                    if (owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic)
+                        endlessColor = kInactiveColor;
+                    break;
+                }
+            }
+            const glm::vec3 origin = point(0, 0, 0);
+            const glm::vec3 alongX = glm::vec3(transform[0]), alongZ = glm::vec3(transform[2]);
+            const float step = WorldUnits::FromMeters(5.0f);
+            const float reach = WorldUnits::FromMeters(50.0f);
+            const float nearX = std::round(glm::dot(eye - origin, alongX) / step) * step;
+            const float nearZ = std::round(glm::dot(eye - origin, alongZ) / step) * step;
+            for (float offset = -reach; offset <= reach + 0.5f * step; offset += step)
+            {
+                line(point(nearX - reach, 0, nearZ + offset), point(nearX + reach, 0, nearZ + offset), endlessColor);
+                line(point(nearX + offset, 0, nearZ - reach), point(nearX + offset, 0, nearZ + reach), endlessColor);
+            }
+            line(origin, point(0, WorldUnits::FromMeters(1.0f), 0), endlessColor);
+        }
+
+        auto animatorView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AnimatorComponent>();
+        for (auto entity : animatorView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, animator] = animatorView.get<WorldTransformComponent, AnimatorComponent>(entity);
+            const AnimationGraphInstance& graph = animator.GraphInstance;
+            if (graph.FootProbes.empty())
+                continue;
+            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+            const float meter = WorldUnits::FromMeters(1.0f);
+            for (const AnimFootProbe& probe : graph.FootProbes)
+            {
+                const glm::vec3 foot = glm::vec3(world * glm::vec4(probe.Position, 1.0f));
+                const glm::vec3 start = foot + glm::vec3(0.0f, probe.Up * meter, 0.0f);
+                const glm::vec3 end = foot - glm::vec3(0.0f, probe.Down * meter, 0.0f);
+                const auto ground = graph.FootGround.find(probe.Bone);
+                if (ground == graph.FootGround.end() || !ground->second.Hit)
+                {
+                    line(start, end, NoxUI::ThemeColor("DebugFootNoGround", { 1.0f, 0.25f, 0.2f, 1.0f }));
+                    continue;
+                }
+                const glm::vec3 hit = glm::vec3(world * glm::vec4(ground->second.Point, 1.0f));
+                const glm::vec4 green(0.2f, 1.0f, 0.3f, 1.0f);
+                line(start, hit, green);
+                const float c = WorldUnits::FromCentimeters(4.0f);
+                line(hit - glm::vec3(c, 0, 0), hit + glm::vec3(c, 0, 0), green);
+                line(hit - glm::vec3(0, 0, c), hit + glm::vec3(0, 0, c), green);
+                line(hit, hit + glm::vec3(world * glm::vec4(ground->second.Normal, 0.0f)) * (3.0f * c), green);
+            }
+        }
+
+        auto meshView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, MeshCollider3DComponent>();
+        for (auto entity : meshView)
+        {
+            if (!m_ActiveScene->IsActiveInHierarchy(entity))
+                continue;
+            auto [wtc, mesh] = meshView.get<WorldTransformComponent, MeshCollider3DComponent>(entity);
+            if (mesh.Mesh == 0)
+                continue;
+            bool dynamic = false;
+            for (Entity owner(entity, m_ActiveScene.get()); owner; owner = owner.GetParent())
+            {
+                if (owner.HasComponent<RigidBody3DComponent>())
+                {
+                    dynamic = owner.GetComponent<RigidBody3DComponent>().Type == RigidBody3DComponent::BodyType::Dynamic;
+                    break;
+                }
+            }
+            const std::vector<glm::vec3>& lines = MeshColliderWireframe(mesh, mesh.Convex || dynamic);
+            const glm::vec4 color = colorOf(entity);
+            const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+            for (size_t i = 0; i + 1 < lines.size(); i += 2)
+                line(glm::vec3(world * glm::vec4(lines[i], 1.0f)), glm::vec3(world * glm::vec4(lines[i + 1], 1.0f)), color);
+        }
+    }
+
+    void EditorLayer::OnOverlayRender()
+    {
+        if (!m_Renderer || !m_Renderer2D || !m_ActiveScene)
+            return;
+
+        if (m_SceneState == SceneState::Play)
+        {
+            Entity camera = m_ActiveScene->GetPrimaryCameraEntity();
+            if (!camera)
+                return;
+            m_Renderer->BeginScene(camera.GetComponent<CameraComponent>().Camera, camera.GetComponent<WorldTransformComponent>().WorldMatrix);
+        }
+        else
+        {
+            m_Renderer->BeginScene(m_EditorCamera);
+        }
+
+        if (m_SceneState != SceneState::Play && m_ViewportTools.ShowGrid)
+            DrawWorldGrid();
+
+        if (m_SceneState != SceneState::Play && m_ViewportTools.ShowReferenceFigure)
+        {
+            glm::dvec3 underCursor;
+            const bool vpHovered = m_ViewportCanvas && NoxUI::HasState(m_ViewportCanvas->GetState(), NoxUI::UIState::Hovered);
+            if (m_ViewportTools.ReferenceFigureAtCursor && vpHovered && m_ViewportCanvas->PickWorldPoint(underCursor))
+                m_ViewportTools.ReferenceFigurePosition = underCursor;
+            DrawReferenceFigure(m_ViewportTools.ReferenceFigureAtCursor ? m_ViewportTools.ReferenceFigurePosition : glm::dvec3(0.0));
+        }
+
+        if (m_SceneState != SceneState::Play)
+        {
+            auto rectLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, RectLightComponent>();
+            for (auto entity : rectLights)
+            {
+                auto [wtc, light] = rectLights.get<WorldTransformComponent, RectLightComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                const glm::vec3 centre = glm::vec3(world[3]);
+                const glm::vec3 halfX = glm::vec3(world[0]) * (0.5f * light.Width);
+                const glm::vec3 halfY = glm::vec3(world[1]) * (0.5f * light.Height);
+                const glm::vec3 corners[4] = { centre - halfX - halfY, centre + halfX - halfY, centre + halfX + halfY, centre - halfX + halfY };
+                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
+                for (int i = 0; i < 4; ++i)
+                    m_Renderer2D->DrawXRayLine(corners[i], corners[(i + 1) % 4], colour);
+                const glm::vec3 forward = -glm::vec3(world[2]);
+                if (glm::length(forward) > 1e-6f)
+                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * 0.5f * (glm::length(halfX) + glm::length(halfY)), colour);
+            }
+
+            auto probes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, ReflectionProbeComponent>();
+            for (auto entity : probes)
+            {
+                auto [wtc, probe] = probes.get<WorldTransformComponent, ReflectionProbeComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? probe.Extents.x : -probe.Extents.x, (i & 2) ? probe.Extents.y : -probe.Extents.y,
+                                                             (i & 4) ? probe.Extents.z : -probe.Extents.z, 1.0f));
+                const glm::vec4 colour(0.4f, 0.8f, 1.0f, 1.0f);
+                for (int i = 0; i < 8; ++i)
+                    for (int axis = 1; axis < 8; axis <<= 1)
+                        if (!(i & axis))
+                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
+            }
+
+            auto volumes = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, IrradianceVolumeComponent>();
+            for (auto entity : volumes)
+            {
+                auto [wtc, volume] = volumes.get<WorldTransformComponent, IrradianceVolumeComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                    corners[i] = glm::vec3(world * glm::vec4((i & 1) ? volume.Extents.x : -volume.Extents.x, (i & 2) ? volume.Extents.y : -volume.Extents.y,
+                                                             (i & 4) ? volume.Extents.z : -volume.Extents.z, 1.0f));
+                const glm::vec4 colour(1.0f, 0.75f, 0.3f, 1.0f);
+                for (int i = 0; i < 8; ++i)
+                    for (int axis = 1; axis < 8; axis <<= 1)
+                        if (!(i & axis))
+                            m_Renderer2D->DrawXRayLine(corners[i], corners[i | axis], colour);
+            }
+
+            auto discLights = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, DiscLightComponent>();
+            for (auto entity : discLights)
+            {
+                auto [wtc, light] = discLights.get<WorldTransformComponent, DiscLightComponent>(entity);
+                const glm::mat4 world = m_Renderer->ToRenderSpace(wtc.WorldMatrix);
+                const glm::vec3 centre = glm::vec3(world[3]);
+                const float scale = glm::max(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])));
+                const glm::vec3 axisX = glm::length(glm::vec3(world[0])) > 1e-6f ? glm::normalize(glm::vec3(world[0])) * light.Radius * scale : glm::vec3(0.0f);
+                const glm::vec3 axisY = glm::length(glm::vec3(world[1])) > 1e-6f ? glm::normalize(glm::vec3(world[1])) * light.Radius * scale : glm::vec3(0.0f);
+                const glm::vec4 colour(glm::mix(light.Color, glm::vec3(1.0f, 0.9f, 0.4f), 0.5f), 1.0f);
+                constexpr int Segments = 32;
+                for (int i = 0; i < Segments; ++i)
+                {
+                    const float a0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
+                    const float a1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
+                    m_Renderer2D->DrawXRayLine(centre + axisX * std::cos(a0) + axisY * std::sin(a0), centre + axisX * std::cos(a1) + axisY * std::sin(a1), colour);
+                }
+                const glm::vec3 forward = -glm::vec3(world[2]);
+                if (glm::length(forward) > 1e-6f)
+                    m_Renderer2D->DrawXRayLine(centre, centre + glm::normalize(forward) * light.Radius * scale, colour);
+            }
+
+            Entity selected = m_Selection.GetPrimary();
+            if (selected && selected.HasComponent<AudioSourceComponent>() && selected.HasComponent<WorldTransformComponent>() &&
+                selected.GetComponent<AudioSourceComponent>().Spatial && !selected.HasComponent<InactiveInHierarchyComponent>())
+            {
+                const auto& source = selected.GetComponent<AudioSourceComponent>();
+                const glm::vec3 centre = glm::vec3(m_Renderer->ToRenderSpace(selected.GetComponent<WorldTransformComponent>().WorldMatrix)[3]);
+                auto sphere = [&](float meters, const glm::vec4& colour)
+                {
+                    const float radius = WorldUnits::FromMeters(meters);
+                    constexpr int Segments = 48;
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+                        for (int i = 0; i < Segments; ++i)
+                        {
+                            const float t0 = glm::two_pi<float>() * static_cast<float>(i) / Segments;
+                            const float t1 = glm::two_pi<float>() * static_cast<float>(i + 1) / Segments;
+                            glm::vec3 p0 = centre, p1 = centre;
+                            p0[a] += std::cos(t0) * radius; p0[b] += std::sin(t0) * radius;
+                            p1[a] += std::cos(t1) * radius; p1[b] += std::sin(t1) * radius;
+                            m_Renderer2D->DrawXRayLine(p0, p1, colour);
+                        }
+                    }
+                };
+                sphere(source.Spatialization.MinDistance, NoxUI::ThemeColor("AudioMinDistance", { 0.55f, 0.85f, 1.0f, 0.9f }));
+                sphere(source.Spatialization.MaxDistance, NoxUI::ThemeColor("AudioMaxDistance", { 0.2f, 0.4f, 1.0f, 0.7f }));
+            }
+
+            constexpr glm::vec4 kVolumeColor(1.0f, 0.55f, 0.1f, 0.9f);
+            constexpr glm::vec4 kAudioVolumeColor(0.3f, 0.6f, 1.0f, 0.9f);
+            constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+            auto drawBox = [&](const WorldTransformComponent& wtc, const glm::vec3& halfExtents, const glm::vec4& color)
+            {
+                glm::vec3 corners[8];
+                for (int i = 0; i < 8; ++i)
+                {
+                    const glm::vec3 sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                    corners[i] = glm::vec3(m_Renderer->ToRenderSpace(wtc.WorldMatrix) * glm::vec4(sign * halfExtents, 1.0f));
+                }
+                for (const auto& edge : edges)
+                    m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], color);
+            };
+            auto streamView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, LevelStreamingVolumeComponent>();
+            for (auto entity : streamView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = streamView.get<WorldTransformComponent, LevelStreamingVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kVolumeColor);
+            }
+            constexpr glm::vec4 kPostProcessVolumeColor(0.75f, 0.45f, 1.0f, 0.9f);
+            auto postView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, PostProcessVolumeComponent>();
+            for (auto entity : postView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = postView.get<WorldTransformComponent, PostProcessVolumeComponent>(entity);
+                if (!volume.Unbound)
+                    drawBox(wtc, volume.HalfExtents, kPostProcessVolumeColor);
+            }
+            auto audioView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AudioVolumeComponent>();
+            for (auto entity : audioView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = audioView.get<WorldTransformComponent, AudioVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kAudioVolumeColor);
+            }
+            constexpr glm::vec4 kProbeVolumeColor(0.35f, 0.9f, 0.55f, 0.9f);
+            auto probeView = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, AcousticProbeVolumeComponent>();
+            for (auto entity : probeView)
+            {
+                if (Entity(entity, m_ActiveScene.get()).HasComponent<InactiveInHierarchyComponent>())
+                    continue;
+                auto [wtc, volume] = probeView.get<WorldTransformComponent, AcousticProbeVolumeComponent>(entity);
+                drawBox(wtc, volume.HalfExtents, kProbeVolumeColor);
+                if (selected != Entity(entity, m_ActiveScene.get()) || volume.BakedData == 0 || AssetManager::RequestAsset(volume.BakedData) != AssetState::Ready)
+                    continue;
+                const Ref<AcousticData> data = AssetManager::GetAsset<AcousticData>(volume.BakedData);
+                const float arm = WorldUnits::FromMeters(0.15f);
+                for (const glm::vec3& probe : data->ProbePositions)
+                {
+                    const glm::vec3 p = glm::vec3(m_Renderer->ToRenderSpace(data->Origin + glm::dvec3(probe)));
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(arm, 0, 0), p + glm::vec3(arm, 0, 0), kProbeVolumeColor);
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, arm, 0), p + glm::vec3(0, arm, 0), kProbeVolumeColor);
+                    m_Renderer2D->DrawXRayLine(p - glm::vec3(0, 0, arm), p + glm::vec3(0, 0, arm), kProbeVolumeColor);
+                }
+            }
+        }
+
+        // A world's loaded cells: the content bounds of each, in green (World Partition window open, Show in Viewport).
+        if (m_WorldPartitionPanel.GetRoot() && m_WorldPartitionPanel.ShowCellsInViewport() && m_ActiveScene && m_ActiveScene->IsWorldPartitioned())
+        {
+            UILayer* ui = Application::Get().GetUILayer();
+            if (ui && ui->GetDockSpaceRef() && ui->GetDockSpaceRef()->HasPanel("World Partition"))
+            {
+                constexpr glm::vec4 kCellColor(0.3f, 0.85f, 0.45f, 0.8f);
+                constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+                const WorldPartition& world = m_ActiveScene->GetWorldPartition();
+                for (const WorldCellCoord& cell : m_ActiveScene->GetLoadedWorldCells(false))
+                {
+                    const auto info = world.Cells.find(cell);
+                    if (info == world.Cells.end())
+                        continue;
+                    glm::vec3 corners[8];
+                    for (int i = 0; i < 8; ++i)
+                        corners[i] = m_Renderer->ToRenderSpace(glm::dvec3((i & 1) ? info->second.BoundsMax.x : info->second.BoundsMin.x,
+                                                                          (i & 2) ? info->second.BoundsMax.y : info->second.BoundsMin.y,
+                                                                          (i & 4) ? info->second.BoundsMax.z : info->second.BoundsMin.z));
+                    for (const auto& edge : edges)
+                        m_Renderer2D->DrawXRayLine(corners[edge[0]], corners[edge[1]], kCellColor);
+                }
+            }
+        }
+
+        if (m_ViewportTools.ShowPhysicsColliders)
+        {
+            {
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, BoxCollider2DComponent>();
+                for (auto entity : view)
+                {
+                    auto [wtc, bc2d] = view.get<WorldTransformComponent, BoxCollider2DComponent>(entity);
+                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix) *
+                                          glm::translate(glm::mat4(1.0f), glm::vec3(bc2d.Offset, 0.001f)) *
+                                          glm::scale(glm::mat4(1.0f), glm::vec3(bc2d.Size * 2.0f, 1.0f));
+                    m_Renderer2D->DrawRect(transform, glm::vec4(0, 1, 0, 1));
+                }
+            }
+            {
+                auto view = m_ActiveScene->GetAllEntitiesWith<WorldTransformComponent, CircleCollider2DComponent>();
+                for (auto entity : view)
+                {
+                    auto [wtc, cc2d] = view.get<WorldTransformComponent, CircleCollider2DComponent>(entity);
+                    glm::mat4 transform = m_Renderer->ToRenderSpace(wtc.WorldMatrix) *
+                                          glm::translate(glm::mat4(1.0f), glm::vec3(cc2d.Offset, 0.001f)) *
+                                          glm::scale(glm::mat4(1.0f), glm::vec3(cc2d.Radius * 2.0f));
+                    m_Renderer2D->DrawCircle(transform, glm::vec4(0, 1, 0, 1), 0.01f);
+                }
+            }
+            DrawPhysicsColliders3D();
+        }
+
+        m_Renderer->EndScene();
+    }
+
+    void EditorLayer::RefreshToolBar()
+    {
+        const bool isPlay = m_SceneState == SceneState::Play;
+        const bool isSim = m_SceneState == SceneState::Simulate;
+        const bool isEdit = m_SceneState == SceneState::Edit;
+        const bool isPaused = !isEdit && m_ActiveScene && m_ActiveScene->IsPaused();
+        const bool prefab = m_PrefabMode.Active; // (nothing plays while a prefab is edited: its bar takes the toolbar)
+
+        if (m_PlayBtnWrap)
+            m_PlayBtnWrap->Visible = !prefab && (isEdit || isPlay);
+        if (m_SimulateBtnWrap)
+            m_SimulateBtnWrap->Visible = !prefab && (isEdit || isSim);
+        if (m_PrefabBar)
+            m_PrefabBar->Visible = prefab;
+        if (m_PauseBtnWrap)
+            m_PauseBtnWrap->Visible = !isEdit;
+        if (m_StepBtnWrap)
+            m_StepBtnWrap->Visible = !isEdit && isPaused;
+
+        if (m_PlayBtnWrap)
+        {
+            const Ref<Texture2D>& tex = isPlay ? m_IconStop : m_IconPlay;
+            m_PlayBtnWrap->Texture = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+        }
+        if (m_SimulateBtnWrap)
+        {
+            const Ref<Texture2D>& tex = isSim ? m_IconStop : m_IconSimulate;
+            m_SimulateBtnWrap->Texture = tex ? tex->GetDescriptorIndexSlot() : ~0u;
+        }
+        if (m_PlaySettingsCogBtn)
+        {
+            m_PlaySettingsCogBtn->SetEnabled(isEdit);
+            m_PlaySettingsCogBtn->Visible = !prefab;
+        }
+        if (m_PlayNetStatusLabel)
+        {
+            if (m_PlaySession)
+            {
+                m_PlayNetStatusLabel->Visible = true;
+                m_PlayNetStatusLabel->Text = m_PlayWaitingForServer
+                    ? ("Waiting for dedicated server -- " + m_PlaySession->Describe())
+                    : m_PlaySession->Describe();
+            }
+            else
+            {
+                m_PlayNetStatusLabel->Visible = false;
+            }
+        }
+    }
+
+    void EditorLayer::RefreshSceneLoadOverlay()
+    {
+        if (!m_SceneLoadBanner)
+            return;
+        if (!m_SceneLoad)
+        {
+            m_SceneLoadBanner->Visible = false;
+            return;
+        }
+        m_SceneLoadBanner->Visible = true;
+        if (m_SceneLoadTitleLabel)
+            m_SceneLoadTitleLabel->Text = "Opening " + m_SceneLoad->GetPath().filename().string();
+        if (m_SceneLoadStageLabel)
+        {
+            char pct[128];
+            std::snprintf(pct, sizeof(pct), "%s (%.0f%%)", m_SceneLoad->GetStage().c_str(), m_SceneLoad->GetProgress() * 100.0f);
+            m_SceneLoadStageLabel->Text = pct;
+        }
+        if (m_SceneLoadProgressFill)
+            m_SceneLoadProgressFill->FixedSize.x = std::clamp(m_SceneLoad->GetProgress(), 0.0f, 1.0f) * 300.0f;
+    }
+
+    void EditorLayer::RefreshStatusBar()
+    {
+        auto* activity = static_cast<StatusActivityElement*>(m_StatusActivity.get());
+        if (!activity || !m_Renderer || !Project::GetActive() || !Project::GetActive()->GetEditorAssetManager())
+            return;
+        auto assetManager = Project::GetActive()->GetEditorAssetManager();
+        const EditorAssetManager::ImportProgress import = assetManager->GetImportProgress();
+        const size_t loading = assetManager->GetLoadingCount();
+        const size_t streaming = assetManager->GetStreamingCount();
+        const double pendingMB = static_cast<double>(assetManager->GetPendingUploadBytes()) / (1024.0 * 1024.0);
+        const size_t blasBuilds = m_Renderer->GetPendingBlasBuilds();
+
+        // Most important first: what the user started (an import, a script build, a scene opening), then background work.
+        std::string text;
+        if (import.Imports > 0)
+            text = import.Total == 0 ? std::string("Importing: reading the file...") : std::format("Importing meshes {} / {}", import.Done, import.Total);
+        else if (m_ScriptBuilder.IsBuilding())
+            text = "Building scripts...";
+        else if (m_SceneLoad)
+            text = "Opening scene...";
+        else if (m_TestWorldGeneration)
+            text = std::format("Generating the streaming test world {:.0f} %: {}", m_TestWorldGeneration->GetProgress() * 100.0f, m_TestWorldGeneration->GetStage());
+        else if (m_HLODBuild)
+            text = std::format("Building HLODs {:.0f} %: {}", m_HLODBuild->GetProgress() * 100.0f, m_HLODBuild->GetStage());
+        else if (const std::string busy = m_ContentBrowserPanel.GetBusyText(); !busy.empty())
+            text = busy;
+        if (loading > 0 || streaming > 0 || blasBuilds > 0)
+        {
+            std::string background;
+            auto add = [&background](const std::string& part)
+            {
+                background += (background.empty() ? "" : "   |   ") + part;
+            };
+            if (loading > 0)
+                add(std::format("Loading {} asset{}", loading, loading == 1 ? "" : "s"));
+            if (streaming > 0)
+                add(std::format("Streaming {} texture{}", streaming, streaming == 1 ? "" : "s"));
+            if (pendingMB >= 0.05)
+                add(std::format("{:.1f} MB to upload", pendingMB));
+            if (blasBuilds > 0)
+                add(std::format("{} BLAS build{}", blasBuilds, blasBuilds == 1 ? "" : "s"));
+            text += (text.empty() ? "" : "   |   ") + background;
+        }
+        if (const auto& index = assetManager->GetReferenceIndex(); index && index->GetProgress().Building)
+        {
+            // The reference cache being built (a project's first open, or files changed since the last session).
+            const AssetReferenceIndex::Progress progress = index->GetProgress();
+            text += (text.empty() ? "" : "   |   ") + std::format("Indexing asset references {} / {}", progress.Done, progress.Total);
+        }
+        activity->Busy = !text.empty();
+        activity->Text = text.empty() ? std::string("Ready") : text;
+    }
+
+    void EditorLayer::OnUpdate(Timestep ts)
+    {
+        if (!Project::GetActive())
+            return;
+
+#if NOX_WITH_MCP
+        UpdateMcpServer(); // (the tool calls that came in run here, at the start of the frame)
+#endif
+        if (m_ResetLayoutRequested)
+        {
+            // Here, between frames: the menu that asked for it is gone and no UI event is being dispatched.
+            m_ResetLayoutRequested = false;
+            ResetLayout();
+        }
+
+        if (m_OpenSaveAndPlay)
+        {
+            m_OpenSaveAndPlay = false;
+            ShowSaveAndPlayOverlay();
+        }
+
+        if (m_ThumbnailPending && m_SceneState == SceneState::Edit && !m_SceneLoad)
+        {
+            m_ThumbnailTimer += ts;
+            if (m_ThumbnailTimer > 4.0f)
+            {
+                m_ThumbnailPending = false;
+                CaptureProjectThumbnail();
+            }
+        }
+
+        if (m_SceneLoad && m_SceneLoad->Step(8.0))
+            FinishSceneLoad();
+
+        m_CustomLitPollTimer += ts;
+        if (m_CustomLitPollTimer > 0.5f)
+        {
+            m_CustomLitPollTimer = 0.0f;
+            PollCustomLitShaders();
+        }
+
+        if (m_TestWorldGeneration && m_TestWorldGeneration->Step())
+        {
+            const AssetHandle scene = m_TestWorldGeneration->Failed() ? AssetHandle(0) : m_TestWorldGeneration->GetScene();
+            const glm::dvec3 middle = m_TestWorldGeneration->GetMiddle();
+            m_TestWorldGeneration.reset();
+            if (scene != 0)
+            {
+                m_FocusOnOpen = middle;
+                OpenScene(scene);
+            }
+        }
+
+        // Build HLODs: a step a frame; done, the scene is saved (its index names the new HLOD cells).
+        if (m_HLODBuild && m_HLODBuild->Step())
+        {
+            const bool failed = m_HLODBuild->Failed();
+            const size_t built = m_HLODBuild->GetBuiltCount();
+            m_HLODBuild.reset();
+            if (!failed)
+                SaveScene();
+            NOX_CORE_INFO("Build HLODs: {} ({} HLODs)", failed ? "failed (see above)" : "done", built);
+            Notify(failed ? NoxUI::UINotificationSeverity::Error : NoxUI::UINotificationSeverity::Success, failed ? "HLOD build failed" : "HLODs built",
+                   failed ? std::string("See the Output Log.") : std::to_string(built) + " HLODs; the scene was saved.");
+        }
+
+        m_ScriptBuilder.Update();
+        if (const ScriptBuilder::BuildResult& build = m_ScriptBuilder.GetLastResult(); build.Number != m_LastScriptBuildNotified)
+        {
+            m_LastScriptBuildNotified = build.Number;
+            size_t errors = 0, warnings = 0;
+            for (const ScriptDiagnostic& diagnostic : build.Diagnostics)
+                (diagnostic.Severity == "error" ? errors : warnings) += 1;
+            if (build.Succeeded)
+                Notify(NoxUI::UINotificationSeverity::Success, build.Reloaded ? "Scripts built and reloaded" : "Scripts built",
+                       std::format("{:.1f} s{}", build.Seconds, warnings > 0 ? std::format(", {} warning{}", warnings, warnings == 1 ? "" : "s") : std::string()));
+            else
+                Notify(NoxUI::UINotificationSeverity::Error, "Script build failed",
+                       std::format("{} error{} -- the Output Log lists them.", errors, errors == 1 ? "" : "s"));
+        }
+
+        auto assetManager = Project::GetActive()->GetEditorAssetManager();
+        if (assetManager)
+        {
+            if (m_EditorScene && m_EditorScene->ConsumeAssetReferencesChanged())
+            {
+                m_UnloadUnusedAssetsRequested = true;
+                m_EditorSceneReferencesValid = false;
+            }
+            if (m_ActiveScene && m_ActiveScene != m_EditorScene && m_ActiveScene->ConsumeAssetReferencesChanged())
+                m_UnloadUnusedAssetsRequested = true;
+            if (assetManager->ConsumeLoadsSettledAfterSweep())
+                m_UnloadUnusedAssetsRequested = true;
+            if (m_UnloadUnusedAssetsRequested && std::chrono::steady_clock::now() - m_LastUnloadSweep >= std::chrono::seconds(1))
+            {
+                NOX_PROFILE_SCOPE("Unload Unused Assets");
+                m_UnloadUnusedAssetsRequested = false;
+                m_LastUnloadSweep = std::chrono::steady_clock::now();
+                UnloadUnusedAssets();
+            }
+
+            for (const ModelInstance::LevelDescription& level : assetManager->ConsumeLevelImports())
+            {
+                if (m_EditorScene)
+                {
+                    if (Entity imported = ModelInstance::SpawnLevel(*m_EditorScene, level))
+                    {
+                        m_Selection.Select(imported);
+                        m_SceneHierarchyPanel.MarkDirty();
+                    }
+                }
+            }
+
+            assetManager->Update();
+        }
+
+        RefreshSceneLoadOverlay();
+        m_ContentBrowserPanel.Update(ts);
+        m_OutputLogPanel.Update(ts);
+
+        // The drawer: an asset dragged out of it closes it (the viewport under it takes the drop); its tabs show what is open;
+        // "Dock in Layout" only while a page is in the drawer.
+        if (UILayer* uiLayer = Application::Get().GetUILayer(); uiLayer && IsDrawerOpen())
+        {
+            const NoxUI::UIContext& ui = uiLayer->GetContext();
+            if (ui.IsDragging() && m_CenterArea && !m_CenterArea->DrawerRect().Contains(ui.GetLastMousePos()))
+                CloseDrawer();
+        }
+        const bool contentDocked = IsPanelDocked("Content Browser"), logDocked = IsPanelDocked("Output Log");
+        if (auto* tab = static_cast<StatusTabButton*>(m_ContentDrawerTab.get()))
+            tab->Active = IsDrawerOpen() && m_DrawerPage == DrawerPage::Content;
+        if (auto* tab = static_cast<StatusTabButton*>(m_LogDrawerTab.get()))
+            tab->Active = IsDrawerOpen() && m_DrawerPage == DrawerPage::Log;
+        if (m_ContentDockButton)
+            m_ContentDockButton->Visible = !contentDocked;
+        if (m_LogDockButton)
+            m_LogDockButton->Visible = !logDocked;
+
+        if (!m_Renderer || !m_ActiveScene || !m_ViewportImage)
+            return;
+
+        const bool wantHideCursor = m_EditorCamera.ShouldHideCursor() || (m_SceneState != SceneState::Edit && Input::IsRelativeMouseMode());
+        if (wantHideCursor != m_CursorHidden)
+        {
+            if (wantHideCursor)
+                SDL_HideCursor();
+            else
+                SDL_ShowCursor();
+            m_CursorHidden = wantHideCursor;
+        }
+
+        const NoxUI::UIRect& bounds = m_ViewportImage->GetBounds();
+        const uint32_t wantW = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Width())));
+        const uint32_t wantH = static_cast<uint32_t>(std::max(0.0f, std::floor(bounds.Height())));
+        if (wantW > 0 && wantH > 0)
+        {
+            m_ActiveScene->OnViewportResize(wantW, wantH);
+            const nri::Extent2D currentSize = m_Renderer->getViewPortSize();
+            UILayer* uiLayer = Application::Get().GetUILayer();
+            const bool dockDragging = (uiLayer && uiLayer->GetDockSpace() && uiLayer->GetDockSpace()->IsDragging()) ||
+                                      (m_ViewportDockSpace && m_ViewportDockSpace->IsDragging());
+            if (!dockDragging && (wantW != currentSize.width || wantH != currentSize.height))
+            {
+                m_Renderer->onViewportSizeChange({wantW, wantH});
+                m_EditorCamera.SetViewportSize(static_cast<float>(wantW), static_cast<float>(wantH));
+            }
+        }
+
+        const NoxUI::UIElement* targetEl = m_ViewportCanvas ? static_cast<const NoxUI::UIElement*>(m_ViewportCanvas.get())
+                                                         : static_cast<const NoxUI::UIElement*>(m_ViewportImage.get());
+        const bool hovered = targetEl && NoxUI::HasState(targetEl->GetState(), NoxUI::UIState::Hovered);
+        const bool focused = targetEl && NoxUI::HasState(targetEl->GetState(), NoxUI::UIState::Focused);
+
+        m_Viewports[m_ActiveViewport].Size = { wantW, wantH };
+        m_Viewports[m_ActiveViewport].Hovered = hovered;
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (index == m_ActiveViewport)
+                continue;
+            ViewportSlot& slot = m_Viewports[index];
+            if (slot.Open && m_ExtraViewportImages[index] && m_ExtraViewportCanvases[index])
+            {
+                const NoxUI::UIRect& eb = m_ExtraViewportImages[index]->GetBounds();
+                slot.Size = {
+                    static_cast<uint32_t>(std::max(0.0f, std::floor(eb.Width()))),
+                    static_cast<uint32_t>(std::max(0.0f, std::floor(eb.Height())))
+                };
+                slot.Hovered = NoxUI::HasState(m_ExtraViewportCanvases[index]->GetState(), NoxUI::UIState::Hovered);
+            }
+            else
+            {
+                slot.Size = { 0, 0 };
+                slot.Hovered = false;
+            }
+        }
+
+        Input::SetGameInputEnabled(focused || hovered, hovered);
+
+        m_ActiveScene->SetRenderer(m_Renderer);
+        m_ActiveScene->SetRenderer2D(m_Renderer2D);
+
+        switch (m_SceneState)
+        {
+        case SceneState::Edit:
+            m_EditorCamera.OnUpdate(ts, hovered || m_ViewportMouseCaptured);
+            m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+            break;
+        case SceneState::Simulate:
+            m_EditorCamera.OnUpdate(ts, hovered || m_ViewportMouseCaptured);
+            m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
+            break;
+        case SceneState::Play:
+            if (m_PlaySession)
+                m_PlaySession->Receive(static_cast<float>(ts));
+            if (m_PlaySessionEnded)
+            {
+                OnSceneStop();
+                break;
+            }
+            if (!m_PlayWaitingForServer)
+                m_ActiveScene->OnUpdateRuntime(ts);
+            if (m_PlaySession)
+            {
+                m_PlaySession->AfterScene(static_cast<float>(ts));
+                m_PlaySession->Send();
+            }
+            break;
+        }
+
+        m_Viewports[m_ActiveViewport].Camera = m_EditorCamera;
+        m_Viewports[m_ActiveViewport].CameraSet = true;
+
+        if (m_ViewportCanvas)
+        {
+            const NoxUI::UIRect& vpBounds = m_ViewportCanvas->GetBounds();
+            glm::vec2 mouse = Input::GetMousePosition();
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+                mouse = uiLayer->GetContext().GetLastMousePos();
+
+            const int mouseX = static_cast<int>(mouse.x - vpBounds.Min.x);
+            const int mouseY = static_cast<int>(mouse.y - vpBounds.Min.y);
+            const int vpW = static_cast<int>(vpBounds.Width());
+            const int vpH = static_cast<int>(vpBounds.Height());
+            if (mouseX >= 0 && mouseY >= 0 && mouseX < vpW && mouseY < vpH)
+            {
+                const int32_t pixelData = m_Renderer->getPickedEntityID();
+                m_HoveredEntity = pixelData == -1 ? Entity() : Entity(static_cast<entt::entity>(pixelData), m_ActiveScene.get());
+
+                if (!m_ViewportTools.IsBoxSelecting)
+                {
+                    if (hovered)
+                        m_Renderer->setPickRequest(mouseX, mouseY, true);
+                }
+                else
+                {
+                    const glm::vec2 boxMin = {
+                        std::min(m_ViewportTools.BoxSelectStart.x, m_ViewportTools.BoxSelectEnd.x) - vpBounds.Min.x,
+                        std::min(m_ViewportTools.BoxSelectStart.y, m_ViewportTools.BoxSelectEnd.y) - vpBounds.Min.y
+                    };
+                    const glm::vec2 boxMax = {
+                        std::max(m_ViewportTools.BoxSelectStart.x, m_ViewportTools.BoxSelectEnd.x) - vpBounds.Min.x,
+                        std::max(m_ViewportTools.BoxSelectStart.y, m_ViewportTools.BoxSelectEnd.y) - vpBounds.Min.y
+                    };
+                    const int startX = std::max(0, static_cast<int>(boxMin.x));
+                    const int startY = std::max(0, static_cast<int>(boxMin.y));
+                    const int width = std::max(1, static_cast<int>(boxMax.x - boxMin.x));
+                    const int height = std::max(1, static_cast<int>(boxMax.y - boxMin.y));
+                    m_Renderer->setBoxPickRequest(startX, startY, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+                }
+            }
+        }
+
+        m_Selection.Prune(); // (entities destroyed this frame -- by a script, a shortcut, the hierarchy -- are not selected)
+        if (m_ShowSceneHierarchy)
+            m_SceneHierarchyPanel.Update();
+        if (m_ShowInspector)
+        {
+            m_InspectorPanel.Update();
+        }
+        m_AssetEditors.Update();
+        UpdateToolWindows();
+
+        std::vector<int32_t> selectedIDs;
+        for (const Entity& entity : m_Selection.GetEntities())
+        {
+            if (entity)
+                selectedIDs.push_back(static_cast<int32_t>(static_cast<uint32_t>(entity)));
+        }
+        m_Renderer->SetSelectedEntityID(selectedIDs);
+
+        OnOverlayRender();
+        SubmitExtraViewports(ts);
+        AssetPreviewRenderer::Get().Update(); // the Content Browser thumbnail in progress
+        UpdateHistory();
+        RefreshToolBar();
+        m_ViewportToolbar.Sync();
+
+        m_StatusRefreshTimer += ts;
+        if (m_StatusRefreshTimer >= 0.25f)
+        {
+            m_StatusRefreshTimer = 0.0f;
+            RefreshStatusBar();
+        }
+
+        m_FpsAccumulator += ts;
+        ++m_FpsFrames;
+        if (m_FpsAccumulator >= 0.25f)
+        {
+            if (m_FpsLabel)
+            {
+                char fpsBuf[32];
+                const float fps = static_cast<float>(m_FpsFrames) / m_FpsAccumulator;
+                std::snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %.1f", fps);
+                m_FpsLabel->Text = fpsBuf;
+            }
+            m_FpsAccumulator = 0.0f;
+            m_FpsFrames = 0;
+        }
+
+        Texture2D* sceneTex = m_Renderer->GetSceneResource();
+        m_ViewportImage->TextureId = sceneTex ? sceneTex->GetDescriptorIndexSlot() : ~0u;
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            if (!m_ExtraViewportImages[index])
+                continue;
+            if (index != m_ActiveViewport && m_Viewports[index].Open && m_Viewports[index].Submitted)
+            {
+                Texture2D* extraTex = m_Renderer->GetExtraViewTexture(static_cast<uint32_t>(index));
+                m_ExtraViewportImages[index]->TextureId = extraTex ? extraTex->GetDescriptorIndexSlot() : ~0u;
+            }
+            else
+            {
+                m_ExtraViewportImages[index]->TextureId = ~0u;
+            }
+        }
+    }
+
+    void EditorLayer::OnEvent(Event& event)
+    {
+        if (!Project::GetActive())
+            return;
+
+        if (event.GetEventType() == EventType::ExternalFileDrop)
+        {
+            const auto& drop = static_cast<const ExternalFileDropEvent&>(event);
+            // Into the folder the Content Browser shows (a model opens the import dialog first).
+            ShowPage(DrawerPage::Content);
+            m_ContentBrowserPanel.ImportFile(drop.GetPath());
+            event.Handled = true;
             return;
         }
 
-        Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-        if (selectedEntity)
+        // The window's close button / Alt+F4 with unsaved work: kept open, asked first (Application quits after Save / Don't Save).
+        if (event.GetEventType() == EventType::WindowClose && HasUnsavedChanges())
         {
-            Entity newEntity = m_EditorScene->DuplicateEntity(selectedEntity);
-            m_SceneHierarchyPanel.SetSelectedEntity(newEntity);
+            event.Handled = true;
+            ConfirmUnsavedChanges("quitting", []() { Application::Get().Shutdown(); });
+            return;
         }
+
+        // A press outside the open drawer closes it (not while one of its menus or dialogs is open, and not on the status bar's
+        // tabs, which toggle it themselves).
+        if (event.GetEventType() == EventType::MouseButtonPressed && IsDrawerOpen())
+        {
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+            {
+                const NoxUI::UIContext& ui = uiLayer->GetContext();
+                const NoxUI::UIVec2 pos = ui.GetLastMousePos();
+                const bool onTab = (m_ContentDrawerTab && m_ContentDrawerTab->GetBounds().Contains(pos)) ||
+                                   (m_LogDrawerTab && m_LogDrawerTab->GetBounds().Contains(pos));
+                if (!ui.GetOverlay() && m_CenterArea && !m_CenterArea->DrawerRect().Contains(pos) && !onTab)
+                    CloseDrawer();
+            }
+        }
+
+        // Keys: the focused widget first, then the editor's commands (EditorLayerCommands.cpp).
+        if (event.GetEventType() == EventType::KeyPressed)
+        {
+            if (DispatchCommandKey(static_cast<KeyPressedEvent&>(event)))
+            {
+                event.Handled = true;
+                return;
+            }
+        }
+
+        const NoxUI::UIElement* scrollEl = m_ViewportSlotRoots[m_ActiveViewport]
+            ? m_ViewportSlotRoots[m_ActiveViewport].get()
+            : (m_ViewportCanvas ? static_cast<const NoxUI::UIElement*>(m_ViewportCanvas.get())
+                                : static_cast<const NoxUI::UIElement*>(m_ViewportImage.get()));
+        if (!scrollEl)
+            return;
+
+        if (event.GetEventType() == EventType::MouseScrolled && m_SceneState == SceneState::Edit)
+        {
+            const NoxUI::UIElement* hoveredUi = nullptr;
+            glm::vec2 mouse = Input::GetMousePosition();
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+            {
+                hoveredUi = uiLayer->GetContext().GetHovered();
+                mouse = uiLayer->GetContext().GetLastMousePos();
+            }
+            const bool activeViewportHovered =
+                (m_ViewportCanvas && (hoveredUi == m_ViewportCanvas.get() || NoxUI::HasState(m_ViewportCanvas->GetState(), NoxUI::UIState::Hovered))) ||
+                (m_ExtraViewportCanvases[m_ActiveViewport] && hoveredUi == m_ExtraViewportCanvases[m_ActiveViewport].get());
+            if (activeViewportHovered)
+            {
+                const NoxUI::UIRect& b = scrollEl->GetBounds();
+                m_EditorCamera.SetCursorPosition({ mouse.x - b.Min.x, mouse.y - b.Min.y });
+                m_EditorCamera.OnEvent(event);
+            }
+        }
+        else if (event.GetEventType() == EventType::MouseButtonReleased)
+        {
+            const bool anyDown = Input::IsMouseButtonPressed(SDL_BUTTON_LEFT) ||
+                                 Input::IsMouseButtonPressed(SDL_BUTTON_RIGHT) ||
+                                 Input::IsMouseButtonPressed(SDL_BUTTON_MIDDLE);
+            if (!anyDown)
+                m_ViewportMouseCaptured = false;
+        }
+    }
+
+    void EditorLayer::BuildUI(bool loadSavedLayout)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+
+        if (const auto& dock = uiLayer->GetDockSpaceRef())
+        {
+            dock->ClearPanels();
+            dock->CanClosePanel = [this](const std::string& title) { return m_AssetEditors.CanClosePanel(title); };
+        }
+
+        m_ViewportImage = NoxUI::MakeUI<NoxUI::UIImage>();
+        m_ViewportImage->AnchorMin = { 0.0f, 0.0f };
+        m_ViewportImage->AnchorMax = { 1.0f, 1.0f };
+        m_ViewportImage->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+        m_ViewportImage->HitTestMode = NoxUI::UIHitTestMode::None;
+
+        m_ViewportCanvas = NoxUI::MakeUI<ViewportCanvas>();
+        m_ViewportCanvas->AnchorMin = { 0.0f, 0.0f };
+        m_ViewportCanvas->AnchorMax = { 1.0f, 1.0f };
+        m_ViewportCanvas->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+        m_ViewportCanvas->HitTestMode = NoxUI::UIHitTestMode::Self;
+        m_ViewportCanvas->Focusable = true;
+        m_ViewportCanvas->Bind({
+            .Render = m_Renderer,
+            .Camera = &m_EditorCamera,
+            .ActiveScene = &m_ActiveScene,
+            .Selection = &m_Selection,
+            .HoveredEntity = &m_HoveredEntity,
+            .Tools = &m_ViewportTools,
+            .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
+            .IsEditModeFn = [this]() { return m_SceneState == SceneState::Edit; },
+            .ShowCameraPositionFn = [this]() { return m_Viewports[m_ActiveViewport].ShowCameraPosition; },
+            .ShowActiveFrameFn = [this]() { return OpenViewportCount() > 1; },
+            .GridPlaneAxisFn = [this]() { return GridPlaneAxis(); },
+            .OnSceneMutated = [this]() { m_HistoryCheckRequested = true; },
+            .OnCaptureChanged = [this](bool captured, int) { m_ViewportMouseCaptured = captured; }
+        });
+        // Assets dragged from the Content Browser: meshes and prefabs are placed where the pointer is (on the surface under it,
+        // else on the ground plane); a scene opens.
+        m_ViewportCanvas->OnDrop = [this](const NoxUI::UIDragPayload& payload) -> bool
+        {
+            if (payload.Type != "CONTENT_BROWSER_ITEM" && payload.Type != "CONTENT_BROWSER_ITEMS")
+                return false;
+            if (m_SceneState != SceneState::Edit)
+            {
+                Notify(NoxUI::UINotificationSeverity::Info, "Stop Play to place assets", "Assets are placed in the edited scene.");
+                return true;
+            }
+            std::vector<AssetHandle> place;
+            for (uint64_t id : payload.Ids.empty() ? std::vector<uint64_t>{ payload.UserId } : payload.Ids)
+            {
+                const AssetHandle handle(id);
+                const AssetType type = AssetManager::GetAssetType(handle);
+                if (type == AssetType::Scene && payload.Ids.size() <= 1)
+                {
+                    ConfirmUnsavedChanges("opening " + AssetDisplayName(handle), [this, handle]() { OpenScene(handle); }, UnsavedScene);
+                    return true;
+                }
+                if (type == AssetType::Mesh || type == AssetType::StaticMesh || type == AssetType::Prefab)
+                    place.push_back(handle);
+            }
+            if (place.empty())
+            {
+                Notify(NoxUI::UINotificationSeverity::Info, "Nothing to place", "Meshes, prefabs and scenes can be dropped into the viewport.");
+                return true;
+            }
+            glm::dvec3 point{ 0.0 };
+            if (!m_ViewportCanvas->PickWorldPoint(point))
+                point = m_EditorCamera.GetFocalPoint();
+            PlaceAssets(place, point, {});
+            return true;
+        };
+
+        Ref<NoxUI::UIElement> overlayToolbar = m_ViewportToolbar.Build(m_Renderer, &m_EditorCamera, &m_ViewportTools, {
+            .SetViewMode = [this](EditorViewMode mode) { SetViewMode(mode); },
+            .SnapToFloor = [this]() { SnapSelectionToFloor(); },
+            .SnapToGrid = [this]() { SnapSelectionToGrid(); },
+            .GetShowCameraPosition = [this]() { return m_Viewports[m_ActiveViewport].ShowCameraPosition; },
+            .SetShowCameraPosition = [this](bool show) { m_Viewports[m_ActiveViewport].ShowCameraPosition = show; }
+        });
+
+        // Floating scene load progress banner inside the bottom center of the viewport
+        m_SceneLoadTitleLabel = NoxUI::Label("Opening scene...").Get();
+        m_SceneLoadStageLabel = NoxUI::Label("").Get();
+        m_SceneLoadStageLabel->UseColorOverride = true;
+        m_SceneLoadStageLabel->ColorOverride = NoxUI::ThemeColor("SceneLoadText", { 0.72f, 0.76f, 0.82f, 1.0f });
+
+        auto progressTrack = NoxUI::MakeUI<NoxUI::UIElement>();
+        progressTrack->WidthMode = NoxUI::UISizeMode::Fixed;
+        progressTrack->HeightMode = NoxUI::UISizeMode::Fixed;
+        progressTrack->FixedSize = { 300.0f, 6.0f };
+        progressTrack->DrawBackground = true;
+        progressTrack->StyleClass = "Surface";
+        progressTrack->ClipChildren = true;
+
+        m_SceneLoadProgressFill = NoxUI::MakeUI<NoxUI::UIElement>();
+        m_SceneLoadProgressFill->WidthMode = NoxUI::UISizeMode::Fixed;
+        m_SceneLoadProgressFill->HeightMode = NoxUI::UISizeMode::Fill;
+        m_SceneLoadProgressFill->FixedSize = { 0.0f, 6.0f };
+        m_SceneLoadProgressFill->DrawBackground = true;
+        m_SceneLoadProgressFill->StyleClass = "Button";
+        m_SceneLoadProgressFill->StyleVariant = "primary";
+        progressTrack->AddChild(m_SceneLoadProgressFill);
+
+        m_SceneLoadBanner = NoxUI::VStack(4.0f, { m_SceneLoadTitleLabel, m_SceneLoadStageLabel, progressTrack })
+            .Padding(10.0f, 8.0f)
+            .Style("Surface")
+            .Background(true)
+            .Get();
+        m_SceneLoadBanner->WidthMode = NoxUI::UISizeMode::Auto;
+        m_SceneLoadBanner->HeightMode = NoxUI::UISizeMode::Auto;
+        m_SceneLoadBanner->AnchorMin = { 0.5f, 1.0f };
+        m_SceneLoadBanner->AnchorMax = { 0.5f, 1.0f };
+        m_SceneLoadBanner->AnchorOffsets = { -160.0f, -96.0f, 160.0f, -20.0f };
+        m_SceneLoadBanner->Visible = false;
+
+        auto viewportHost = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+        viewportHost->WidthMode = NoxUI::UISizeMode::Fill;
+        viewportHost->HeightMode = NoxUI::UISizeMode::Fill;
+        viewportHost->AnchorMin = { 0.0f, 0.0f };
+        viewportHost->AnchorMax = { 1.0f, 1.0f };
+        viewportHost->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+        viewportHost->AddChild(m_ViewportImage);
+        viewportHost->AddChild(m_ViewportCanvas);
+        viewportHost->AddChild(overlayToolbar);
+        viewportHost->AddChild(m_SceneLoadBanner);
+        m_ActiveViewportHost = viewportHost;
+
+        for (int index = 0; index < kMaxViewports; ++index)
+        {
+            auto extraImg = NoxUI::MakeUI<NoxUI::UIImage>();
+            extraImg->AnchorMin = { 0.0f, 0.0f };
+            extraImg->AnchorMax = { 1.0f, 1.0f };
+            extraImg->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+            extraImg->HitTestMode = NoxUI::UIHitTestMode::None;
+            m_ExtraViewportImages[index] = extraImg;
+
+            auto extraCanvas = NoxUI::MakeUI<ExtraViewportCanvas>();
+            extraCanvas->AnchorMin = { 0.0f, 0.0f };
+            extraCanvas->AnchorMax = { 1.0f, 1.0f };
+            extraCanvas->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+            extraCanvas->HitTestMode = NoxUI::UIHitTestMode::Self;
+            extraCanvas->Bind({
+                .Index = index,
+                .Render = m_Renderer,
+                .Camera = &m_Viewports[index].Camera,
+                .Selection = &m_Selection,
+                .GizmoMode = &m_ViewportTools.GizmoMode,
+                .ShowCameraPosition = &m_Viewports[index].ShowCameraPosition,
+                .ShowFlags = &m_Viewports[index].ShowFlags,
+                .ResolutionIndex = &m_Viewports[index].ResolutionIndex,
+                .Realtime = &m_Viewports[index].Realtime,
+                .IsPlayModeFn = [this]() { return m_SceneState == SceneState::Play; },
+                .HasImageFn = [this, index]() { return m_ExtraViewportImages[index] && m_ExtraViewportImages[index]->TextureId != ~0u; },
+                .OnActivate = [this](int idx) { ActivateViewport(idx); }
+            });
+            m_ExtraViewportCanvases[index] = extraCanvas;
+
+            auto extraHost = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+            extraHost->WidthMode = NoxUI::UISizeMode::Fill;
+            extraHost->HeightMode = NoxUI::UISizeMode::Fill;
+            extraHost->AnchorMin = { 0.0f, 0.0f };
+            extraHost->AnchorMax = { 1.0f, 1.0f };
+            extraHost->AnchorOffsets = { 0.0f, 0.0f, 0.0f, 0.0f };
+            extraHost->AddChild(extraImg);
+            extraHost->AddChild(extraCanvas);
+            m_ExtraViewportHosts[index] = extraHost;
+
+            auto root = NoxUI::MakeUI<NoxUI::UIAnchorBox>();
+            root->WidthMode = NoxUI::UISizeMode::Fill;
+            root->HeightMode = NoxUI::UISizeMode::Fill;
+            root->AddChild(index == m_ActiveViewport ? m_ActiveViewportHost : m_ExtraViewportHosts[index]);
+            m_ViewportSlotRoots[index] = root;
+        }
+
+        // Play / Simulate / Pause / Step: icon buttons with the toolbar's textures.
+        const auto makeToolbarIconBtn = [](const Ref<Texture2D>& icon, const std::string& tip, std::function<void()> onClick)
+        {
+            return NoxUI::UIIconButton::FromTexture(icon ? icon->GetDescriptorIndexSlot() : ~0u, tip, std::move(onClick));
+        };
+
+        m_PlayBtnWrap = makeToolbarIconBtn(m_IconPlay, "Play / Stop (Esc)", [this]()
+        {
+            if (m_SceneState == SceneState::Play)
+                OnSceneStop();
+            else
+                OnScenePlay();
+        });
+
+        m_SimulateBtnWrap = makeToolbarIconBtn(m_IconSimulate, "Simulate / Stop", [this]()
+        {
+            if (m_SceneState == SceneState::Simulate)
+                OnSceneStop();
+            else
+                OnSceneSimulate();
+        });
+
+        m_PauseBtnWrap = makeToolbarIconBtn(m_IconPause, "Pause / Resume", [this]()
+        {
+            if (m_SceneState != SceneState::Edit && m_ActiveScene)
+                m_ActiveScene->SetPaused(!m_ActiveScene->IsPaused());
+            RefreshToolBar();
+        });
+
+        m_StepBtnWrap = makeToolbarIconBtn(m_IconStep, "Step one frame", [this]()
+        {
+            if (m_SceneState != SceneState::Edit && m_ActiveScene)
+                m_ActiveScene->Step();
+        });
+
+        m_PlaySettingsCogBtn = NoxUI::MakeUI<UIVectorIconButton>(
+            EditorIconKind::Cogwheel,
+            "Play Settings (Multiplayer: Net Mode, Players, Emulation)",
+            [this]() { ShowPlaySettingsOverlay(m_PlaySettingsCogBtn.get()); });
+        m_PlaySettingsCogBtn->FixedSize = { 30.0f, 30.0f };
+        m_PlaySettingsCogBtn->IconScale = 1.35f;
+        m_PlaySettingsCogBtn->VAlign = NoxUI::UIAlignment::Center;
+
+        m_PlayNetStatusLabel = NoxUI::Label("").VAlign(NoxUI::UIAlignment::Center).Margin(6.0f, 0.0f);
+        m_PlayNetStatusLabel->UseColorOverride = true;
+        m_PlayNetStatusLabel->ColorOverride = NoxUI::ThemeColor("PlayNetStatus", { 0.72f, 0.78f, 0.86f, 1.0f });
+        m_PlayNetStatusLabel->Visible = false;
+
+        auto tbLeftSpacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        tbLeftSpacer->WidthMode = NoxUI::UISizeMode::Fill;
+        tbLeftSpacer->HeightMode = NoxUI::UISizeMode::Fill;
+        auto tbRightSpacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        tbRightSpacer->WidthMode = NoxUI::UISizeMode::Fill;
+        tbRightSpacer->HeightMode = NoxUI::UISizeMode::Fill;
+
+        m_ToolBar = NoxUI::HStack(4.0f, {
+            tbLeftSpacer,
+            BuildPrefabBar(),
+            m_PlayBtnWrap,
+            m_SimulateBtnWrap,
+            m_PauseBtnWrap,
+            m_StepBtnWrap,
+            m_PlaySettingsCogBtn,
+            m_PlayNetStatusLabel,
+            tbRightSpacer
+        }).Padding(6.0f, 2.0f).Style("Surface").Background(true).Get();
+        m_ToolBar->WidthMode = NoxUI::UISizeMode::Fill;
+        m_ToolBar->HeightMode = NoxUI::UISizeMode::Fill;
+        RefreshToolBar();
+
+        // Inner dock space inside "Viewports" holds Viewport 1..4 (matching ImGui NoxViewportDockSpace),
+        // so Toolbar / Scene Hierarchy can dock across the full width/height of all 4 viewports cleanly.
+        m_ViewportDockSpace = NoxUI::MakeUI<NoxUI::UIDockSpace>();
+        m_ViewportDockSpace->WidthMode = NoxUI::UISizeMode::Fill;
+        m_ViewportDockSpace->HeightMode = NoxUI::UISizeMode::Fill;
+        m_ViewportDockSpace->SetContext(&uiLayer->GetContext());
+        m_ViewportDockSpace->AddPanel(
+            "Viewport",
+            m_ViewportSlotRoots[0],
+            NoxUI::UIDockDropZone::Center,
+            {},
+            0.5f,
+            (OpenViewportCount() > 1)
+                ? NoxUI::UIDockNodeFlags::NoUndocking
+                : (NoxUI::UIDockNodeFlags::NoUndocking | NoxUI::UIDockNodeFlags::NoTabBar)
+        );
+
+        for (int index = 1; index < kMaxViewports; ++index)
+        {
+            if (m_Viewports[index].Open)
+            {
+                const NoxUI::UIDockDropZone zone = (index == 2) ? NoxUI::UIDockDropZone::Bottom : NoxUI::UIDockDropZone::Right;
+                const std::string target = (index == 3 && m_Viewports[1].Open) ? std::string(m_Viewports[1].Title) : std::string("Viewport");
+                const NoxUI::UIDockDropZone useZone = (index == 3 && m_Viewports[1].Open) ? NoxUI::UIDockDropZone::Bottom : zone;
+                m_ViewportDockSpace->AddPanel(m_Viewports[index].Title, m_ViewportSlotRoots[index], useZone, target, 0.5f);
+            }
+        }
+
+        // Dock outer panels: Viewports Center -> Scene Hierarchy Left -> Toolbar Top of Viewports (no tab strip)
+        uiLayer->AddPanel(
+            "Viewports",
+            m_ViewportDockSpace,
+            NoxUI::UIDockDropZone::Center,
+            {},
+            0.5f,
+            NoxUI::UIDockNodeFlags::CentralNode
+        );
+
+        if (m_ShowSceneHierarchy)
+        {
+            uiLayer->AddPanel(
+                "Scene Hierarchy",
+                m_SceneHierarchyPanel.BuildUI(),
+                NoxUI::UIDockDropZone::Left,
+                "Viewports",
+                0.155f
+            );
+        }
+
+        if (m_ShowInspector)
+        {
+            uiLayer->AddPanel(
+                "Inspector",
+                m_InspectorPanel.BuildUI(),
+                NoxUI::UIDockDropZone::Right,
+                "Viewports",
+                0.22f
+            );
+        }
+
+        if (m_ShowToolBar)
+        {
+            uiLayer->AddPanel(
+                "Toolbar",
+                m_ToolBar,
+                NoxUI::UIDockDropZone::Top,
+                "Viewports",
+                0.038f,
+                NoxUI::UIDockNodeFlags::NoTabBar | NoxUI::UIDockNodeFlags::NoDockingOver
+            );
+        }
+
+        // The Content Browser and the Output Log: in the drawer (opened from the status bar), or docked under the viewports when
+        // the saved layout has them there ("Dock in Layout").
+        auto dockButton = [this](DrawerPage page)
+        {
+            Ref<NoxUI::UIButton> button = NoxUI::MakeUI<NoxUI::UIButton>("Dock in Layout", [this, page]() { DockPage(page); });
+            button->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+            button->HeightMode = NoxUI::UISizeMode::Fixed;
+            button->FixedSize = { 0.0f, 26.0f };
+            button->Tooltip = "Keep it open as a tab under the viewport (Window > Back to Drawer puts it back here)";
+            return button;
+        };
+        m_ContentDockButton = dockButton(DrawerPage::Content);
+        m_LogDockButton = dockButton(DrawerPage::Log);
+        m_ContentBrowserPanel.SetToolbarExtra(m_ContentDockButton);
+        m_OutputLogPanel.SetToolbarExtra(m_LogDockButton);
+        m_ContentBrowserRoot = m_ContentBrowserPanel.BuildUI();
+        m_OutputLogRoot = m_OutputLogPanel.BuildUI();
+
+        std::string savedLayout;
+        if (loadSavedLayout)
+        {
+            std::ifstream layoutFile(LayoutDirectory() / kLayoutFile);
+            std::stringstream ss;
+            ss << layoutFile.rdbuf();
+            savedLayout = ss.str();
+        }
+        if (savedLayout.find("Content Browser") != std::string::npos)
+            uiLayer->AddPanel("Content Browser", m_ContentBrowserRoot, NoxUI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+        if (savedLayout.find("Output Log") != std::string::npos)
+        {
+            const bool besideBrowser = savedLayout.find("Content Browser") != std::string::npos;
+            uiLayer->AddPanel("Output Log", m_OutputLogRoot, besideBrowser ? NoxUI::UIDockDropZone::Center : NoxUI::UIDockDropZone::Bottom,
+                              besideBrowser ? "Content Browser" : "Viewports", 0.30f);
+        }
+
+        // The dock space with the drawer sliding up over it (UI::UIDrawerHost); dragging its top edge keeps the height for the session.
+        m_CenterArea = Ref<NoxUI::UIDrawerHost>(new NoxUI::UIDrawerHost(uiLayer->GetDockSpaceRef()));
+        m_CenterArea->HeightFraction = m_DrawerFraction;
+        m_CenterArea->OnResized = [this](float fraction) { m_DrawerFraction = fraction; };
+        m_DrawerPage = DrawerPage::None;
+
+        // Status bar: the drawer's tabs and what runs on the left, the log's warnings / errors on the right; toasts stack above it
+        // at the right.
+        Ref<StatusTabButton> contentTab(new StatusTabButton("Content Drawer", [this]() { ToggleDrawer(DrawerPage::Content); }));
+        contentTab->Tooltip = "The Content Browser (Ctrl+Space)";
+        Ref<StatusTabButton> logTab(new StatusTabButton("Output Log", [this]() { ToggleDrawer(DrawerPage::Log); }));
+        logTab->Tooltip = "The Output Log and the console's Cmd line (the ` key)";
+        m_ContentDrawerTab = contentTab;
+        m_LogDrawerTab = logTab;
+        m_StatusActivity = NoxUI::MakeUI<StatusActivityElement>();
+        m_StatusActivity->WidthMode = NoxUI::UISizeMode::Fill;
+        m_StatusActivity->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
+        m_StatusActivity->Tooltip = "Imports, script builds, assets loading and textures streaming show here; Ready when nothing runs";
+        m_StatusCounts = Ref<NoxUI::UIElement>(new StatusCountsElement(m_OutputLogPanel, [this]() { ShowOutputLog(); }));
+        m_StatusBar = NoxUI::HStack(4.0f, { contentTab, logTab, m_StatusActivity, m_StatusCounts }).Padding(4.0f, 2.0f).Style("Surface").Background(true).Get();
+        m_StatusBar->WidthMode = NoxUI::UISizeMode::Fill;
+        m_StatusBar->HeightMode = NoxUI::UISizeMode::Fixed;
+        m_StatusBar->FixedSize = { 0.0f, kStatusBarHeight };
+        uiLayer->GetContext().SetToastBottomInset(kStatusBarHeight + 6.0f);
+        RefreshStatusBar();
+
+        if (loadSavedLayout)
+        {
+            bool shouldLoad = true;
+            std::ifstream layoutFile(LayoutDirectory() / kLayoutFile);
+            if (layoutFile.is_open())
+            {
+                std::stringstream ss;
+                ss << layoutFile.rdbuf();
+                const std::string saved = ss.str();
+                if (saved.find("Viewports") == std::string::npos ||
+                    (m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
+                    (m_ShowInspector && saved.find("Inspector") == std::string::npos) ||
+                    (m_ShowToolBar && (saved.find("Toolbar") == std::string::npos || saved.find("flags: 6") == std::string::npos)))
+                    shouldLoad = false;
+            }
+            if (shouldLoad)
+            {
+                if (const auto& dock = uiLayer->GetDockSpaceRef(); dock && std::filesystem::exists(LayoutDirectory() / kLayoutFile))
+                    dock->LoadLayout(LayoutDirectory() / kLayoutFile);
+                if (m_ViewportDockSpace && std::filesystem::exists(LayoutDirectory() / kViewportDockLayoutFile))
+                    m_ViewportDockSpace->LoadLayout(LayoutDirectory() / kViewportDockLayoutFile);
+            }
+        }
+        SyncViewportTabBars();
+
+        auto menuBar = NoxUI::MakeUI<NoxUI::UIMenuBar>();
+        menuBar->AddDynamicMenu("File", [this, uiLayer]() -> std::vector<NoxUI::UIMenuItem>
+        {
+            return {
+                {"New Project...", "", [this]() { ConfirmUnsavedChanges("making a new project", [this]() { NewProjectAsync(); }); }},
+                {"Open Project...", m_Commands.ShortcutText("File.OpenProject"), [this]() { m_Commands.Execute("File.OpenProject"); }},
+                {"Project Manager...", "", [this]() { ConfirmUnsavedChanges("closing this project", [this]() { OpenProjectManager(); }); }, false, true, false, false,
+                 "Close this project and show the Project Manager (unsaved changes are asked about first)."},
+                {"", "", {}, true},
+                {"New Scene", m_Commands.ShortcutText("File.NewScene"), [this]() { m_Commands.Execute("File.NewScene"); }},
+                {"Save Scene", m_Commands.ShortcutText("File.SaveScene"), [this]() { m_Commands.Execute("File.SaveScene"); }},
+                {"Save Scene As...", m_Commands.ShortcutText("File.SaveSceneAs"), [this]() { m_Commands.Execute("File.SaveSceneAs"); }},
+                {"Save All", m_Commands.ShortcutText("File.SaveAll"), [this]() { m_Commands.Execute("File.SaveAll"); }, false, true, false, false,
+                 "The scene, every asset editor's unsaved edits, the materials edited in the Inspector and the mixer."},
+                {"", "", {}, true},
+                {"Package Game...", "", [this]() { ShowPackageDialog(false); }, false, true, false, false,
+                 "A folder that runs the game on its own (the runtime, scripts, shaders and the cooked assets the scenes need)."},
+                {"Package Server...", "", [this]() { ShowPackageDialog(true); }, false, true, false, false,
+                 "A dedicated server build (no window, GPU or sound; clients join with --connect)."},
+                {"", "", {}, true},
+                {"Save Layout", "", [this]()
+                {
+                    SaveLayoutFiles();
+                    Notify(NoxUI::UINotificationSeverity::Success, "Layout saved", "In the project's Saved/Layout folder (it is also saved on exit).");
+                }},
+                {"Exit", "Alt+F4", [this]() { ConfirmUnsavedChanges("quitting", []() { Application::Get().Shutdown(); }); }}
+            };
+        });
+
+        menuBar->AddDynamicMenu("Edit", [this]() -> std::vector<NoxUI::UIMenuItem>
+        {
+            const bool editing = m_SceneState == SceneState::Edit;
+            const std::string undoLabel = m_History.CanUndo() ? "Undo " + m_History.GetUndoName() : std::string("Undo");
+            const std::string redoLabel = m_History.CanRedo() ? "Redo " + m_History.GetRedoName() : std::string("Redo");
+            char historyText[96];
+            const size_t steps = m_History.GetStateCount() > 0 ? m_History.GetStateCount() - 1 : 0;
+            std::snprintf(historyText, sizeof(historyText), "History: %zu steps, %.1f MB",
+                          steps, static_cast<double>(m_History.GetMemoryBytes()) / (1024.0 * 1024.0));
+            return {
+                {undoLabel, m_Commands.ShortcutText("Edit.Undo"), [this]() { m_Commands.Execute("Edit.Undo"); }, false, m_Commands.CanExecute("Edit.Undo")},
+                {redoLabel, m_Commands.ShortcutText("Edit.Redo"), [this]() { m_Commands.Execute("Edit.Redo"); }, false, m_Commands.CanExecute("Edit.Redo")},
+                {"", "", {}, true},
+                {"Duplicate", m_Commands.ShortcutText("Edit.Duplicate"), [this]() { m_Commands.Execute("Edit.Duplicate"); }, false, m_Commands.CanExecute("Edit.Duplicate")},
+                {"Delete", m_Commands.ShortcutText("Edit.Delete"), [this]() { m_Commands.Execute("Edit.Delete"); }, false, m_Commands.CanExecute("Edit.Delete")},
+                {"Snap Selection to Floor", m_Commands.ShortcutText("Edit.SnapToFloor"), [this]() { m_Commands.Execute("Edit.SnapToFloor"); }, false, m_Commands.CanExecute("Edit.SnapToFloor")},
+                {"", "", {}, true},
+                {"Keyboard Shortcuts...", "", [this]() { m_Commands.Execute("Edit.KeyboardShortcuts"); }, false, true, false, false,
+                 "Every command and its keys; click a key to change it."},
+                {"", "", {}, true},
+                {historyText, "", {}, false, false, false, true}
+            };
+        });
+
+        menuBar->AddDynamicMenu("Create", [this]() -> std::vector<NoxUI::UIMenuItem>
+        {
+            std::vector<NoxUI::UIMenuItem> shapeItems;
+            for (uint8_t index = 0; index < static_cast<uint8_t>(PrimitiveShape::Count); ++index)
+            {
+                const PrimitiveShape shape = static_cast<PrimitiveShape>(index);
+                shapeItems.push_back({PrimitiveShapes::GetName(shape), "", [this, shape]() { CreateShape(shape); }});
+            }
+
+            return {
+                {"Empty Entity", "", [this]()
+                {
+                    if (m_ActiveScene)
+                    {
+                        Entity created = m_ActiveScene->CreateEntity("Empty Entity");
+                        m_Selection.Select(created);
+                        m_SceneHierarchyPanel.MarkDirty();
+                        m_HistoryCheckRequested = true;
+                    }
+                }},
+                {"Shapes", "", {}, false, true, false, false, "", std::move(shapeItems)},
+                {"", "", {}, true},
+                {"Streaming Test World...", "", [this]() { ShowStreamingTestWorldDialog(); }, false, !m_TestWorldGeneration && m_SceneState == SceneState::Edit, false, false,
+                 "A world partition larger than RAM and VRAM (every cell its own terrain mesh and texture), to fly through and see streaming keep up."},
+                {"Cancel Streaming Test World", "", [this]() { CancelStreamingTestWorld(); }, false, m_TestWorldGeneration != nullptr, false, false,
+                 "Stops the generation (what was written stays on disk, unregistered)."}
+            };
+        });
+
+#if NOX_WITH_MCP
+        menuBar->AddDynamicMenu("Tools", [this]() -> std::vector<NoxUI::UIMenuItem>
+        {
+            return { {"MCP Server", "", {}, false, true, false, false, "", BuildMcpMenu()} };
+        });
+#endif
+
+        menuBar->AddDynamicMenu("Window", [this, uiLayer]() -> std::vector<NoxUI::UIMenuItem>
+        {
+            std::vector<NoxUI::UIMenuItem> viewportItems = {
+                {"1 Viewport", "", [this]() { ApplyViewportLayout(ViewportLayout::One); }},
+                {"2 Side by Side", "", [this]() { ApplyViewportLayout(ViewportLayout::TwoSideBySide); }},
+                {"2 Stacked", "", [this]() { ApplyViewportLayout(ViewportLayout::TwoStacked); }},
+                {"3 Viewports", "", [this]() { ApplyViewportLayout(ViewportLayout::Three); }},
+                {"4 Viewports (2 x 2)", "", [this]() { ApplyViewportLayout(ViewportLayout::Four); }},
+                {"", "", {}, true}
+            };
+            for (int index = 1; index < kMaxViewports; ++index)
+            {
+                const bool open = m_Viewports[index].Open;
+                viewportItems.push_back({
+                    m_Viewports[index].Title,
+                    "",
+                    [this, index, open]()
+                    {
+                        if (open)
+                            CloseViewport(index);
+                        else
+                            OpenViewport(index);
+                    },
+                    false, true, open
+                });
+            }
+            viewportItems.push_back({"", "", {}, true});
+            for (int index = 0; index < kMaxViewports; ++index)
+            {
+                viewportItems.push_back({
+                    std::string(m_Viewports[index].Title) + " Options",
+                    "",
+                    {},
+                    false, true, false, false, "",
+                    BuildViewportOptionsItems(index)
+                });
+            }
+            viewportItems.push_back({"", "", {}, true});
+            viewportItems.push_back({"Click a viewport to use it; drag its tab to move it", "", {}, false, false, false, true});
+
+            std::vector<NoxUI::UIMenuItem> animGraphItems;
+            if (Ref<Project> project = Project::GetActive(); project && project->GetEditorAssetManager())
+            {
+                for (const auto& [handle, metadata] : project->GetEditorAssetManager()->GetAssetRegistry())
+                {
+                    if (metadata.Type != AssetType::AnimationGraph)
+                        continue;
+                    const AssetHandle graphHandle = handle;
+                    animGraphItems.push_back({metadata.FilePath.stem().string(), "", [this, graphHandle]() { OpenAsset(graphHandle); }, false, true, false, false,
+                                              "Opens the graph in its editor window"});
+                }
+            }
+            if (animGraphItems.empty())
+                animGraphItems.push_back({"No .nanimgraph assets found", "", {}, false, false, false, true});
+
+            return {
+                {"Scene Hierarchy", "", [this, uiLayer]()
+                {
+                    m_ShowSceneHierarchy = !m_ShowSceneHierarchy;
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    {
+                        if (m_ShowSceneHierarchy)
+                            dock->AddPanel("Scene Hierarchy", m_SceneHierarchyPanel.BuildUI(), NoxUI::UIDockDropZone::Left, "Viewports", 0.155f);
+                        else
+                            dock->RemovePanel("Scene Hierarchy");
+                    }
+                }, false, true, m_ShowSceneHierarchy},
+                {"Inspector", "", [this, uiLayer]()
+                {
+                    m_ShowInspector = !m_ShowInspector;
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    {
+                        if (m_ShowInspector)
+                        {
+                            dock->AddPanel("Inspector", m_InspectorPanel.BuildUI(), NoxUI::UIDockDropZone::Right, "Viewports", 0.22f);
+                            m_InspectorPanel.MarkDirty();
+                            m_InspectorPanel.Update();
+                        }
+                        else
+                        {
+                            dock->RemovePanel("Inspector");
+                        }
+                    }
+                }, false, true, m_ShowInspector},
+                {"Toolbar", "", [this, uiLayer]()
+                {
+                    m_ShowToolBar = !m_ShowToolBar;
+                    if (const auto& dock = uiLayer->GetDockSpaceRef())
+                    {
+                        if (m_ShowToolBar)
+                            dock->AddPanel("Toolbar", m_ToolBar, NoxUI::UIDockDropZone::Top, "Viewports", 0.038f,
+                                           NoxUI::UIDockNodeFlags::NoTabBar | NoxUI::UIDockNodeFlags::NoDockingOver);
+                        else
+                            dock->RemovePanel("Toolbar");
+                    }
+                }, false, true, m_ShowToolBar},
+                {"Renderer Settings", "", [this, uiLayer]()
+                {
+                    if (!m_RendererSettings.GetRoot())
+                        m_RendererSettings.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Renderer Settings", m_RendererSettings.GetRoot(), { 470.0f, 720.0f });
+                }, false, true, false, false, "How this session renders: debug views, exposure, DLSS, shadows, ray tracing, GI, denoisers, streaming, post effects (not saved)."},
+                {"Project Settings", "", [this, uiLayer]()
+                {
+                    if (!m_ProjectSettings.GetRoot())
+                        m_ProjectSettings.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Project Settings", m_ProjectSettings.GetRoot(), { 470.0f, 640.0f });
+                }, false, true, false, false, "What the project keeps: start scene, render quality and its saved settings, game window, physical surfaces."},
+                {"Render Graph", "", [this, uiLayer]()
+                {
+                    if (!m_RenderGraphPanel.GetRoot())
+                    {
+                        m_RenderGraphPanel.SetRenderer(m_Renderer);
+                        m_RenderGraphPanel.BuildUI(&uiLayer->GetContext());
+                    }
+                    OpenToolWindow("Render Graph", m_RenderGraphPanel.GetRoot(), { 1000.0f, 700.0f });
+                }, false, true, false, false, "The frame's passes, resources, validation and a texture inspector; culling and LOD switches."},
+                {"Content Browser", m_Commands.ShortcutText("Window.ContentDrawer"), [this]() { ShowPage(DrawerPage::Content); }, false, true, false, false,
+                 "In the drawer over the viewport (or its tab, when it is docked in the layout)."},
+                {"Output Log", m_Commands.ShortcutText("Window.OutputLogCommand"), [this]() { ShowPage(DrawerPage::Log); }},
+                {IsPanelDocked("Content Browser") ? "Content Browser: Back to Drawer" : "Content Browser: Dock in Layout", "",
+                 [this]() { if (IsPanelDocked("Content Browser")) UndockPage(DrawerPage::Content); else DockPage(DrawerPage::Content); }},
+                {IsPanelDocked("Output Log") ? "Output Log: Back to Drawer" : "Output Log: Dock in Layout", "",
+                 [this]() { if (IsPanelDocked("Output Log")) UndockPage(DrawerPage::Log); else DockPage(DrawerPage::Log); }},
+                {"Profiler", "", [this, uiLayer]()
+                {
+                    if (!m_ProfilerPanel.GetRoot())
+                        m_ProfilerPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Profiler", m_ProfilerPanel.GetRoot(), { 1100.0f, 680.0f });
+                }, false, true, false, false, "Frame times, the frame's timeline per thread and GPU queue, scopes, spikes and captures."},
+                {"World Partition", "", [this, uiLayer]()
+                {
+                    if (!m_WorldPartitionPanel.GetRoot())
+                        m_WorldPartitionPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("World Partition", m_WorldPartitionPanel.GetRoot(), { 560.0f, 680.0f });
+                }, false, true, false, false, "A world's cells on a map: load and unload them, its settings, HLODs."},
+                {"Levels", "", [this, uiLayer]()
+                {
+                    if (!m_LevelsPanel.GetRoot())
+                        m_LevelsPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Levels", m_LevelsPanel.GetRoot(), { 820.0f, 320.0f });
+                }, false, true, false, false, "The open scene and its sub-levels: current, visible, locked, loading, placement."},
+                {AudioMixer::IsDirty() ? "Mixer *" : "Mixer", "", [this, uiLayer]()
+                {
+                    if (!m_MixerPanel.GetRoot())
+                        m_MixerPanel.BuildUI(&uiLayer->GetContext());
+                    OpenToolWindow("Mixer", m_MixerPanel.GetRoot(), { 960.0f, 680.0f });
+                }, false, true, false, false, "The project's audio mixer: buses, effects, sends, ducking, snapshots, acoustics (* : unsaved)."},
+                {"Viewports", "", {}, false, true, false, false, "", std::move(viewportItems)},
+                {"Animation Graphs", "", {}, false, true, false, false, "", std::move(animGraphItems)},
+                {"", "", {}, true},
+                {"Reset Layout", "", [this]() { ConfirmUnsavedChanges("resetting the layout (it closes the asset editor windows)", [this]() { m_ResetLayoutRequested = true; }, UnsavedAssets); }, false, true, false, false,
+                 "Back to the default panels (closes windows torn off into their own OS window and the graph and material windows); the saved layout is replaced."},
+                {"Reload Theme", "", [uiLayer]() { uiLayer->ReloadTheme(); }}
+            };
+        });
+
+        menuBar->AddDynamicMenu("Script", [this]() -> std::vector<NoxUI::UIMenuItem>
+        {
+            const bool waitForDbg = ScriptEngine::GetWaitForDebugger();
+            const bool canReload = ScriptEngine::IsInitialized();
+            std::vector<NoxUI::UIMenuItem> items = {
+                {"Build and Reload", m_Commands.ShortcutText("Script.Build"), [this]() { m_Commands.Execute("Script.Build"); }, false, m_Commands.CanExecute("Script.Build")},
+                {"Reload assembly", m_Commands.ShortcutText("Script.ReloadAssembly"), [this]() { m_Commands.Execute("Script.ReloadAssembly"); }, false, canReload},
+                {"Build on Save", "", [this]() { m_ScriptBuilder.AutoBuild = !m_ScriptBuilder.AutoBuild; }, false, true, m_ScriptBuilder.AutoBuild, false,
+                 "Saving a .cs file of the project builds its scripts and reloads them a moment later."},
+                {"Wait for Debugger on Play", "", [waitForDbg]() { ScriptEngine::SetWaitForDebugger(!waitForDbg); }, false, true, waitForDbg, false,
+                 "Play waits (up to 60 s) until a .NET debugger attaches to the editor, then breaks once."}
+            };
+            if (!m_ScriptBuilder.GetStatus().empty())
+            {
+                items.push_back({"", "", {}, true});
+                items.push_back({m_ScriptBuilder.GetStatus(), "", {}, false, false, false, true});
+            }
+            return items;
+        });
+
+        auto spacer = NoxUI::MakeUI<NoxUI::UIElement>();
+        spacer->WidthMode = NoxUI::UISizeMode::Fill;
+        menuBar->AddChild(spacer);
+
+        Renderer* renderer = Application::Get().GetRenderer();
+        auto vsyncBox = NoxUI::CheckBox("VSync", renderer ? renderer->getVSync() : false, [renderer](bool enabled)
+        {
+            if (renderer)
+                renderer->setVSync(enabled);
+        }).VAlign(NoxUI::UIAlignment::Center).Margin(6.0f, 0.0f);
+        menuBar->AddChild(vsyncBox);
+
+        m_FpsLabel = NoxUI::Label("FPS: --.-").VAlign(NoxUI::UIAlignment::Center).Margin(10.0f, 0.0f);
+        m_FpsLabel->UseColorOverride = true;
+        m_FpsLabel->ColorOverride = NoxUI::ThemeColor("FpsText", { 0.72f, 0.76f, 0.82f, 1.0f });
+        menuBar->AddChild(m_FpsLabel);
+
+        uiLayer->SetRoot(
+            NoxUI::VStack(0.0f, {
+                           menuBar,
+                           m_CenterArea,
+                           m_StatusBar
+                       })
+            .Padding(0.0f)
+            .Style("Background")
+            .Background(true)
+        );
+        m_LayoutBuilt = true;
+    }
+
+    void EditorLayer::OpenAsset(AssetHandle handle)
+    {
+        if (handle == 0 || !AssetManager::IsAssetHandleValid(handle))
+            return;
+
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+
+        const AssetType type = AssetManager::GetAssetType(handle);
+        if (type == AssetType::Scene)
+        {
+            ConfirmUnsavedChanges("opening " + AssetDisplayName(handle), [this, handle]() { OpenScene(handle); }, UnsavedScene);
+            return;
+        }
+        if (type == AssetType::Prefab)
+        {
+            OpenPrefabMode(handle);
+            return;
+        }
+        // The editor registered for the type (RegisterAssetEditors); one window per asset.
+        if (m_AssetEditors.Open(handle) || !AssetManager::IsAssetHandleValid(handle))
+            return;
+        if (!m_AssetEditors.HasEditorFor(type))
+            Notify(NoxUI::UINotificationSeverity::Info, "No editor for " + AssetDisplayName(handle) + " yet",
+                   "NoxEditor opens scenes, prefabs, materials, graphs, animation clips and timelines so far; the old NoxEditor has the other editors.");
+    }
+
+    void EditorLayer::RegisterAssetEditors()
+    {
+        AssetEditorRegistry& registry = m_AssetEditors.GetRegistry();
+        const auto graph = [](AssetHandle handle) -> std::unique_ptr<AssetEditor> { return std::make_unique<NodeGraphEditor>(handle); };
+        registry.Register(AssetType::AnimationGraph, graph);
+        registry.Register(AssetType::AudioGraph, graph);
+        registry.Register(AssetType::MaterialGraph, graph);
+        registry.Register(AssetType::Material, [](AssetHandle handle) -> std::unique_ptr<AssetEditor> { return std::make_unique<MaterialEditor>(handle); });
+        registry.Register(AssetType::AnimationSequence, [](AssetHandle handle) -> std::unique_ptr<AssetEditor> { return std::make_unique<AnimationClipEditor>(handle); });
+        registry.Register(AssetType::Timeline, [this](AssetHandle handle) -> std::unique_ptr<AssetEditor>
+        {
+            TimelineEditor::Hooks timelineHooks;
+            timelineHooks.ActiveScene = [this]() { return m_ActiveScene; };
+            timelineHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
+            timelineHooks.Selected = [this]() { return m_Selection.GetPrimary(); };
+            return std::make_unique<TimelineEditor>(handle, std::move(timelineHooks));
+        });
+
+        AssetEditorManager::Hooks hooks;
+        hooks.Notify = [this](NoxUI::UINotification note) { Notify(note.Severity, std::move(note.Title), std::move(note.Message)); };
+        hooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
+        {
+            ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
+        };
+        hooks.OpenAsset = [this](AssetHandle handle) { OpenAsset(handle); };
+        m_AssetEditors.SetHooks(std::move(hooks));
+
+        RendererSettingsPanel::Hooks rendererHooks;
+        rendererHooks.Render = m_Renderer;
+        rendererHooks.Camera = &m_EditorCamera;
+        rendererHooks.Hovered = [this]() { return m_HoveredEntity; };
+        rendererHooks.DumpFrameGraph = [this]()
+        {
+            // Next to Nox.log; open the .dot files with GraphViz.
+            const std::filesystem::path directory = std::filesystem::current_path();
+            if (!m_ActiveScene || !m_ActiveScene->DumpSystemGraphs(directory))
+                return false;
+            Notify(NoxUI::UINotificationSeverity::Success, "Frame graph written", (directory / "SceneUpdate.dot").generic_string());
+            return true;
+        };
+        m_RendererSettings.SetHooks(std::move(rendererHooks));
+
+        ProjectSettingsPanel::Hooks projectHooks;
+        projectHooks.Render = m_Renderer;
+        projectHooks.ApplyQuality = [this](int quality) { ApplyQualityPreset(quality); };
+        projectHooks.SurfaceRenamed = [this](const std::string& from, const std::string& to)
+        {
+            if (!m_ActiveScene)
+                return;
+            bool changed = false;
+            for (auto [entity, body] : m_ActiveScene->GetAllEntitiesWith<RigidBody3DComponent>().each())
+            {
+                if (body.PhysicalSurface == from)
+                {
+                    body.PhysicalSurface = to;
+                    changed = true;
+                }
+            }
+            if (changed)
+                m_HistoryCheckRequested = true; // (the scene changed: an undo step, and unsaved)
+        };
+        m_ProjectSettings.SetHooks(std::move(projectHooks));
+
+        LevelsPanel::Hooks levelHooks;
+        levelHooks.ActiveScene = [this]() { return m_ActiveScene; };
+        levelHooks.Editing = [this]() { return m_SceneState == SceneState::Edit && !m_PrefabMode.Active; };
+        levelHooks.OpenScene = [this]() { return EditorSceneHandle(); };
+        levelHooks.Selection = [this]() { return m_Selection.GetEntities(); };
+        levelHooks.Save = [this]() { SaveScene(); };
+        levelHooks.SceneChanged = [this]() { m_HistoryCheckRequested = true; m_SceneHierarchyPanel.MarkDirty(); };
+        levelHooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
+        {
+            ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
+        };
+        m_LevelsPanel.SetHooks(std::move(levelHooks));
+
+        WorldPartitionPanel::Hooks worldHooks;
+        worldHooks.ActiveScene = [this]() { return m_ActiveScene; };
+        worldHooks.Editing = [this]() { return m_SceneState == SceneState::Edit && !m_PrefabMode.Active; };
+        worldHooks.StreamingSource = [this]()
+        {
+            // The camera the cells stream around: the primary camera in Play, the editor camera in Simulate; editing, what the
+            // editor camera looks at (where a world opens its cells).
+            glm::dvec3 source = m_SceneState == SceneState::Edit ? m_EditorCamera.GetFocalPoint() : m_EditorCamera.GetPosition();
+            if (m_SceneState == SceneState::Play && m_ActiveScene)
+                if (Entity camera = m_ActiveScene->GetPrimaryCameraEntity(); camera && camera.HasComponent<WorldTransformComponent>())
+                    source = camera.GetComponent<WorldTransformComponent>().GetPosition();
+            return source;
+        };
+        worldHooks.Save = [this]() { SaveScene(); };
+        worldHooks.SceneChanged = [this]() { m_HistoryCheckRequested = true; };
+        worldHooks.BuildHLODs = [this]() { StartHLODBuild(); };
+        worldHooks.RunningBuild = [this]() -> const HLODBuilder* { return m_HLODBuild.get(); };
+        worldHooks.AskSave = [this](const std::string& text, std::function<void()> save, std::function<void()> dontSave)
+        {
+            ShowSaveChangesDialog(text, std::move(save), std::move(dontSave));
+        };
+        m_WorldPartitionPanel.SetHooks(std::move(worldHooks));
+    }
+
+    void EditorLayer::CancelHLODBuild(const char* reason)
+    {
+        if (!m_HLODBuild)
+            return;
+        NOX_CORE_WARN("Build HLODs cancelled ({}): the HLODs built so far are imported, the HLOD grid is not written", reason);
+        Notify(NoxUI::UINotificationSeverity::Warning, "HLOD build cancelled", std::string(reason) + ": the HLOD grid was not written.");
+        m_HLODBuild.reset();
+    }
+
+    void EditorLayer::StartHLODBuild()
+    {
+        if (m_HLODBuild || m_SceneLoad || m_SceneState != SceneState::Edit || m_PrefabMode.Active || !m_EditorScene || !m_EditorScene->IsWorldPartitioned())
+            return;
+        if (m_EditorScenePath.empty())
+        {
+            Notify(NoxUI::UINotificationSeverity::Warning, "Save the scene first", "Its cells are built from their files.");
+            return;
+        }
+        SaveScene(); // the cells' files are what is built
+        m_HLODBuild = CreateScope<HLODBuilder>(m_EditorScene);
+        if (m_HLODBuild->Failed())
+        {
+            m_HLODBuild.reset();
+            Notify(NoxUI::UINotificationSeverity::Error, "HLOD build not started", "See the Output Log.");
+        }
+    }
+
+
+    void EditorLayer::ApplyQualityPreset(int quality)
+    {
+        if (!m_Renderer)
+            return;
+        m_Renderer->ApplyQualityPreset(static_cast<Renderer::RenderQuality>(quality));
+        // An orthographic view stays raster only; the preset's features come back when it is left.
+        if (m_EditorCamera.IsOrthographic())
+        {
+            m_OrthoSaved = { true, m_Renderer->isDLSSEnabled(), m_Renderer->getRayTracingEnabled(), m_Renderer->isPathTracingEnabled() };
+            m_Renderer->setDLSSEnabled(false);
+            m_Renderer->setRayTracingEnabled(false);
+            m_Renderer->setPathTracingEnabled(false);
+        }
+    }
+
+    void EditorLayer::OpenToolWindow(const std::string& title, const Ref<NoxUI::UIElement>& root, NoxUI::UIVec2 size)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef() || !root)
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        if (const Ref<NoxUI::UIWindow> window = dock->FindFloatingWindow(title))
+        {
+            if (window->OnActivate)
+                window->OnActivate();
+            return;
+        }
+        if (dock->FindNodeByPanelTitle(title))
+        {
+            ActivateDockedTab(*dock, title);
+            return;
+        }
+        if (dock->HasPanel(title))
+            return; // (torn off into its own OS window)
+        dock->FloatPanel(title, root, { 260.0f, 90.0f }, size, false);
+    }
+
+    void EditorLayer::UpdateToolWindows()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        const auto& dock = uiLayer ? uiLayer->GetDockSpaceRef() : nullptr;
+        if (!dock)
+            return;
+        if (m_RendererSettings.GetRoot() && dock->HasPanel("Renderer Settings"))
+            m_RendererSettings.Update();
+        if (m_ProjectSettings.GetRoot() && dock->HasPanel("Project Settings"))
+            m_ProjectSettings.Update();
+        if (m_LevelsPanel.GetRoot() && dock->HasPanel("Levels"))
+            m_LevelsPanel.Update();
+        if (m_WorldPartitionPanel.GetRoot() && dock->HasPanel("World Partition"))
+            m_WorldPartitionPanel.Update();
+        if (m_MixerPanel.GetRoot() && dock->HasPanel("Mixer"))
+            m_MixerPanel.Update();
+        // (every frame: closed, it stops the profiler keeping frames)
+        m_ProfilerPanel.Update(m_ProfilerPanel.GetRoot() && dock->HasPanel("Profiler"));
+        m_RenderGraphPanel.Update(m_RenderGraphPanel.GetRoot() && dock->HasPanel("Render Graph")); // (closed: no report is made)
+    }
+
+    std::filesystem::path EditorLayer::LayoutDirectory() const
+    {
+        if (!Project::GetActive())
+            return {};
+        return Project::GetProjectDirectory() / "Saved" / "Layout";
+    }
+
+    void EditorLayer::SaveLayoutFiles()
+    {
+        const std::filesystem::path directory = LayoutDirectory();
+        if (directory.empty() || !m_LayoutBuilt)
+            return;
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (UILayer* uiLayer = Application::Get().GetUILayer())
+        {
+            if (const auto& dock = uiLayer->GetDockSpaceRef())
+                dock->SaveLayout(directory / kLayoutFile);
+        }
+        if (m_ViewportDockSpace)
+            m_ViewportDockSpace->SaveLayout(directory / kViewportDockLayoutFile);
+        SaveViewportPrefs();
+    }
+
+    void EditorLayer::ResetLayout()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+
+        // Panels torn off into OS windows close first: the default layout docks every panel again, and a window left open would
+        // keep a second copy of one.
+        if (NoxUI::UIViewportManager* windows = uiLayer->GetViewportManager())
+            windows->Shutdown();
+
+        // The saved files go, so the next start shows the default layout too (until the layout is saved again on exit).
+        std::error_code error;
+        for (const char* file : { kLayoutFile, kViewportDockLayoutFile, kViewportPrefsFile })
+            std::filesystem::remove(LayoutDirectory() / file, error);
+
+        for (int i = 0; i < kMaxViewports; ++i)
+        {
+            m_Viewports[i].Open = (i == 0);
+            m_Viewports[i].Camera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[i]));
+        }
+        m_EditorCamera.SetViewMode(static_cast<EditorViewMode>(kDefaultSlotViewModes[0]));
+        m_ActiveViewport = 0;
+        m_ShowSceneHierarchy = true;
+        m_ShowInspector = true;
+        m_ShowToolBar = true;
+        m_AssetEditors.CloseAll(); // (their windows go with the old layout; unsaved edits were asked about)
+        m_DrawerPage = DrawerPage::None;
+        m_DrawerFraction = 0.42f;
+
+        BuildUI(false);
+        SaveLayoutFiles();
+        Notify(NoxUI::UINotificationSeverity::Success, "Layout reset", "The default panels are back.");
+    }
+
+    bool EditorLayer::IsPanelDocked(const std::string& title) const
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        return uiLayer && uiLayer->GetDockSpaceRef() && uiLayer->GetDockSpaceRef()->FindNodeByPanelTitle(title) != nullptr;
+    }
+
+    namespace
+    {
+        const char* PageTitle(int page) { return page == 2 ? "Output Log" : "Content Browser"; }
+
+        void ActivateDockedTab(NoxUI::UIDockSpace& dock, const std::string& title)
+        {
+            if (Ref<NoxUI::UIDockNode> node = dock.FindNodeByPanelTitle(title); node && node->TabPanel)
+            {
+                for (size_t i = 0; i < node->TabPanel->GetTabCount(); ++i)
+                {
+                    if (node->TabPanel->GetTabTitle(i) == title)
+                        node->TabPanel->SetActiveTab(i);
+                }
+            }
+        }
+    }
+
+    bool EditorLayer::IsDrawerOpen() const
+    {
+        return m_CenterArea && m_CenterArea->Open;
+    }
+
+    void EditorLayer::ShowPage(DrawerPage page)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef() || page == DrawerPage::None)
+            return;
+        const std::string title = PageTitle(static_cast<int>(page));
+        if (IsPanelDocked(title))
+        {
+            ActivateDockedTab(*uiLayer->GetDockSpaceRef(), title);
+            return;
+        }
+        OpenDrawer(page);
+    }
+
+    void EditorLayer::ToggleDrawer(DrawerPage page)
+    {
+        if (IsPanelDocked(PageTitle(static_cast<int>(page))))
+        {
+            ShowPage(page);
+            return;
+        }
+        if (IsDrawerOpen() && m_DrawerPage == page)
+            CloseDrawer();
+        else
+            OpenDrawer(page);
+    }
+
+    void EditorLayer::OpenDrawer(DrawerPage page)
+    {
+        if (!m_CenterArea || page == DrawerPage::None || IsPanelDocked(PageTitle(static_cast<int>(page))))
+            return;
+        Ref<NoxUI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
+        if (!root)
+            return;
+        m_CenterArea->SetPage(root);
+        m_DrawerPage = page;
+        m_CenterArea->HeightFraction = m_DrawerFraction;
+        m_CenterArea->Open = true;
+    }
+
+    void EditorLayer::CloseDrawer()
+    {
+        if (m_CenterArea)
+            m_CenterArea->Open = false;
+    }
+
+    void EditorLayer::DockPage(DrawerPage page)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef() || page == DrawerPage::None)
+            return;
+        const auto& dock = uiLayer->GetDockSpaceRef();
+        const std::string title = PageTitle(static_cast<int>(page));
+        if (dock->FindNodeByPanelTitle(title))
+            return;
+        Ref<NoxUI::UIElement> root = page == DrawerPage::Content ? m_ContentBrowserRoot : m_OutputLogRoot;
+        if (!root)
+            return;
+        // Out of the drawer (closed at once: the page is needed in the dock now).
+        if (m_DrawerPage == page)
+        {
+            if (m_CenterArea)
+            {
+                m_CenterArea->SetPage({});
+                m_CenterArea->CloseNow();
+            }
+            m_DrawerPage = DrawerPage::None;
+        }
+        // Under the viewports, as a tab beside the other page when that one is docked already.
+        const std::string partner = PageTitle(page == DrawerPage::Log ? 1 : 2);
+        if (dock->FindNodeByPanelTitle(partner))
+            dock->AddPanel(title, root, NoxUI::UIDockDropZone::Center, partner);
+        else
+            dock->AddPanel(title, root, NoxUI::UIDockDropZone::Bottom, "Viewports", 0.30f);
+        ActivateDockedTab(*dock, title);
+    }
+
+    void EditorLayer::UndockPage(DrawerPage page)
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer || !uiLayer->GetDockSpaceRef())
+            return;
+        uiLayer->GetDockSpaceRef()->RemovePanel(PageTitle(static_cast<int>(page)));
+        OpenDrawer(page);
+    }
+
+    AssetHandle EditorLayer::CreatePrefab(UUID dragged, const std::filesystem::path& relativeFolder)
+    {
+        if (!m_ActiveScene || !Project::GetActive())
+            return 0;
+        Entity draggedEntity = m_ActiveScene->GetEntityByUUID(dragged);
+        if (!draggedEntity)
+        {
+            NOX_CORE_WARN("Create Prefab: drag entities from the Scene Hierarchy (a folder row is not an entity)");
+            return 0;
+        }
+
+        // The dragged entity, or the whole selection when it is part of it; the dragged one first (the pivot of the others).
+        std::vector<Entity> entities{ draggedEntity };
+        if (m_Selection.Contains(draggedEntity))
+        {
+            for (Entity selected : m_Selection.GetEntities())
+            {
+                if (selected && !(selected == draggedEntity))
+                    entities.push_back(selected);
+            }
+        }
+
+        std::string name = entities.size() == 1 ? draggedEntity.GetName() : std::string("New Prefab");
+        for (char& character : name)
+        {
+            if (std::strchr("\\/:*?\"<>|", character) != nullptr)
+                character = '_';
+        }
+        if (name.empty())
+            name = "New Prefab";
+
+        const std::filesystem::path assetDirectory = Project::GetActiveAssetDirectory();
+        std::filesystem::path relativePath = relativeFolder / (name + ".nprefab");
+        for (int suffix = 2; std::filesystem::exists(assetDirectory / relativePath); ++suffix)
+            relativePath = relativeFolder / (name + " " + std::to_string(suffix) + ".nprefab");
+
+        if (!SceneSerializer::SerializePrefab(*m_ActiveScene, entities, relativePath.stem().string(), assetDirectory / relativePath))
+        {
+            NOX_CORE_ERROR("Create Prefab: could not write {}", relativePath.generic_string());
+            return 0;
+        }
+        return Project::GetActive()->GetEditorAssetManager()->RegisterExistingFile(relativePath, AssetType::Prefab);
+    }
+
+    void EditorLayer::Notify(NoxUI::UINotificationSeverity severity, std::string title, std::string message)
+    {
+        if (UILayer* uiLayer = Application::Get().GetUILayer())
+            uiLayer->GetContext().PushNotification({ severity, std::move(title), std::move(message) });
     }
 }

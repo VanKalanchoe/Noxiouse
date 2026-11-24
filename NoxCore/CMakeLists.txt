@@ -20,38 +20,6 @@ set(RTXDI_INCLUDE_DIR "${RTXDI_DIR}/Include" "${RTXDI_DIR}/Include/Rtxdi" "${RTX
 set(RTXDI_SHADERS_DIR "${RTXDI_DIR}/Include/Rtxdi" "${RTXDI_DIR}/shaders")
 file(GLOB RTXDI_SOURCES "${RTXDI_DIR}/Source/*.cpp")
 
-set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui")
-set(IMGUI_SOURCES
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
-    ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
-)
-
-set(IMGUIZMO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/ImGuizmo/src")
-set(IMGUIZMO_SOURCES
-    ${IMGUIZMO_DIR}/ImGuizmo.cpp
-)
-
-# Node-graph canvas UI (thedmd/imgui-node-editor), for the animation graph editor and any future graph editor
-# reusing the same NodeGraph core (docs/Animation_Graph_Architecture_Plan_2026.md Step 3). Fetched fresh from
-# master (includes its "fixing for modern imgui" commits), plus the blueprints-example's pin-icon utilities
-# (drawing.cpp/widgets.cpp -- self-contained, no patched-ImGui-fork dependency). NodeGraphEditorPanel talks to
-# this only through INodeGraphCanvasBackend (NoxEditor/src/Panels/NodeGraph/), so swapping to a different
-# canvas library later only means adding a new backend implementation, not touching the panel.
-set(IMGUI_NODE_EDITOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/imgui-node-editor")
-set(IMGUI_NODE_EDITOR_SOURCES
-    ${IMGUI_NODE_EDITOR_DIR}/crude_json.cpp
-    ${IMGUI_NODE_EDITOR_DIR}/imgui_canvas.cpp
-    ${IMGUI_NODE_EDITOR_DIR}/imgui_node_editor.cpp
-    ${IMGUI_NODE_EDITOR_DIR}/imgui_node_editor_api.cpp
-    ${IMGUI_NODE_EDITOR_DIR}/utilities/drawing.cpp
-    ${IMGUI_NODE_EDITOR_DIR}/utilities/widgets.cpp
-)
-
 set(TINYGLTF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/tinygltf")
 #set(TINYGLTF_SOURCE
 #    ${TINYGLTF_DIR}/tiny_gltf_v3.c
@@ -82,21 +50,21 @@ file(GLOB_RECURSE NOXCORE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}) #main file here
+add_library(${PROJECT_NAME} STATIC ${NOXCORE_FILES} ${TINYGLTF_SOURCE} ${MESHOPTIMIZER_SOURCES} ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}) #main file here
 
 # Precompiled header (src/NoxPCH.h): the standard library and the third-party headers most files include, parsed once instead of in
 # every source file. The vendors' own sources compiled into this library build without it (their own configuration macros).
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/NoxPCH.h")
-set_source_files_properties(${IMGUI_SOURCES} ${IMGUIZMO_SOURCES} ${IMGUI_NODE_EDITOR_SOURCES} ${MESHOPTIMIZER_SOURCES}
+set_source_files_properties(${MESHOPTIMIZER_SOURCES}
                             ${OFFSETALLOCATOR_SOURCES} ${BC7ENC_SOURCES} ${XATLAS_SOURCES} ${RTXDI_SOURCES}
                             PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_link_libraries (${PROJECT_NAME} PUBLIC NoxTasks::NoxTasks NoxNet::NoxNet NoxAudio::NoxAudio NoxRHI::RenderGraph NoxUI::Core NoxUI::SDL3 NoxUI::NoxRHI Coral.Native KTX::ktx SDL3::SDL3 glm::glm spdlog::spdlog EnTT::EnTT xxHash::xxhash yaml-cpp::yaml-cpp box2d::box2d msdf-atlas-gen::msdf-atlas-gen Freetype::Freetype tinyobjloader::tinyobjloader Jolt)
 # Add here vendors
-target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR} ${IMGUI_DIR}/backends)
+target_include_directories (${PROJECT_NAME} SYSTEM PRIVATE ${STB_INCLUDEDIR})
 
 #vendors visible to other projects like editor
-target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR} ${IMGUI_NODE_EDITOR_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch ${CMAKE_CURRENT_SOURCE_DIR}/vendors/JoltPhysics)
+target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendors/filewatch ${CMAKE_CURRENT_SOURCE_DIR}/vendors/JoltPhysics)
 
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})

@@ -13,7 +13,6 @@ namespace Nox
 {
     namespace
     {
-        // A change this long ago and none since: saving several files (or an IDE's rename across files) builds once.
         constexpr std::chrono::milliseconds kDebounce{ 750 };
 
 #ifdef NDEBUG
@@ -26,7 +25,7 @@ namespace Nox
     ScriptBuilder::ScriptBuilder() = default;
     ScriptBuilder::~ScriptBuilder()
     {
-        m_Watcher.reset(); // its threads call back into this
+        m_Watcher.reset();
         if (m_Build.valid())
             m_Build.wait();
     }
@@ -44,7 +43,6 @@ namespace Nox
         m_Watcher = std::make_unique<Utils::NOXWatcher>();
         m_Watcher->watch(m_Project.parent_path(), [this](const std::filesystem::path& path)
         {
-            // Sources only: the build's own output (bin, obj) changes while it runs.
             if (path.extension() != ".cs")
                 return;
             const std::string generic = path.generic_string();
@@ -73,7 +71,7 @@ namespace Nox
         std::string command = "dotnet build \"" + m_Project.string() + "\" --configuration " + kConfiguration +
                               " -nologo -verbosity:quiet > \"" + m_Log.string() + "\" 2>&1";
 #ifdef _WIN32
-        command = "\"" + command + "\""; // cmd /c drops the outer quotes and keeps the inner ones
+        command = "\"" + command + "\"";
 #endif
         m_Status = "Building " + m_Project.filename().string() + "...";
         NOX_CORE_INFO("Scripts: building {}", m_Project.generic_string());
@@ -88,7 +86,6 @@ namespace Nox
             if (m_Build.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return;
             const int result = m_Build.get();
-            // The compiler's messages as data (MSBuild prints each twice: in place and in its summary; kept once).
             std::string output;
             {
                 std::ifstream log(m_Log, std::ios::binary);
@@ -111,7 +108,6 @@ namespace Nox
             }
             else
             {
-                // The compiler's errors, into the editor's log: file(line,col) code message.
                 for (const ScriptDiagnostic& diagnostic : built.Diagnostics)
                 {
                     if (diagnostic.Severity != "error")
@@ -120,7 +116,7 @@ namespace Nox
                                             : std::format("{}({},{}): ", diagnostic.File, diagnostic.Line, diagnostic.Column);
                     NOX_CORE_ERROR("[C# build] {}{} {}", place, diagnostic.Code, diagnostic.Message);
                 }
-                if (errors == 0) // (failed without a message we can read: the output's last lines)
+                if (errors == 0)
                     NOX_CORE_ERROR("[C# build] the build failed without a compiler error; see {}", m_Log.generic_string());
                 m_Status = "Script build failed (" + std::to_string(errors) + " errors)";
                 NOX_CORE_ERROR("Scripts: build failed, the scripts that were running stay; full output in {}", m_Log.generic_string());

@@ -2,15 +2,24 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <format>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 
+#include <NoxUI/Core/UIContext.h>
+#include <NoxUI/Widgets/UIPropertyRows.h>
+#include "Panels/TableView.h"
 #include "NoxCore/Profiling/Profiler.h"
 #include <NRIRenderGraph/RGFrameReport.h>
+#include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include <NoxUI/Layout/UILayout.h>
+#include <NoxUI/Layout/UITabPanel.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UILabel.h>
+#include <NoxUI/Widgets/UIScrollView.h>
 
 namespace Nox
 {
@@ -37,7 +46,6 @@ namespace Nox
             default: return "other";
             }
         }
-
         const char* KindName(RGResourceKind kind)
         {
             switch (kind)
@@ -48,549 +56,394 @@ namespace Nox
             }
             return "";
         }
-
-        // Per second, short: 12.34M, 1.25B.
         std::string FormatRate(double perSecond)
         {
-            if (perSecond >= 1e12)
-                return std::format("{:.2f}T", perSecond / 1e12);
-            if (perSecond >= 1e9)
-                return std::format("{:.2f}B", perSecond / 1e9);
-            if (perSecond >= 1e6)
-                return std::format("{:.2f}M", perSecond / 1e6);
-            if (perSecond >= 1e3)
-                return std::format("{:.2f}K", perSecond / 1e3);
+            if (perSecond >= 1e12) return std::format("{:.2f}T", perSecond / 1e12);
+            if (perSecond >= 1e9) return std::format("{:.2f}B", perSecond / 1e9);
+            if (perSecond >= 1e6) return std::format("{:.2f}M", perSecond / 1e6);
+            if (perSecond >= 1e3) return std::format("{:.2f}K", perSecond / 1e3);
             return std::format("{:.0f}", perSecond);
         }
-
         std::string FormatBytes(uint64_t bytes)
         {
-            if (bytes >= 1024 * 1024)
-                return std::format("{:.1f} MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
-            if (bytes >= 1024)
-                return std::format("{:.1f} KB", static_cast<double>(bytes) / 1024.0);
+            if (bytes >= 1024 * 1024) return std::format("{:.1f} MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+            if (bytes >= 1024) return std::format("{:.1f} KB", static_cast<double>(bytes) / 1024.0);
             return std::format("{} B", bytes);
         }
+        constexpr NoxUI::UIThemeToken kCulled{ "RenderGraphCulled", { 0.5f, 0.5f, 0.5f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kGroup{ "RenderGraphGroup", { 0.55f, 0.75f, 1.0f, 1.0f } };
+        constexpr NoxUI::UIThemeToken kWarning{ "StatusWarning", { 1.0f, 0.7f, 0.3f, 1.0f } };
+    }
 
-        // Average GPU time per scope name over the stats window (pass and group scopes share the render graph's names).
-        std::unordered_map<std::string_view, double> CollectGpuTimes()
+    void RenderGraphPanel::Update(bool shown)
+    {
+        if (!m_Renderer)
+            return;
+        m_Renderer->getRenderGraph().SetReportEnabled(shown);
+        if (!shown)
         {
-            std::unordered_map<std::string_view, double> times;
+            if (m_WasShown && !m_Renderer->getTextureInspection().Name.empty())
+                m_Renderer->setTextureInspection({}); // (closed: what it showed stops being copied)
+            m_WasShown = false;
+            return;
+        }
+        m_WasShown = true;
+    }
+
+    const Ref<NoxUI::UIElement>& RenderGraphPanel::BuildUI(NoxUI::UIContext* context)
+    {
+        auto root = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 6.0f);
+        root->WidthMode = NoxUI::UISizeMode::Fill;
+        root->HeightMode = NoxUI::UISizeMode::Fill;
+        root->StyleClass = "Surface";
+        root->DrawBackground = true;
+        root->Padding = NoxUI::UIThickness::All(8.0f);
+        m_Root = root;
+        Renderer* r = m_Renderer;
+        if (!r)
+            return m_Root;
+        RenderGraph* graph = &r->getRenderGraph();
+
+        // ---- Header: switches and the frame's counts ----
+        {
+            NoxUI::UIPropertyRows rows(root, context);
+            NoxUI::UIPropertyRows header = rows.Section("Graph, Culling and LOD", true, nullptr);
+            header.Check("Validation", [graph]() { return graph->IsValidationEnabled(); }, [graph](bool v) { graph->SetValidationEnabled(v); });
+            header.Check("Parallel Recording", [r]() { return r->isParallelCommandRecording(); }, [r](bool v) { r->setParallelCommandRecording(v); });
+            header.Choice("Synchronization", { "Blanket", "Precise" }, [graph]() { return graph->GetSynchronization() == RGSynchronization::Precise ? 1 : 0; },
+                          [graph](int v) { graph->SetSynchronization(v == 1 ? RGSynchronization::Precise : RGSynchronization::Blanket); },
+                          "Blanket: one memory barrier after a pass whose writes a later pass uses. Precise: per-resource barriers before the consuming pass.");
+            header.Button("Export .dot", [graph]() { WriteRenderGraphDot(graph->GetReport(), "RenderGraph.dot"); }, "Writes RenderGraph.dot next to the editor (GraphViz)");
+            header.Check("Instance Culling", [r]() { return r->isInstanceCullingEnabled(); }, [r](bool v) { r->setInstanceCullingEnabled(v); });
+            header.Check("Occlusion Culling", [r]() { return r->isOcclusionCullingEnabled(); }, [r](bool v) { r->setOcclusionCullingEnabled(v); },
+                         "Hi-Z: instances hidden behind closer geometry, re-tested in phase 2 (off while the culling view is frozen)");
+            header.Check("Meshlet Frustum", [r]() { return (r->getMeshletCulling() & shaderio::MESHLET_CULL_FRUSTUM) != 0; },
+                         [r](bool v) { r->setMeshletCulling(v ? shaderio::MESHLET_CULL_FRUSTUM : 0u); },
+                         "Also tests each meshlet of a visible instance against the frustum");
+            header.Check("Freeze Culling View", [r]() { return r->getFrozen(); }, [r](bool v) { r->setFrozen(v); });
+            header.Slider("LOD Error (px)", [r]() { return r->getLodErrorPixels(); }, [r](float v) { r->setLodErrorPixels(v); }, 0.0f, 8.0f, "{:.2f}");
+            header.Check("Full Detail", [r]() { return r->getLodFullDetail(); }, [r](bool v) { r->setLodFullDetail(v); }, "Draws only the original clusters (no LOD), for comparison");
+            Ref<NoxUI::UIElement> statistics = header.Check("Pipeline Statistics", []() { return Profiler::Get().IsPipelineStatisticsEnabled(); },
+                [](bool v) { Profiler::Get().SetPipelineStatisticsEnabled(v); }, "Fragments and task / mesh shader invocations per raster pass (queries cost GPU time)");
+            header.EnableWhen(statistics, []() { return Profiler::Get().IsPipelineStatisticsSupported(); },
+                              []() { return std::string("needs pipeline statistics and mesh shader queries (and a profiling build)"); });
+            rows.Text([r, graph]()
+            {
+                const RGFrameReport& report = graph->GetReport();
+                uint32_t executed = 0;
+                for (const RGFrameReport::Pass& pass : report.Passes)
+                    executed += pass.Culled ? 0 : 1;
+                std::string text = std::format("Frame {} | {} of {} passes executed | {} command buffer(s) | pool: textures {}, buffers {}\n"
+                                               "Visible {} (+{} of {} re-tested) / {} | drawn {} clusters, {} of {} triangles",
+                                               report.FrameNumber, executed, report.Passes.size(), report.CommandBuffers, FormatBytes(report.PoolTextureBytes),
+                                               FormatBytes(report.PoolBufferBytes), r->getVisibleInstanceCount(), r->getLateDrawnCount(), r->getLateCandidateCount(),
+                                               r->getDrawListSize(), r->getDrawnClusterCount(), r->getDrawnTriangleCount(), r->getVisibleTriangleCount());
+                if (const double frameMs = Profiler::Get().GetFrameTime().Avg; frameMs > 0.0)
+                {
+                    const double draws = static_cast<double>(r->getVisibleInstanceCount() + r->getLateDrawnCount());
+                    text += std::format(" | {} draws/s | {} tris/s", FormatRate(draws * 1000.0 / frameMs), FormatRate(static_cast<double>(r->getVisibleTriangleCount()) * 1000.0 / frameMs));
+                }
+                return text;
+            }, NoxUI::ThemeColor("RenderGraphStats", { 0.80f, 0.83f, 0.89f, 1.0f }));
+            rows.Text([graph]()
+            {
+                const RGFrameReport& report = graph->GetReport();
+                if (!report.ResetAllHistory && report.ResetHistoryKeys.empty())
+                    return std::string();
+                std::string resets = report.ResetAllHistory ? "all" : "";
+                for (const std::string& key : report.ResetHistoryKeys)
+                    resets += (resets.empty() ? "" : ", ") + key;
+                return "History reset this frame: " + resets;
+            }, kWarning);
+        }
+
+        Ref<NoxUI::UITabPanel> tabs(new NoxUI::UITabPanel());
+        tabs->WidthMode = NoxUI::UISizeMode::Fill;
+        tabs->HeightMode = NoxUI::UISizeMode::Fill;
+        root->AddChild(tabs);
+
+        // ---- Passes ----
+        {
+            auto page = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+            page->WidthMode = NoxUI::UISizeMode::Fill;
+            page->HeightMode = NoxUI::UISizeMode::Fill;
+            Ref<TableView> table(new TableView());
+            table->Columns = { { "Pass", 3.0f }, { "Command Buffer", 1.0f }, { "CPU ms", 0.8f }, { "GPU ms", 0.8f }, { "Mesh inv.", 0.9f }, { "Flags", 2.5f } };
+            table->Fill = [this, graph](std::vector<TableView::Row>& out)
+            {
+                const RGFrameReport& report = graph->GetReport();
+                std::unordered_map<std::string_view, double> gpuTimes;
 #if NOX_PROFILE_STATS
-            std::vector<ProfileScopeStats> scopes;
-            Profiler::Get().GetGpuScopes(scopes);
-            for (const ProfileScopeStats& scope : scopes)
-                times[scope.Name] = scope.Timing.Avg;
+                std::vector<ProfileScopeStats> scopes;
+                Profiler::Get().GetGpuScopes(scopes);
+                for (const ProfileScopeStats& scope : scopes)
+                    gpuTimes[scope.Name] = scope.Timing.Avg;
 #endif
-            return times;
-        }
-
-        constexpr ImVec4 CulledColor{ 0.5f, 0.5f, 0.5f, 1.0f };
-        constexpr ImVec4 GroupColor{ 0.55f, 0.75f, 1.0f, 1.0f };
-        constexpr ImVec4 WarningColor{ 1.0f, 0.7f, 0.3f, 1.0f };
-    }
-
-    void RenderGraphPanel::OnImGuiRender()
-    {
-        RenderGraph& graph = m_Renderer->getRenderGraph();
-        graph.SetReportEnabled(m_Open);
-        if (!m_Open)
-        {
-            StopInspection();
-            return;
-        }
-
-        if (!ImGui::Begin("Render Graph", &m_Open))
-        {
-            ImGui::End();
-            return;
-        }
-
-        const RGFrameReport& report = graph.GetReport();
-        DrawHeader(report);
-
-        if (ImGui::BeginTabBar("##RenderGraphTabs"))
-        {
-            if (ImGui::BeginTabItem("Passes"))
-            {
-                DrawPasses(report);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Resources"))
-            {
-                DrawResources(report);
-                ImGui::EndTabItem();
-            }
-            const std::string validationTab = std::format("Validation ({})###Validation", report.ValidationMessages.size());
-            if (ImGui::BeginTabItem(validationTab.c_str()))
-            {
-                DrawValidation(report);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Inspector"))
-            {
-                DrawInspector();
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
-        }
-
-        ImGui::End();
-    }
-
-    void RenderGraphPanel::DrawHeader(const RGFrameReport& report)
-    {
-        RenderGraph& graph = m_Renderer->getRenderGraph();
-
-        bool validation = graph.IsValidationEnabled();
-        if (ImGui::Checkbox("Validation", &validation))
-            graph.SetValidationEnabled(validation);
-
-        ImGui::SameLine();
-        bool parallel = m_Renderer->isParallelCommandRecording();
-        if (ImGui::Checkbox("Parallel Recording", &parallel))
-            m_Renderer->setParallelCommandRecording(parallel);
-
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(110.0f);
-        int synchronization = graph.GetSynchronization() == RGSynchronization::Precise ? 1 : 0;
-        if (ImGui::Combo("Sync", &synchronization, "Blanket\0Precise\0"))
-            graph.SetSynchronization(synchronization == 1 ? RGSynchronization::Precise : RGSynchronization::Blanket);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Blanket: one memory barrier after a pass whose writes a later pass uses.\nPrecise: per-resource barriers before the consuming pass.");
-
-        ImGui::SameLine();
-        if (ImGui::Button("Export .dot"))
-            WriteRenderGraphDot(report, "RenderGraph.dot");
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Writes RenderGraph.dot next to the editor (GraphViz)");
-
-        // GPU culling (§5.6): instance frustum culling, optional meshlet culling, frozen culling view (no key: F fired while
-        // typing a name and is the viewport's Frame Selected; the viewport shows when it is frozen).
-        bool instanceCulling = m_Renderer->isInstanceCullingEnabled();
-        if (ImGui::Checkbox("Instance Culling", &instanceCulling))
-            m_Renderer->setInstanceCullingEnabled(instanceCulling);
-
-        ImGui::SameLine();
-        bool occlusionCulling = m_Renderer->isOcclusionCullingEnabled();
-        if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling))
-            m_Renderer->setOcclusionCullingEnabled(occlusionCulling);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Hi-Z: instances hidden behind closer geometry, re-tested in phase 2 (off while the culling view is frozen)");
-
-        ImGui::SameLine();
-        bool meshletFrustum = (m_Renderer->getMeshletCulling() & shaderio::MESHLET_CULL_FRUSTUM) != 0;
-        if (ImGui::Checkbox("Meshlet Frustum", &meshletFrustum))
-            m_Renderer->setMeshletCulling(meshletFrustum ? shaderio::MESHLET_CULL_FRUSTUM : 0u);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Also tests each meshlet of a visible instance against the frustum (the task shader fetches meshlet bounds)");
-
-        ImGui::SameLine();
-        bool frozen = m_Renderer->getFrozen();
-        if (ImGui::Checkbox("Freeze Culling View", &frozen))
-            m_Renderer->setFrozen(frozen);
-
-        ImGui::SameLine();
-        ImGui::Text("| visible %u (+%u of %u re-tested) / %u", m_Renderer->getVisibleInstanceCount(), m_Renderer->getLateDrawnCount(),
-                    m_Renderer->getLateCandidateCount(), m_Renderer->getDrawListSize());
-
-        // Rates of the newest frame, from what the culling pass submitted: throughput, not a score -- culling lowers
-        // them by design, because the same image is drawn with fewer draws and triangles.
-        const double frameMs = Profiler::Get().GetFrameTime().Avg;
-        if (frameMs > 0.0)
-        {
-            const double draws = static_cast<double>(m_Renderer->getVisibleInstanceCount() + m_Renderer->getLateDrawnCount());
-            std::string rates = std::format("| {} draws/s", FormatRate(draws * 1000.0 / frameMs));
-
-            rates += std::format(" | {} tris/s", FormatRate(static_cast<double>(m_Renderer->getVisibleTriangleCount()) * 1000.0 / frameMs));
-
-            ImGui::SameLine();
-            ImGui::TextUnformatted(rates.c_str());
-        }
-
-        // Cluster LOD (§5.7): the DAG cut the task shader draws, and what the visibility passes drew with it against the
-        // original triangles of the visible instances.
-        float lodErrorPixels = m_Renderer->getLodErrorPixels();
-        ImGui::SetNextItemWidth(160.0f);
-        if (ImGui::SliderFloat("LOD Error (px)", &lodErrorPixels, 0.0f, 8.0f, "%.2f"))
-            m_Renderer->setLodErrorPixels(lodErrorPixels);
-        ImGui::SameLine();
-        bool lodFullDetail = m_Renderer->getLodFullDetail();
-        if (ImGui::Checkbox("Full Detail", &lodFullDetail))
-            m_Renderer->setLodFullDetail(lodFullDetail);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Draws only the original clusters (no LOD), for comparison");
-        ImGui::SameLine();
-        ImGui::Text("| drawn %u clusters, %u of %u triangles", m_Renderer->getDrawnClusterCount(), m_Renderer->getDrawnTriangleCount(),
-                    m_Renderer->getVisibleTriangleCount());
-
-        // Vulkan pipeline statistics per raster pass (Triangles column, stats report). Costs GPU time: off for timings.
-        Profiler& profiler = Profiler::Get();
-        ImGui::BeginDisabled(!profiler.IsPipelineStatisticsSupported());
-        bool statistics = profiler.IsPipelineStatisticsEnabled();
-        if (ImGui::Checkbox("Pipeline Statistics", &statistics))
-            profiler.SetPipelineStatisticsEnabled(statistics);
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip(profiler.IsPipelineStatisticsSupported()
-                                  ? "Fragments and task/mesh shader invocations per raster pass (queries cost GPU time)"
-                                  : "Needs pipeline statistics and mesh shader queries (and a profiling build)");
-
-        uint32_t executed = 0;
-        for (const RGFrameReport::Pass& pass : report.Passes)
-            executed += pass.Culled ? 0 : 1;
-
-        ImGui::Text("Frame %llu | %u of %zu passes executed | %u command buffer(s) | pool: textures %s, buffers %s",
-                    static_cast<unsigned long long>(report.FrameNumber), executed, report.Passes.size(), report.CommandBuffers,
-                    FormatBytes(report.PoolTextureBytes).c_str(), FormatBytes(report.PoolBufferBytes).c_str());
-
-        if (report.ResetAllHistory || !report.ResetHistoryKeys.empty())
-        {
-            std::string resets = report.ResetAllHistory ? "all" : "";
-            for (const std::string& key : report.ResetHistoryKeys)
-                resets += (resets.empty() ? "" : ", ") + key;
-            ImGui::TextColored(WarningColor, "History reset this frame: %s", resets.c_str());
-        }
-    }
-
-    void RenderGraphPanel::DrawPasses(const RGFrameReport& report)
-    {
-        const std::unordered_map<std::string_view, double> gpuTimes = CollectGpuTimes();
-        std::vector<ProfilePipelineStatistics> statistics;
-        Profiler::Get().GetPipelineStatistics(statistics);
-        auto meshInvocations = [&statistics](const char* name) -> std::string
-        {
-            for (const ProfilePipelineStatistics& pass : statistics)
-            {
-                if (std::string_view(pass.Name) == name)
-                    return std::format("{}", pass.MeshInvocations);
-            }
-            return std::string("-");
-        };
-        auto gpuTime = [&gpuTimes](const char* name) -> std::string
-        {
-            const auto found = gpuTimes.find(name);
-            return found != gpuTimes.end() ? std::format("{:.2f}", found->second) : std::string("-");
-        };
-
-        constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
-        const float tableHeight = m_SelectedPass < report.Passes.size() ? ImGui::GetContentRegionAvail().y * 0.65f : 0.0f;
-        if (ImGui::BeginTable("##Passes", 6, tableFlags, ImVec2(0.0f, tableHeight)))
-        {
-            ImGui::TableSetupScrollFreeze(0, 1);
-            ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Command Buffer", ImGuiTableColumnFlags_WidthFixed);
-            ImGui::TableSetupColumn("CPU ms", ImGuiTableColumnFlags_WidthFixed);
-            ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed);
-            ImGui::TableSetupColumn("Mesh inv.", ImGuiTableColumnFlags_WidthFixed);
-            ImGui::TableSetupColumn("Flags", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableHeadersRow();
-
-            for (const RGFrameReport::Row& row : report.Rows)
-            {
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::Indent(static_cast<float>(row.Depth) * 14.0f + 1.0f);
-
-                if (row.Pass == RGInvalidIndex)
+                std::vector<ProfilePipelineStatistics> statistics;
+                Profiler::Get().GetPipelineStatistics(statistics);
+                const auto gpuTime = [&](const char* name) { const auto found = gpuTimes.find(name); return found != gpuTimes.end() ? std::format("{:.2f}", found->second) : std::string("-"); };
+                const auto mesh = [&](const char* name)
                 {
-                    ImGui::TextColored(GroupColor, "%s", row.Name);
-                    ImGui::Unindent(static_cast<float>(row.Depth) * 14.0f + 1.0f);
-                    ImGui::TableNextColumn();
-                    ImGui::TableNextColumn();
-                    ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(gpuTime(row.Name).c_str());
-                    ImGui::TableNextColumn();
-                    ImGui::TableNextColumn();
-                    continue;
-                }
-
-                const RGFrameReport::Pass& pass = report.Passes[row.Pass];
-                if (pass.Culled)
-                    ImGui::PushStyleColor(ImGuiCol_Text, CulledColor);
-                ImGui::PushID(static_cast<int>(row.Pass));
-                if (ImGui::Selectable(pass.Name, m_SelectedPass == row.Pass, ImGuiSelectableFlags_SpanAllColumns))
-                    m_SelectedPass = m_SelectedPass == row.Pass ? ~0u : row.Pass;
-                ImGui::PopID();
-                ImGui::Unindent(static_cast<float>(row.Depth) * 14.0f + 1.0f);
-
-                ImGui::TableNextColumn();
-                if (pass.Culled)
-                    ImGui::TextUnformatted("culled");
-                else
-                    ImGui::Text("%u", pass.Chunk);
-                ImGui::TableNextColumn();
-                if (!pass.Culled)
-                    ImGui::Text("%.3f", pass.RecordMs);
-                ImGui::TableNextColumn();
-                if (!pass.Culled)
-                    ImGui::TextUnformatted(gpuTime(pass.Name).c_str());
-                ImGui::TableNextColumn();
-                if (!pass.Culled && pass.Raster)
-                    ImGui::TextUnformatted(meshInvocations(pass.Name).c_str());
-                ImGui::TableNextColumn();
-
-                std::string flags;
-                if (pass.Raster)
-                    flags += "Raster ";
-                if (pass.Presents)
-                    flags += "Present ";
-                if (pass.SynchronizeAfter)
-                    flags += "Sync ";
-                if (pass.Barriers > 0)
-                    flags += std::format("{} barrier(s) ", pass.Barriers);
-                for (uint32_t key = 0; key < report.ExclusiveKeys.size(); ++key)
+                    for (const ProfilePipelineStatistics& pass : statistics)
+                        if (std::string_view(pass.Name) == name)
+                            return std::format("{}", pass.MeshInvocations);
+                    return std::string("-");
+                };
+                for (const RGFrameReport::Row& row : report.Rows)
                 {
-                    if ((pass.ExclusiveMask & (1u << key)) != 0)
-                        flags += std::format("[{}] ", report.ExclusiveKeys[key]);
+                    TableView::Row line;
+                    line.Indent = static_cast<float>(row.Depth) * 14.0f;
+                    if (row.Pass == RGInvalidIndex)
+                    {
+                        line.Cells = { row.Name ? row.Name : "", "", "", gpuTime(row.Name), "", "" };
+                        line.Color = kGroup;
+                        line.Id = ~0ull;
+                        out.push_back(std::move(line));
+                        continue;
+                    }
+                    const RGFrameReport::Pass& pass = report.Passes[row.Pass];
+                    std::string flags;
+                    if (pass.Raster) flags += "Raster ";
+                    if (pass.Presents) flags += "Present ";
+                    if (pass.SynchronizeAfter) flags += "Sync ";
+                    if (pass.Barriers > 0) flags += std::format("{} barrier(s) ", pass.Barriers);
+                    for (uint32_t key = 0; key < report.ExclusiveKeys.size(); ++key)
+                        if ((pass.ExclusiveMask & (1u << key)) != 0)
+                            flags += std::format("[{}] ", report.ExclusiveKeys[key]);
+                    line.Cells = { pass.Name, pass.Culled ? std::string("culled") : std::to_string(pass.Chunk), pass.Culled ? std::string() : std::format("{:.3f}", pass.RecordMs),
+                                   pass.Culled ? std::string() : gpuTime(pass.Name), !pass.Culled && pass.Raster ? mesh(pass.Name) : std::string(), flags };
+                    line.Color = pass.Culled ? kCulled : line.Color;
+                    line.Id = row.Pass;
+                    line.Highlight = m_SelectedPass == row.Pass;
+                    line.Tooltip = "Click: what it reads and writes";
+                    out.push_back(std::move(line));
                 }
-                ImGui::TextUnformatted(flags.c_str());
-
-                if (pass.Culled)
-                    ImGui::PopStyleColor();
-            }
-            ImGui::EndTable();
-        }
-
-        if (m_SelectedPass >= report.Passes.size())
-            return;
-
-        const RGFrameReport::Pass& pass = report.Passes[m_SelectedPass];
-        ImGui::SeparatorText(pass.Name);
-        if (ImGui::BeginChild("##PassAccesses"))
-        {
-            for (uint32_t index = pass.FirstAccess; index < pass.FirstAccess + pass.AccessCount; ++index)
+            };
+            table->OnRowClick = [this](const TableView::Row& row, int) { if (row.Id != ~0ull) m_SelectedPass = m_SelectedPass == row.Id ? ~0u : static_cast<uint32_t>(row.Id); };
+            page->AddChild(table);
+            auto accesses = NoxUI::Label("", 13.0f);
+            Ref<NoxUI::UILabel> accessesRef = accesses;
+            accessesRef->WordWrap = true;
+            accessesRef->WidthMode = NoxUI::UISizeMode::Fill;
+            page->AddChild(accessesRef);
+            NoxUI::AppendSync(*page, [this, graph, accessesRef]()
             {
-                const RGFrameReport::Access& access = report.Accesses[index];
-                const std::vector<RGFrameReport::Resource>& resources = access.IsTexture ? report.Textures : report.Buffers;
-                if (access.Resource >= resources.size())
-                    continue;
-                ImGui::Text("%s  %s  %s", access.IsWrite ? "Write" : "Read ", access.IsTexture ? "texture" : "buffer ", resources[access.Resource].Name);
-            }
+                const RGFrameReport& report = graph->GetReport();
+                if (m_SelectedPass >= report.Passes.size())
+                {
+                    accessesRef->Text = "Click a pass for what it reads and writes.";
+                    return;
+                }
+                const RGFrameReport::Pass& pass = report.Passes[m_SelectedPass];
+                std::string text = std::string(pass.Name) + ":";
+                for (uint32_t index = pass.FirstAccess; index < pass.FirstAccess + pass.AccessCount; ++index)
+                {
+                    const RGFrameReport::Access& access = report.Accesses[index];
+                    const std::vector<RGFrameReport::Resource>& resources = access.IsTexture ? report.Textures : report.Buffers;
+                    if (access.Resource < resources.size())
+                        text += std::format("\n  {}  {}  {}", access.IsWrite ? "Write" : "Read ", access.IsTexture ? "texture" : "buffer ", resources[access.Resource].Name);
+                }
+                accessesRef->Text = text;
+            });
+            tabs->AddTab("Passes", page);
         }
-        ImGui::EndChild();
-    }
 
-    void RenderGraphPanel::DrawResources(const RGFrameReport& report)
-    {
-        ImGui::Checkbox("Show resources unused this frame", &m_ShowUnusedResources);
-
-        const float passCount = static_cast<float>(std::max<size_t>(report.Passes.size(), 1));
-        constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
-        if (!ImGui::BeginTable("##Resources", 8, tableFlags))
-            return;
-
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("Format", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("Memory", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("Lifetime", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("GPU Object", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableHeadersRow();
-
-        const Renderer::TextureInspection& inspection = m_Renderer->getTextureInspection();
-        auto drawRows = [&](const std::vector<RGFrameReport::Resource>& resources, bool textures)
+        // ---- Resources ----
         {
-            // Occurrence per name, in graph order: history slots share their key as name.
-            std::unordered_map<std::string_view, uint32_t> occurrences;
-            for (uint32_t index = 0; index < resources.size(); ++index)
+            auto page = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+            page->WidthMode = NoxUI::UISizeMode::Fill;
+            page->HeightMode = NoxUI::UISizeMode::Fill;
+            NoxUI::UIPropertyRows rows(page, context);
+            rows.Check("Show resources unused this frame", [this]() { return m_ShowUnusedResources; }, [this](bool v) { m_ShowUnusedResources = v; });
+            Ref<TableView> table(new TableView());
+            table->Columns = { { "Resource", 3.0f }, { "Kind", 1.2f }, { "Size", 1.4f }, { "Format", 1.0f }, { "Memory", 1.0f }, { "Lifetime", 2.2f }, { "GPU Object", 0.9f }, { "", 0.9f } };
+            // Ids: textures 2i, buffers 2i+1 (in report order); names with their occurrence for the inspector.
+            auto names = std::make_shared<std::unordered_map<uint64_t, std::pair<std::string, uint32_t>>>();
+            table->Fill = [this, graph, r, names](std::vector<TableView::Row>& out)
             {
-                const RGFrameReport::Resource& resource = resources[index];
-                const uint32_t occurrence = occurrences[resource.Name]++;
-                const bool used = resource.FirstPass != RGInvalidIndex;
-                if (!used && !m_ShowUnusedResources)
-                    continue;
-
-                ImGui::TableNextRow();
-                ImGui::PushID(static_cast<int>(index) * 2 + (textures ? 0 : 1));
-                if (!used)
-                    ImGui::PushStyleColor(ImGuiCol_Text, CulledColor);
-
-                ImGui::TableNextColumn();
-                if (occurrence > 0 || (resource.Kind == RGResourceKind::History))
-                    ImGui::Text("%s [%u]", resource.Name, occurrence);
-                else
-                    ImGui::TextUnformatted(resource.Name);
-
-                ImGui::TableNextColumn();
-                ImGui::Text("%s%s", KindName(resource.Kind), resource.ReadOnly ? " (RO)" : "");
-
-                ImGui::TableNextColumn();
-                if (textures)
+                const RGFrameReport& report = graph->GetReport();
+                const float passCount = static_cast<float>(std::max<size_t>(report.Passes.size(), 1));
+                const Renderer::TextureInspection& inspection = r->getTextureInspection();
+                names->clear();
+                const auto rowsOf = [&](const std::vector<RGFrameReport::Resource>& resources, bool textures)
                 {
-                    if (resource.Texture.MipLevels > 1)
-                        ImGui::Text("%ux%u (%u mips)", resource.Texture.Width, resource.Texture.Height, resource.Texture.MipLevels);
-                    else
-                        ImGui::Text("%ux%u", resource.Texture.Width, resource.Texture.Height);
-                }
-                else
-                {
-                    ImGui::TextUnformatted(resource.Kind == RGResourceKind::Imported ? "-" : FormatBytes(resource.Buffer.Size).c_str());
-                }
-
-                ImGui::TableNextColumn();
-                ImGui::TextUnformatted(textures ? FormatName(resource.Texture.Format) : "buffer");
-
-                ImGui::TableNextColumn();
-                ImGui::TextUnformatted(resource.Bytes > 0 ? FormatBytes(resource.Bytes).c_str() : "-");
-
-                // First to last executed pass over the whole pass list.
-                ImGui::TableNextColumn();
-                if (used)
-                {
-                    const ImVec2 cursor = ImGui::GetCursorScreenPos();
-                    const float width = ImGui::GetContentRegionAvail().x;
-                    const float height = ImGui::GetTextLineHeight();
-                    const float begin = cursor.x + width * (static_cast<float>(resource.FirstPass) / passCount);
-                    const float end = cursor.x + width * (static_cast<float>(resource.LastPass + 1) / passCount);
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(ImVec2(cursor.x, cursor.y + 2.0f), ImVec2(cursor.x + width, cursor.y + height - 2.0f), IM_COL32(60, 60, 60, 120));
-                    drawList->AddRectFilled(ImVec2(begin, cursor.y + 2.0f), ImVec2(std::max(end, begin + 2.0f), cursor.y + height - 2.0f),
-                                            resource.Kind == RGResourceKind::Transient ? IM_COL32(110, 190, 90, 255) : IM_COL32(220, 150, 70, 255));
-                    ImGui::Dummy(ImVec2(width, height));
-                    if (ImGui::IsItemHovered() && resource.FirstPass < report.Passes.size() && resource.LastPass < report.Passes.size())
-                        ImGui::SetTooltip("%s -> %s", report.Passes[resource.FirstPass].Name, report.Passes[resource.LastPass].Name);
-                }
-
-                ImGui::TableNextColumn();
-                if (resource.PhysicalId != RGInvalidIndex)
-                    ImGui::Text("#%u", resource.PhysicalId);
-
-                ImGui::TableNextColumn();
-                if (textures)
-                {
-                    const bool inspected = inspection.Name == resource.Name && inspection.Occurrence == occurrence;
-                    if (ImGui::SmallButton(inspected ? "Inspecting" : "Inspect"))
-                        Inspect(resource.Name, occurrence);
-                }
-
-                if (!used)
-                    ImGui::PopStyleColor();
-                ImGui::PopID();
-            }
-        };
-
-        drawRows(report.Textures, true);
-        drawRows(report.Buffers, false);
-        ImGui::EndTable();
-    }
-
-    void RenderGraphPanel::DrawValidation(const RGFrameReport& report)
-    {
-        if (!m_Renderer->getRenderGraph().IsValidationEnabled())
-            ImGui::TextColored(WarningColor, "Validation is off.");
-        else if (report.ValidationMessages.empty())
-            ImGui::TextUnformatted("No issues this frame.");
-
-        for (const std::string& message : report.ValidationMessages)
-            ImGui::TextColored(WarningColor, "%s", message.c_str());
-
-        if (report.UnusedWrites.empty())
-            return;
-
-        ImGui::SeparatorText("Writes no later pass reads (informational)");
-        for (const RGFrameReport::UnusedWrite& unused : report.UnusedWrites)
-        {
-            const std::vector<RGFrameReport::Resource>& resources = unused.IsTexture ? report.Textures : report.Buffers;
-            if (unused.Pass < report.Passes.size() && unused.Resource < resources.size())
-                ImGui::Text("%s -> %s", report.Passes[unused.Pass].Name, resources[unused.Resource].Name);
-        }
-    }
-
-    void RenderGraphPanel::DrawInspector()
-    {
-        Renderer::TextureInspection inspection = m_Renderer->getTextureInspection();
-        if (inspection.Name.empty())
-        {
-            ImGui::TextUnformatted("Pick a texture with Inspect in the Resources tab.");
-            return;
+                    std::unordered_map<std::string_view, uint32_t> occurrences;
+                    for (uint32_t index = 0; index < resources.size(); ++index)
+                    {
+                        const RGFrameReport::Resource& resource = resources[index];
+                        const uint32_t occurrence = occurrences[resource.Name]++;
+                        const bool used = resource.FirstPass != RGInvalidIndex;
+                        if (!used && !m_ShowUnusedResources)
+                            continue;
+                        TableView::Row row;
+                        row.Id = static_cast<uint64_t>(index) * 2 + (textures ? 0 : 1);
+                        const std::string name = occurrence > 0 || resource.Kind == RGResourceKind::History ? std::format("{} [{}]", resource.Name, occurrence) : std::string(resource.Name);
+                        const std::string size = textures ? (resource.Texture.MipLevels > 1 ? std::format("{}x{} ({} mips)", resource.Texture.Width, resource.Texture.Height, resource.Texture.MipLevels)
+                                                                                           : std::format("{}x{}", resource.Texture.Width, resource.Texture.Height))
+                                                          : (resource.Kind == RGResourceKind::Imported ? std::string("-") : FormatBytes(resource.Buffer.Size));
+                        const bool inspected = textures && inspection.Name == resource.Name && inspection.Occurrence == occurrence;
+                        row.Cells = { name, std::string(KindName(resource.Kind)) + (resource.ReadOnly ? " (RO)" : ""), size, textures ? FormatName(resource.Texture.Format) : "buffer",
+                                      resource.Bytes > 0 ? FormatBytes(resource.Bytes) : std::string("-"), "", resource.PhysicalId != RGInvalidIndex ? std::format("#{}", resource.PhysicalId) : std::string(),
+                                      textures ? (inspected ? "Inspecting" : "Inspect") : "" };
+                        row.Color = used ? row.Color : kCulled;
+                        row.Highlight = inspected;
+                        if (used)
+                        {
+                            row.BarColumn = 5;
+                            row.BarBegin = static_cast<float>(resource.FirstPass) / passCount;
+                            row.BarEnd = static_cast<float>(resource.LastPass + 1) / passCount;
+                            row.BarColor = resource.Kind == RGResourceKind::Transient ? NoxUI::ThemeColor("RenderGraphTransient", { 0.43f, 0.75f, 0.35f, 1.0f }) : NoxUI::ThemeColor("RenderGraphPersistent", { 0.86f, 0.59f, 0.27f, 1.0f });
+                            if (resource.FirstPass < report.Passes.size() && resource.LastPass < report.Passes.size())
+                                row.Tooltip = std::format("{} -> {}", report.Passes[resource.FirstPass].Name, report.Passes[resource.LastPass].Name);
+                        }
+                        if (textures)
+                        {
+                            row.Tooltip += (row.Tooltip.empty() ? "" : "\n") + std::string("Click Inspect (last column) to see it in the Inspector tab");
+                            (*names)[row.Id] = { resource.Name, occurrence };
+                        }
+                        out.push_back(std::move(row));
+                    }
+                };
+                rowsOf(report.Textures, true);
+                rowsOf(report.Buffers, false);
+            };
+            table->OnRowClick = [r, names, tabs](const TableView::Row& row, int column)
+            {
+                const auto found = names->find(row.Id);
+                if (column != 7 || found == names->end())
+                    return;
+                Renderer::TextureInspection inspection = r->getTextureInspection();
+                inspection.Name = found->second.first;
+                inspection.Occurrence = found->second.second;
+                inspection.Mip = 0;
+                r->setTextureInspection(inspection);
+                tabs->SetActiveTab(3); // (the Inspector)
+            };
+            page->AddChild(table);
+            tabs->AddTab("Resources", page);
         }
 
-        const RGTextureKey& key = m_Renderer->getInspectedTextureKey();
-        ImGui::Text("%s [%u]  %ux%u %s", inspection.Name.c_str(), inspection.Occurrence, key.Width, key.Height, FormatName(key.Format));
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Stop"))
+        // ---- Validation ----
         {
-            StopInspection();
-            return;
+            auto scroll = NoxUI::MakeUI<NoxUI::UIScrollView>();
+            scroll->WidthMode = NoxUI::UISizeMode::Fill;
+            scroll->HeightMode = NoxUI::UISizeMode::Fill;
+            auto label = NoxUI::Label("", 13.0f);
+            Ref<NoxUI::UILabel> labelRef = label;
+            labelRef->WordWrap = true;
+            labelRef->WidthMode = NoxUI::UISizeMode::Fill;
+            scroll->AddChild(labelRef);
+            NoxUI::AppendSync(*scroll, [graph, labelRef]()
+            {
+                const RGFrameReport& report = graph->GetReport();
+                std::string text = !graph->IsValidationEnabled() ? "Validation is off." : report.ValidationMessages.empty() ? "No issues this frame." : "";
+                for (const std::string& message : report.ValidationMessages)
+                    text += (text.empty() ? "" : "\n") + message;
+                if (!report.UnusedWrites.empty())
+                {
+                    text += "\n\nWrites no later pass reads (informational):";
+                    for (const RGFrameReport::UnusedWrite& unused : report.UnusedWrites)
+                    {
+                        const std::vector<RGFrameReport::Resource>& resources = unused.IsTexture ? report.Textures : report.Buffers;
+                        if (unused.Pass < report.Passes.size() && unused.Resource < resources.size())
+                            text += std::format("\n  {} -> {}", report.Passes[unused.Pass].Name, resources[unused.Resource].Name);
+                    }
+                }
+                labelRef->Text = text;
+            });
+            tabs->AddTab("Validation", scroll);
         }
 
-        if (key.MipLevels > 1)
+        // ---- Inspector ----
         {
-            int mip = static_cast<int>(inspection.Mip);
-            if (ImGui::SliderInt("Mip", &mip, 0, static_cast<int>(key.MipLevels) - 1))
-                inspection.Mip = static_cast<uint32_t>(mip);
-        }
-
-        const bool floatFormat = key.Format != NRI_FORMAT_R32_SINT && key.Format != NRI_FORMAT_R32G32_UINT &&
-                                 key.Format != NRI_FORMAT_R32G32B32A32_UINT &&
-                                 key.Usage != NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
-        if (floatFormat)
-        {
-            ImGui::Checkbox("Depth curve", &inspection.DepthCurve);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Reverse-Z curve: depth kept in a color format (the Hi-Z pyramid) reads as black otherwise");
-
-            if (ImGui::SliderFloat("Exposure (stops)", &m_ExposureStops, -10.0f, 10.0f, "%.1f"))
-                inspection.Exposure = std::pow(2.0f, m_ExposureStops);
-
-            constexpr const char* channelNames[] = { "R", "G", "B", "A" };
+            auto page = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Vertical, 4.0f);
+            page->WidthMode = NoxUI::UISizeMode::Fill;
+            page->HeightMode = NoxUI::UISizeMode::Fill;
+            NoxUI::UIPropertyRows rows(page, context);
+            rows.Text([r]()
+            {
+                const Renderer::TextureInspection& inspection = r->getTextureInspection();
+                if (inspection.Name.empty())
+                    return std::string("Pick a texture with Inspect in the Resources tab.");
+                const RGTextureKey& key = r->getInspectedTextureKey();
+                return std::format("{} [{}]  {}x{} {}", inspection.Name, inspection.Occurrence, key.Width, key.Height, FormatName(key.Format));
+            }, NoxUI::ThemeColor("RenderGraphInspectText", { 0.86f, 0.88f, 0.92f, 1.0f }));
+            const auto inspecting = [r]() { return !r->getTextureInspection().Name.empty(); };
+            const auto edit = [r](auto change) { Renderer::TextureInspection inspection = r->getTextureInspection(); change(inspection); r->setTextureInspection(inspection); };
+            Ref<NoxUI::UIElement> stop = rows.Button("Stop", [r]() { r->setTextureInspection({}); });
+            rows.ShowWhen(stop, inspecting);
+            Ref<NoxUI::UIElement> mip = rows.Int("Mip", [r]() { return static_cast<int>(r->getTextureInspection().Mip); },
+                [edit](int v) { edit([v](Renderer::TextureInspection& i) { i.Mip = static_cast<uint32_t>(v); }); }, 0, 15);
+            rows.ShowWhen(mip, [r, inspecting]() { return inspecting() && r->getInspectedTextureKey().MipLevels > 1; });
+            const auto floatFormat = [r]()
+            {
+                const RGTextureKey& key = r->getInspectedTextureKey();
+                return key.Format != NRI_FORMAT_R32_SINT && key.Format != NRI_FORMAT_R32G32_UINT && key.Format != NRI_FORMAT_R32G32B32A32_UINT &&
+                       key.Usage != NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
+            };
+            NoxUI::UIPropertyRows floats = rows.Group();
+            floats.Check("Depth Curve", [r]() { return r->getTextureInspection().DepthCurve; }, [edit](bool v) { edit([v](Renderer::TextureInspection& i) { i.DepthCurve = v; }); },
+                         "Reverse-Z curve: depth kept in a colour format (the Hi-Z pyramid) reads as black otherwise");
+            floats.Slider("Exposure (stops)", [this]() { return m_ExposureStops; },
+                          [this, edit](float v) { m_ExposureStops = v; edit([v](Renderer::TextureInspection& i) { i.Exposure = std::pow(2.0f, v); }); }, -10.0f, 10.0f, "{:.1f}");
+            static constexpr const char* kChannels[4] = { "R", "G", "B", "A" };
             for (uint32_t channel = 0; channel < 4; ++channel)
+                floats.Check(kChannels[channel], [r, channel]() { return (r->getTextureInspection().ChannelMask & (1u << channel)) != 0; },
+                             [edit, channel](bool v) { edit([v, channel](Renderer::TextureInspection& i) { i.ChannelMask = v ? i.ChannelMask | (1u << channel) : i.ChannelMask & ~(1u << channel); }); });
+            rows.ShowWhen(floats.GetBody(), [inspecting, floatFormat]() { return inspecting() && floatFormat(); });
+
+            // The image, with the value under the pointer (the renderer reads back the probed texel).
+            class InspectImage final : public NoxUI::UIImage
             {
-                bool shown = (inspection.ChannelMask & (1u << channel)) != 0;
-                if (channel > 0)
-                    ImGui::SameLine();
-                if (ImGui::Checkbox(channelNames[channel], &shown))
-                    inspection.ChannelMask = shown ? inspection.ChannelMask | (1u << channel) : inspection.ChannelMask & ~(1u << channel);
-            }
+            public:
+                Renderer* Render = nullptr;
+                bool OnPointerMove(const NoxUI::UIPointerEvent& e) override { m_Pointer = e.Position; m_In = true; return true; }
+                bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_In = false; return false; }
+            protected:
+                void OnUpdate(float) override
+                {
+                    if (!Render)
+                        return;
+                    Renderer::TextureInspection inspection = Render->getTextureInspection();
+                    inspection.ProbeX = inspection.ProbeY = -1;
+                    NriTexture image = Render->getInspectionImage();
+                    TextureId = image ? nriGetTextureDescriptorSlot(image) : ~0u;
+                    Visible = image != nullptr;
+                    const RGTextureKey& key = Render->getInspectedTextureKey();
+                    const uint32_t width = std::max(key.Width >> inspection.Mip, 1u), height = std::max(key.Height >> inspection.Mip, 1u);
+                    const NoxUI::UIRect b = GetBounds();
+                    const float scale = b.Width() / static_cast<float>(width);
+                    FixedSize = { 0.0f, static_cast<float>(height) * std::max(scale, 0.01f) };
+                    if (image && m_In && b.Contains(m_Pointer) && scale > 0.0f)
+                    {
+                        inspection.ProbeX = std::clamp(static_cast<int32_t>((m_Pointer.x - b.Min.x) / scale), 0, static_cast<int32_t>(width) - 1);
+                        inspection.ProbeY = std::clamp(static_cast<int32_t>((m_Pointer.y - b.Min.y) / scale), 0, static_cast<int32_t>(height) - 1);
+                        glm::vec4 value;
+                        Tooltip = Render->getInspectionProbe(value) ? std::format("({}, {})\n{:.5g}  {:.5g}  {:.5g}  {:.5g}", inspection.ProbeX, inspection.ProbeY, value.r, value.g, value.b, value.a)
+                                                                    : std::string();
+                    }
+                    if (!inspection.Name.empty())
+                        Render->setTextureInspection(inspection);
+                }
+            private:
+                NoxUI::UIVec2 m_Pointer{ 0.0f };
+                bool m_In = false;
+            };
+            Ref<InspectImage> image(new InspectImage());
+            image->Render = r;
+            image->WidthMode = NoxUI::UISizeMode::Fill;
+            image->HeightMode = NoxUI::UISizeMode::Fixed;
+            image->HitTestMode = NoxUI::UIHitTestMode::Self;
+            page->AddChild(image);
+            rows.Text([r, inspecting]() { return inspecting() && !r->getInspectionImage() ? std::string("Not available this frame (culled or not produced by the current pipeline).") : std::string(); }, kWarning);
+            tabs->AddTab("Inspector", page);
         }
-
-        inspection.ProbeX = -1;
-        inspection.ProbeY = -1;
-        if (NriTexture image = m_Renderer->getInspectionImage())
+        NoxUI::AppendSync(*root, [tabs, graph]()
         {
-            const uint32_t mipWidth = std::max(key.Width >> inspection.Mip, 1u);
-            const uint32_t mipHeight = std::max(key.Height >> inspection.Mip, 1u);
-            const float availableWidth = ImGui::GetContentRegionAvail().x;
-            const float scale = availableWidth / static_cast<float>(mipWidth);
-            const ImVec2 imageSize(availableWidth, static_cast<float>(mipHeight) * scale);
-
-            const ImVec2 origin = ImGui::GetCursorScreenPos();
-            ImGui::Image(static_cast<ImTextureID>(nriGetTextureDescriptorSlot(image)), imageSize);
-            if (ImGui::IsItemHovered())
-            {
-                const ImVec2 mouse = ImGui::GetMousePos();
-                inspection.ProbeX = std::clamp(static_cast<int32_t>((mouse.x - origin.x) / scale), 0, static_cast<int32_t>(mipWidth) - 1);
-                inspection.ProbeY = std::clamp(static_cast<int32_t>((mouse.y - origin.y) / scale), 0, static_cast<int32_t>(mipHeight) - 1);
-
-                glm::vec4 value;
-                if (m_Renderer->getInspectionProbe(value))
-                    ImGui::SetTooltip("(%d, %d)\n%.5g  %.5g  %.5g  %.5g", inspection.ProbeX, inspection.ProbeY, value.r, value.g, value.b, value.a);
-            }
-        }
-        else
-        {
-            ImGui::TextColored(WarningColor, "Not available this frame (culled or not produced by the current pipeline).");
-        }
-
-        m_Renderer->setTextureInspection(inspection);
-    }
-
-    void RenderGraphPanel::Inspect(const char* name, uint32_t occurrence)
-    {
-        Renderer::TextureInspection inspection = m_Renderer->getTextureInspection();
-        inspection.Name = name;
-        inspection.Occurrence = occurrence;
-        inspection.Mip = 0;
-        m_Renderer->setTextureInspection(inspection);
-    }
-
-    void RenderGraphPanel::StopInspection()
-    {
-        if (!m_Renderer->getTextureInspection().Name.empty())
-            m_Renderer->setTextureInspection({});
+            const std::string title = std::format("Validation ({})", graph->GetReport().ValidationMessages.size());
+            if (tabs->GetTabCount() > 2 && tabs->GetTabTitle(2) != title)
+                tabs->SetTabTitle(2, title);
+        });
+        return m_Root;
     }
 }

@@ -1,40 +1,58 @@
-# C# Scripting Host (`.NET 9` / Coral) & `NoxScriptCore` API (`35` Files)
+# C# Scripting Host (`.NET 10` / Coral `320c90d`) & `NoxScriptCore` API (`35` Files)
 
-Noxiouse features a first-class **C# scripting runtime** powered by **.NET 9 (`net9.0`)** and **Coral** (`NoxCore/src/NoxCore/Scripting/` + `NoxScriptCore/`). It supports **multiple scripts per entity**, **stateful hot reload during Play Mode**, **rich Inspector attributes (`[Expose]`, `[DisallowSelf]`)**, **64-bit Large World Coordinate `Vector3d` positions**, **multi-threaded C# jobs (`Nox.Jobs`)**, **runtime procedural meshes (`MeshBuilder`)**, and **85 native C++ internal calls**.
+Noxiouse features a first-class **C# scripting runtime** powered by **.NET 10 (`net10.0`)** and **Coral `320c90d`** (`NoxCore/src/NoxCore/Scripting/` + `NoxScriptCore/`). It supports **multiple scripts per entity**, **atomic stateful hot reload during Play Mode**, **rich Inspector reflection (`[Expose]` on fields, `get`/`set` properties, `enum` dropdowns, and `System.Action` events)**, **live Play-mode Inspector sync & editing**, **64-bit Large World Coordinate `Vector3d` positions**, **multi-threaded C# jobs (`Nox.Jobs`)**, **runtime procedural meshes (`MeshBuilder`)**, and **native C++ internal calls**.
 
 ---
 
 ## 1. Plain-English Tour of the Scripting Architecture
 
-### A. Assembly Staging & Stateful Hot Reload (`ScriptEngine` + `DotNetBackend`)
+### A. Assembly Staging & Atomic Stateful Hot Reload (`ScriptEngine` + `DotNetBackend`)
 - **Zero File-Lock Shadow Copying**: In the editor, `ScriptEngine` copies `.dll`, `.pdb`, `.deps.json`, and `.runtimeconfig.json` into `Intermediate/Scripts/Generation-<N>/` before loading so `dotnet build` can recompile C# scripts at any time—even while the game is playing!
-- **Stateful Hot Reload (`ScriptEngine::ReloadAssembly`)**:
+- **Atomic Stateful Hot Reload (`ScriptEngine::ReloadAssembly`)**:
   1. Waits for any running background `Nox.Jobs` tasks to finish (`WaitForJobs(2000)`).
-  2. Snapshots the live value of every `[Expose]` field on every active script instance (`FieldSnapshot`).
-  3. Unloads the old `Coral::AssemblyLoadContext` and loads the new generation DLL (automatically rolling back to the previous generation if the new DLL fails to load or mismatches `kScriptApiVersion = 19`).
-  4. Recreates script instances, restores their live `[Expose]` field values from the snapshot, invokes `OnCreate()`, and calls `OnAfterReload()`.
+  2. Snapshots the live value of every `[Expose]` field/property on every active script instance (`FieldSnapshot`).
+  3. Loads and validates the **new** `Coral::AssemblyLoadContext` first (Coral `320c90d` isolates reflection caches per context), checks `kScriptApiVersion = 23`, and reflects all `EntityBehaviour` types, fields, properties, enums, and events. If anything fails, only the new context is unloaded and the currently running scripts keep executing untouched.
+  4. On success, swaps in the new context, unloads the old context, recreates script instances, restores live `[Expose]` values from the snapshot, re-binds all `EventBindings`, and calls `OnAfterReload()`.
 
-### B. `EntityBehaviour` Lifecycle & Inspector Attributes
+### B. `EntityBehaviour` Lifecycle, Properties, Enums & Events
 Every gameplay script inherits from `Nox.EntityBehaviour`:
 
 ```csharp
+using System;
 using Nox;
+
+public enum MovementMode { Walk = 0, Sprint = 2, Fly = 5 }
 
 public sealed class PlayerController : EntityBehaviour
 {
-    [Expose(Unit = "m/s", Min = 0f, Max = 20f, Tooltip = "Horizontal walk speed")]
-    public float MoveSpeed = WorldUnits.FromMeters(5.0f);
+    [Expose(Tooltip = "Inspector enum dropdown (supports explicit values & YAML persistence)")]
+    public MovementMode Mode = MovementMode.Walk;
+
+    private float _moveSpeed = WorldUnits.FromMeters(5.0f);
+    [Expose(Unit = "m/s", Min = 0f, Max = 20f, Tooltip = "Validated C# property")]
+    public float MoveSpeed
+    {
+        get => _moveSpeed;
+        set => _moveSpeed = Math.Clamp(value, 0f, WorldUnits.FromMeters(20f));
+    }
+
+    // Getter-only (or private set) properties are automatically ReadOnly and update live in Play Mode:
+    [Expose] public bool IsGrounded => GetComponent<CharacterControllerComponent>().IsGrounded;
 
     [Expose, DisallowSelf]
     public Entity FollowTarget;
 
-    public override void OnCreate() { }
-    public override void OnUpdate(float dt) { }
-    public override void OnFixedUpdate(float fixedDt) { } // Only called at 60Hz if overridden!
-    public override void OnLateUpdate(float dt) { }       // Called after physics & animations!
-    public override void OnAnimationEvent(string name) { }
-    public override void OnAfterReload() { }
-    public override void OnDestroy() { }
+    // UnityEvent-style Inspector wiring to any target entity's public void Method():
+    [Expose(Tooltip = "Wired in the Inspector via EventBindings")]
+    public event Action? OnJump;
+
+    protected override void OnCreate() { }
+    protected override void OnUpdate(float dt) { }
+    protected override void OnFixedUpdate(float fixedDt) { } // Only called at 60Hz if overridden!
+    protected override void OnLateUpdate(float dt) { }       // Called after physics & animations!
+    protected override void OnAnimationEvent(string name) { }
+    protected override void OnAfterReload() { }
+    protected override void OnDestroy() { }
 }
 ```
 
@@ -52,7 +70,7 @@ public sealed class PlayerController : EntityBehaviour
 | [`IScriptBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/IScriptBackend.h) | Pure abstract interface decoupling `ScriptEngine` from the underlying .NET / Coral hosting implementation. |
 | [`ScriptEngine.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/ScriptEngine.h) & [`ScriptEngine.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/ScriptEngine.cpp) | Static scripting facade: assembly discovery (`FindAssemblies`), shadow-copy staging (`StageAssemblies`), stateful hot reload (`ReloadAssembly`), entity instance creation/destruction, and callback dispatch. |
 | [`DotNet/CoralCompat.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/CoralCompat.h) | Declares explicit `Coral::Attribute::GetFieldValue<std::string>` and `<bool>` specializations matching `Coral.Native`. |
-| [`DotNet/DotNetBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.h) & [`DotNetBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.cpp) | Hosts `.NET 9` via `Coral::HostInstance` (supporting both system .NET and packaged self-contained `dotnet/` folders), verifies `kScriptApiVersion = 19`, reflects `[Expose]`/`[DisallowSelf]` fields, enforces main-thread guards (`OnMainThread`), and implements all **88 native C++ internal calls**. |
+| [`DotNet/DotNetBackend.h`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.h) & [`DotNetBackend.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Scripting/DotNet/DotNetBackend.cpp) | Hosts `.NET 10` via `Coral::HostInstance` (`320c90d`, supporting both system .NET and packaged self-contained `dotnet/` folders), verifies `kScriptApiVersion = 23`, implements atomic hot-reload, reflects `[Expose]` fields, properties, enums, and `System.Action` events, and registers all native C++ internal calls. |
 
 ---
 
@@ -60,8 +78,8 @@ public sealed class PlayerController : EntityBehaviour
 
 | File | Plain-English Summary & Public API |
 | :--- | :--- |
-| [`Nox.ScriptCore.csproj`](file:///E:/dev/noxiouse/NoxScriptCore/Nox.ScriptCore.csproj) | .NET 9 (`net9.0`) project file with `AllowUnsafeBlocks` enabled for zero-overhead unmanaged `delegate*` pointers. |
-| [`Source/ScriptApi.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ScriptApi.cs) | Defines `ScriptApi.Version = 23` and `WaitForDebugger(timeoutMs)` (polls `Debugger.IsAttached` and calls `Debugger.Break()`). |
+| [`Nox.ScriptCore.csproj`](file:///E:/dev/noxiouse/NoxScriptCore/Nox.ScriptCore.csproj) | .NET 10 (`net10.0`) project file with `AllowUnsafeBlocks` enabled for zero-overhead unmanaged `delegate*` pointers. |
+| [`Source/ScriptApi.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ScriptApi.cs) | Defines `ScriptApi.Version = 23`, `GetEnumMembers`, `SubscribeEvent` (native `Delegate.CreateDelegate` event wiring), and `WaitForDebugger(timeoutMs)`. |
 | [`Source/InternalCalls.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/InternalCalls.cs) | Declares all **69 unmanaged `delegate*` function pointers** bound by `DotNetBackend::RegisterInternalCalls` plus `NativeString` marshaling. |
 | [`Source/ExposeAttribute.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/ExposeAttribute.cs) | `[Expose]` attribute with optional `Unit` (`"cm"`, `"m"`, `"cm/s"`, `"m/s"`, `"km/h"`), `Tooltip`, `Min`, `Max`, and `ReadOnly` parameters. |
 | [`Source/DisallowSelfAttribute.cs`](file:///E:/dev/noxiouse/NoxScriptCore/Source/DisallowSelfAttribute.cs) | `[DisallowSelf]` attribute preventing an `Entity` reference field from being assigned to `Self` in the Inspector. |

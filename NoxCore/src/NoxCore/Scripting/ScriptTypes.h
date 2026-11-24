@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <variant>
+#include <vector>
 #include <glm/glm.hpp>
 
 #include "NoxCore/Core/UUID.h"
@@ -11,7 +13,7 @@ namespace Nox
 {
     enum class ScriptLanguage : uint8_t { DotNet, Lua };
     enum class ScriptCallback : uint8_t { Create, Update, Destroy, AfterReload, FixedUpdate, LateUpdate };
-    enum class ScriptFieldType : uint8_t { Bool, Int, UInt, Long, ULong, Float, Double, String, Vector3, Entity };
+    enum class ScriptFieldType : uint8_t { Bool, Int, UInt, Long, ULong, Float, Double, String, Vector3, Entity, Enum };
 
     struct ScriptInstanceHandle
     {
@@ -39,5 +41,17 @@ namespace Nox
         float Min = 0.0f;
         float Max = 0.0f;
         bool ReadOnly = false;
+        // True when reflected from a C# property ([Expose] public T Prop { get; set; }) rather than a field.
+        bool IsProperty = false;
+        // ScriptFieldType::Enum: (display name, numeric value) pairs and underlying enum byte size (1, 2, 4, or 8).
+        std::vector<std::pair<std::string, int64_t>> EnumOptions;
+        uint8_t EnumByteSize = 4;
+    };
+
+    struct ScriptEventInfo
+    {
+        std::string Name;
+        std::string HandlerType;
+        std::string Tooltip;
     };
 }

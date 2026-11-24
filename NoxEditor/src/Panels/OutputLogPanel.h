@@ -1,64 +1,88 @@
 #pragma once
+
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "NoxCore/Core/LogBuffer.h"
+#include "NoxCore/Core/Ref.h"
 
-struct ImGuiInputTextCallbackData;
+namespace NoxUI
+{
+        class UIElement;
+        class UILabel;
+    }
 
 namespace Nox
 {
-    // Unreal's Output Log: everything the engine, the editor and the scripts log (the LogBuffer), as it happens -- a tab beside the
-    // Content Browser the first time it opens. Filters by verbosity (errors, warnings, info, verbose) and by text (every word must
-    // appear, case ignored: "net debug" or "[C#]"); Clear hides what is there (Nox.log keeps it all); the view follows new lines while
-    // it is scrolled to the bottom. Click a line to select it (Shift / Ctrl for more), Ctrl+C or the right-click menu copies; Window >
-    // Output Log. Under the lines, Unreal's Cmd line: engine console commands (Tab completes, Up / Down walk the history, the names that
-    // fit what is typed are listed above it).
+
+    class LogLinesView;
+    class LogFilterChip;
+    class ConsoleLine;
+
+    // Unreal's Output Log: everything the engine, the editor and the scripts log (the LogBuffer) as it happens, docked as a tab
+    // beside the Content Browser.
+    //  - Filter chips for Errors / Warnings / Messages / Verbose show how many there are since the last Clear; a click hides or
+    //    shows that level. The search keeps lines that have every word typed (case ignored: "net debug", "[C#]").
+    //  - The view follows new lines while it is scrolled to the bottom. Click a line to select it (Shift / Ctrl for more); Ctrl+C
+    //    or the right-click menu copies. Clear hides what is there (Nox.log keeps it all).
+    //  - Under the lines, the Cmd line runs engine console commands: Tab completes, Up / Down walk the history, the names that fit
+    //    what is typed are listed above it.
     class OutputLogPanel
     {
     public:
-        void OnImGuiRender();
+        OutputLogPanel();
+        ~OutputLogPanel();
 
-        bool IsOpen() const { return m_Open; }
-        void SetOpen(bool open) { m_Open = open; }
+        Ref<NoxUI::UIElement> BuildUI();
+        // Once a frame: takes the new lines from the LogBuffer.
+        void Update(float dt);
+
+        // Since the last Clear (the status bar shows them).
+        size_t GetErrorCount() const { return m_ErrorCount; }
+        size_t GetWarningCount() const { return m_WarningCount; }
+        // Puts the keyboard into the Cmd line (the status bar's counters, the ` key).
+        void FocusCommandLine();
+        // An element put at the right end of the toolbar (the editor's "Dock in Layout" while the log is in the drawer).
+        void SetToolbarExtra(Ref<NoxUI::UIElement> element) { m_ToolbarExtra = std::move(element); }
 
     private:
-        void Fetch();
-        bool Passes(const LogEntry& entry) const;
-        void Refilter();
-        void AddRows(uint32_t entry);
-        void DrawToolbar();
-        void DrawLines();
-        void CopyLines(bool selectedOnly) const;
-        void DrawCommandLine();
-        static int CommandCallback(::ImGuiInputTextCallbackData* data);
+        friend class LogLinesView;
+        friend class ConsoleLine;
 
-    private:
-        bool m_Open = true;
-        bool m_DockPlaced = false;           // its first appearance put beside the Content Browser (or given up)
-        int m_DockAttempts = 0;
-        std::vector<LogEntry> m_Entries;     // its own copy of the buffer's lines (at most LogBuffer::Capacity)
-        uint64_t m_LastSequence = 0;
-        uint64_t m_ClearedAt = 0;            // lines up to this one are hidden (Clear)
-        // The rows drawn: each line of each entry that passes the filters (a message with line breaks takes several rows).
+        // What a row shows: one line of one entry (a message with line breaks takes several rows).
         struct Row
         {
             uint32_t Entry = 0;          // index into m_Entries
-            uint32_t Begin = 0, End = 0; // the line's characters in its Text
+            uint32_t Begin = 0, End = 0; // the line's characters in the entry's Text
         };
-        std::vector<Row> m_Shown;
-        bool m_ShowErrors = true, m_ShowWarnings = true, m_ShowInfo = true, m_ShowVerbose = true;
-        char m_Search[256] = {};
-        std::vector<std::string> m_SearchWords; // lower case
-        bool m_AutoScroll = true;
-        uint64_t m_SelectionAnchor = 0;      // sequences: what Shift-click extends from
-        std::vector<uint64_t> m_Selected;    // sorted
-        size_t m_ErrorCount = 0, m_WarningCount = 0; // since Clear
-        char m_Command[512] = {};
+
+        bool Passes(const LogEntry& entry) const;
+        void AddRows(uint32_t entryIndex);
+        void Refilter();
+        void Clear();
+        void CopyLines(bool selectedOnly) const;
+        void UpdateSuggestions();
+        void RunCommand(const std::string& line);
+
+        std::vector<LogEntry> m_Entries;   // its own copy of the buffer's lines (at most LogBuffer::Capacity)
+        uint64_t m_LastSequence = 0;
+        uint64_t m_ClearedAt = 0;          // lines up to this sequence are hidden (Clear)
+        std::vector<Row> m_Rows;
+        bool m_Show[4] = { true, true, true, true }; // errors, warnings, messages, verbose
+        std::vector<std::string> m_SearchWords;      // lower case
+        size_t m_ErrorCount = 0, m_WarningCount = 0, m_InfoCount = 0, m_VerboseCount = 0;
+        std::vector<uint64_t> m_Selected;  // sequences, sorted
+        uint64_t m_SelectionAnchor = 0;
         std::vector<std::string> m_History; // commands run, oldest first
-        int m_HistoryIndex = -1;            // -1: not walking the history
-        bool m_RefocusCommand = false;
-        bool m_ScrollToBottom = false;
+        int m_HistoryIndex = -1;
+
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIElement> m_ToolbarExtra;
+        Ref<LogLinesView> m_Lines;
+        Ref<LogFilterChip> m_Chips[4];
+        Ref<ConsoleLine> m_Command;
+        Ref<NoxUI::UILabel> m_Suggestions;
+        std::string m_SuggestionsFor;
     };
 }

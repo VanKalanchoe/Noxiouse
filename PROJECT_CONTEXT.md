@@ -18,7 +18,7 @@
 | `NoxCore` | static library | The engine: NRI (graphics layer), renderer and render graph, GPU scene, ECS scene, assets, physics, animation, scripting host, job system, profiling. |
 | `NoxEditor` | executable | The editor (`EditorLayer`, panels, undo history, script hot reload, File > Package Game). |
 | `NoxRuntime` | executable | The standalone player: the engine without the editor, the scene drawn straight to the window. Built with `-DNOX_BUILD_RUNTIME=ON`. |
-| `NoxScriptCore` | C# project (`net9.0`) | `Nox.ScriptCore.dll`, the C# API game scripts use. |
+| `NoxScriptCore` | C# project (`net10.0`) | `Nox.ScriptCore.dll`, the C# API game scripts use. |
 
 The sample project is `Facerun/` (`Facerun.nproj`, C# scripts in `Facerun/Assets/Scripts`). The world unit is a project
 setting, `WorldUnitsPerMeter` (`Project/Project.h`), default **100: one unit is one centimeter**, like Unreal

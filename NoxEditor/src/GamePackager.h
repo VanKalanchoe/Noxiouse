@@ -6,36 +6,13 @@
 
 namespace Nox
 {
-    // File > Package Game (docs/Runtime_And_Packaging_Plan_2026-10.md R3, R6 and a first R7): a folder that runs the game on its own.
-    //
-    //   <Output>/<Project>.exe        NoxRuntime, renamed
-    //   <Output>/*.dll, Scripts/, ... everything else next to the editor's executable (engine libraries, .NET host, managed
-    //                                 scripts, shader cache) except the editor itself and debug files
-    //   <Output>/assets/              the engine's shaders, fonts and textures
-    //   <Output>/Game/<Project>.nproj the project, and only the assets its scenes need: cooked files without their sources (the
-    //                                 importers take a cooked file as it is when its source is gone), with a registry of just
-    //                                 those -- in Game/Content.npak (PackFiles, VirtualFileSystem.h), else loose under
-    //                                 Game/<AssetDirectory>/
-    //   <Output>/Scripts/<Name>/      the project's script assembly (ScriptModulePath's name), next to Scripts/Core
-    //
-    // The scenes are the project's start scene (or every scene); scripts naming prefabs by path pull them in too.
     struct PackageSettings
     {
         std::filesystem::path OutputDirectory;
         bool AllScenes = false;
-        // The assets in one pack file (Game/Content.npak) the game reads from, instead of a folder of loose files.
         bool PackFiles = true;
-        // Shaders from the precompiled cache only (shaders/ next to the executable: shader-object binaries and SPIR-V of every
-        // pipeline the editor created): the Slang compiler is left out, which is delay-loaded and never needed then.
         bool PrecompiledShadersOnly = true;
-        // The .NET runtime the editor uses, copied into <Output>/dotnet (host/fxr and shared/Microsoft.NETCore.App, about
-        // 70 MB): the game runs on machines without .NET installed. Off: they need the .NET 9 runtime.
         bool SelfContainedDotNet = false;
-        // File > Package Server (docs/Networking_Plan_2026-11.md, NET6; Unreal's server target): a dedicated server -- the same
-        // runtime named <Project>Server (a server whatever its arguments: no window, GPU or sound; ApplicationCommandLineArgs::
-        // IsDedicatedServer) and the same cooked content without what only drawing and sound use (textures, fonts, sound clips, baked
-        // acoustics, the shader cache and the engine's shaders). Run it on a machine without a GPU; its console takes the server's
-        // commands.
         bool Server = false;
     };
 
@@ -45,7 +22,7 @@ namespace Nox
         std::string Error;
         size_t Assets = 0;
         size_t Files = 0;
-        size_t Cooked = 0; // textures cooked while packaging (they had never been loaded)
+        size_t Cooked = 0;
         uint64_t Bytes = 0;
         std::filesystem::path Executable;
         std::vector<std::string> Warnings;

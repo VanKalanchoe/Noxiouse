@@ -1181,6 +1181,7 @@ namespace Nox
                 Entity entity = { e, this };
                 ScriptEngine::OnCreateEntity(entity);
             }
+            ScriptEngine::BindAllEvents();
         }
     }
 
@@ -3661,9 +3662,9 @@ namespace Nox
         // (2D physics stays single precision: Box2D is float)
         bodyDef.position = b2Vec2{static_cast<float>(transform.Translation.x), static_cast<float>(transform.Translation.y)};
         bodyDef.rotation = b2MakeRot(transform.Rotation.z); //i could set full rotation will see bodyde.rotation
+        bodyDef.motionLocks.angularZ = r2bd.FixedRotation;
 
         b2BodyId body = b2CreateBody(m_PhysicsWorldID, &bodyDef);
-        b2Body_SetFixedRotation(body, r2bd.FixedRotation);
         r2bd.RuntimeBody = body;
 
         if (entity.HasComponent<BoxCollider2DComponent>())

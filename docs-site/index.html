@@ -127,17 +127,17 @@
                                     <td><strong><a href="#core-tasks-profiling">NoxCore/</a></strong></td>
                                     <td>Static Library (<code>C++20</code>)</td>
                                     <td>295</td>
-                                    <td>The core engine: <code>NRI</code> graphics abstraction, Vulkan 1.4 backend, frame-compiled <code>RenderGraph</code>, hybrid visibility-buffer + RT + path-traced <code>Renderer</code>, <code>Scene</code> ECS (47 components), <code>Asset</code> cooking & streaming pipeline, <code>Physics</code> (Jolt 3D + Box2D 2D), <code>Animation</code> & <code>NodeGraph</code>, <code>Scripting</code> (.NET 9 / Coral), <code>Tasks</code> (<code>JobSystem</code>), and <code>Profiling</code>.</td>
+                                    <td>The core engine: <code>NoxRHI</code> graphics abstraction (Vulkan 1.4 + Direct3D 12), frame-compiled <code>RenderGraph</code>, hybrid visibility-buffer + RT + path-traced <code>Renderer</code>, <code>Scene</code> ECS, <code>Asset</code> cooking &amp; streaming pipeline, <code>Physics</code> (Jolt 3D v5.7 + Box2D v3.1), <code>Animation</code> &amp; <code>NodeGraph</code>, <code>Scripting</code> (.NET 10 / Coral 320c90d), <code>Tasks</code> (<code>NoxTasks</code>), and <code>Profiling</code>.</td>
                                 </tr>
                                 <tr>
                                     <td><strong><a href="#scripting">NoxScriptCore/</a></strong></td>
-                                    <td>Managed Class Library (<code>C# / net9.0</code>)</td>
+                                    <td>Managed Class Library (<code>C# / net10.0</code>)</td>
                                     <td>28</td>
-                                    <td>The <code>Nox</code> C# API (<code>Nox.ScriptCore.dll</code>) providing <code>EntityBehaviour</code>, <code>Entity</code>, component wrappers, <code>Physics</code>, <code>Mesh</code> / <code>MeshBuilder</code>, <code>Jobs</code>, <code>Scene</code>, <code>Input</code>, <code>WorldUnits</code>, and <code>Vector3d</code>.</td>
+                                    <td>The <code>Nox</code> C# API (<code>Nox.ScriptCore.dll</code>) providing <code>EntityBehaviour</code>, <code>Entity</code>, <code>[Expose]</code> (fields, properties, enums, events), component wrappers, <code>Physics</code>, <code>Mesh</code> / <code>MeshBuilder</code>, <code>Jobs</code>, <code>Scene</code>, <code>Input</code>, <code>WorldUnits</code>, and <code>Vector3d</code>.</td>
                                 </tr>
                                 <tr>
                                     <td><strong><a href="#editor-runtime-sample">NoxEditor/</a></strong></td>
-                                    <td>Executable (<code>C++20</code>) + Shaders</td>
+                                    <td>Executable (<code>C++20 / NoxUI</code>) + Shaders</td>
                                     <td>31 C++ + 113 Shaders</td>
                                     <td>The full authoring environment with multi-viewport layout, gizmos, Undo/Redo, 12 specialized panels (including Levels), and 1-click <code>.npak</code> Game Packager. Also houses all <strong>113 Slang/HLSL shaders</strong> in <code>NoxEditor/assets/shaders/</code>.</td>
                                 </tr>

@@ -1140,6 +1140,28 @@ namespace Nox
                 }
             }
             out << YAML::EndSeq;
+
+            if (!scriptComponent.EventBindings.empty())
+            {
+                out << YAML::Key << "EventBindings" << YAML::Value << YAML::BeginSeq;
+                for (const auto& [className, events] : scriptComponent.EventBindings)
+                {
+                    for (const auto& [eventName, bindings] : events)
+                    {
+                        for (const auto& binding : bindings)
+                        {
+                            out << YAML::BeginMap;
+                            out << YAML::Key << "Class" << YAML::Value << className;
+                            out << YAML::Key << "Event" << YAML::Value << eventName;
+                            out << YAML::Key << "TargetEntity" << YAML::Value << binding.TargetEntity;
+                            out << YAML::Key << "TargetClass" << YAML::Value << binding.TargetClass;
+                            out << YAML::Key << "TargetMethod" << YAML::Value << binding.TargetMethod;
+                            out << YAML::EndMap;
+                        }
+                    }
+                }
+                out << YAML::EndSeq;
+            }
             out << YAML::EndMap;
         }
 
@@ -2824,12 +2846,26 @@ namespace Nox
                 if (type == "Bool") overrideValue = value.as<bool>();
                 else if (type == "Int") overrideValue = value.as<int32_t>();
                 else if (type == "UInt") overrideValue = value.as<uint32_t>();
-                else if (type == "Long") overrideValue = value.as<int64_t>();
+                else if (type == "Long" || type == "Enum") overrideValue = value.as<int64_t>();
                 else if (type == "ULong") overrideValue = value.as<uint64_t>();
                 else if (type == "Float") overrideValue = value.as<float>();
                 else if (type == "Double") overrideValue = value.as<double>();
                 else if (type == "String") overrideValue = value.as<std::string>();
                 else if (type == "Vector3") overrideValue = value.as<glm::vec3>();
+            }
+
+            if (auto bindingsNode = scriptComponent["EventBindings"])
+            {
+                for (const auto& bindingNode : bindingsNode)
+                {
+                    const std::string className = bindingNode["Class"].as<std::string>();
+                    const std::string eventName = bindingNode["Event"].as<std::string>();
+                    ScriptComponent::EventBinding binding;
+                    binding.TargetEntity = bindingNode["TargetEntity"].as<UUID>();
+                    binding.TargetClass = bindingNode["TargetClass"].as<std::string>();
+                    binding.TargetMethod = bindingNode["TargetMethod"].as<std::string>();
+                    sc.EventBindings[className][eventName].push_back(std::move(binding));
+                }
             }
         }
 

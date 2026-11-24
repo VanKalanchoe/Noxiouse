@@ -5,26 +5,33 @@
 #include <chrono>
 #include <cstdio>
 
-#include <imgui.h>
 #include <SDL3/SDL_misc.h>
 #include <SDL3/SDL_video.h>
 
 #include "EditorLayer.h"
-#include "ProjectLibrary.h"
-#include "NoxCore/Core/Application.h"
+#include <NoxUI/Core/UIContext.h>
 #include "NoxCore/Asset/TextureImporter.h"
+#include "NoxCore/Core/Application.h"
+#include "NoxCore/Core/Window.h"
 #include "NoxCore/Renderer/Renderer.h"
+#include <NoxUI/Core/UIBuilder.h>
+#include "NoxCore/UI/Core/UILayer.h"
+#include <NoxUI/Widgets/UIBadge.h>
+#include <NoxUI/Widgets/UIDropdown.h>
+#include <NoxUI/Widgets/UIImage.h>
+#include <NoxUI/Widgets/UISearchBar.h>
+#include <NoxUI/Widgets/UISegmentedControl.h>
 #include "NoxCore/Utils/Utils.h"
+#include "ProjectManager/ProjectLibrary.h"
 
 namespace Nox
 {
     namespace
     {
-        const char* s_IniFilename = nullptr;
-
-        std::string Lower(std::string text)
+        std::string ToLower(std::string text)
         {
-            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::transform(text.begin(), text.end(), text.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             return text;
         }
 
@@ -34,7 +41,8 @@ namespace Nox
             const auto written = std::filesystem::last_write_time(file, error);
             if (error)
                 return {};
-            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::filesystem::file_time_type::clock::now() - written).count();
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::filesystem::file_time_type::clock::now() - written).count();
             char text[64];
             if (seconds < 60)
                 return "just now";
@@ -65,74 +73,28 @@ namespace Nox
 
     ProjectManagerLayer::ProjectManagerLayer() : Layer("ProjectManagerLayer")
     {
-        ImGuiIO& io = ImGui::GetIO();
-        if (io.IniFilename)
-        {
-            s_IniFilename = io.IniFilename;
-            io.IniFilename = nullptr;
-        }
-        SDL_SetWindowTitle(Application::Get().getWindow()->getHandle(), "Nox Project Manager");
-        std::snprintf(m_Location, sizeof(m_Location), "%s", ProjectLibrary::GetDefaultProjectLocation().generic_string().c_str());
+        if (auto win = Application::Get().getWindow(); win && win->getHandle())
+            SDL_SetWindowTitle(win->getHandle(), "Nox Project Manager");
+
         m_OpenLast = ProjectLibrary::GetOpenLastProjectAtStartup();
-        // The templates' pictures (missing ones: the tile says so).
+        m_NewLocation = ProjectLibrary::GetDefaultProjectLocation().generic_string();
+
         for (int i = 0; i < 2; ++i)
         {
             std::error_code error;
-            const std::filesystem::path picture = ProjectLibrary::TemplatePicturePath(i == 0 ? ProjectLibrary::ProjectTemplate::Basic
-                                                                                             : ProjectLibrary::ProjectTemplate::Blank);
-            if (std::filesystem::exists(picture, error))
-                m_TemplatePictures[i] = TextureImporter::LoadTexture2D(picture, { .flip = false, .generateMips = false });
+            const auto tmpl = i == 0 ? ProjectLibrary::ProjectTemplate::Basic : ProjectLibrary::ProjectTemplate::Blank;
+            const std::filesystem::path pic = ProjectLibrary::TemplatePicturePath(tmpl);
+            if (!pic.empty() && std::filesystem::exists(pic, error))
+                m_TemplatePictures[i] = TextureImporter::LoadTexture2D(pic, { .flip = false, .generateMips = false });
         }
-        Refresh();
-    }
 
-    const char* ProjectManagerLayer::TakeIniFilename()
-    {
-        const char* name = s_IniFilename;
-        s_IniFilename = nullptr;
-        return name;
-    }
-
-    void ProjectManagerLayer::Refresh()
-    {
-        // Pictures the last frames may still draw are released once those frames are done.
-        for (Entry& entry : m_Projects)
-            if (entry.Thumbnail)
-                Renderer::DeferAssetRelease(entry.Thumbnail);
-        m_Projects.clear();
-        for (const std::filesystem::path& file : ProjectLibrary::LoadRecentProjects())
-        {
-            std::error_code error;
-            Entry entry;
-            entry.File = file;
-            entry.Exists = std::filesystem::exists(file, error);
-            entry.Name = entry.Exists ? ProjectLibrary::ReadProjectName(file) : file.stem().string();
-            entry.Modified = entry.Exists ? Age(file) : std::string();
-            m_Projects.push_back(std::move(entry));
-        }
-        // The repository's sample project, listed until it has been opened once (then it is a recent one).
-        if (const std::filesystem::path sample = ProjectLibrary::FindSampleProject(); !sample.empty() &&
-            std::none_of(m_Projects.begin(), m_Projects.end(), [&](const Entry& e) { return e.File == sample; }))
-        {
-            Entry entry;
-            entry.File = sample;
-            entry.Exists = true;
-            entry.Sample = true;
-            entry.Name = ProjectLibrary::ReadProjectName(sample);
-            entry.Modified = Age(sample);
-            m_Projects.push_back(std::move(entry));
-        }
-        for (Entry& entry : m_Projects)
-        {
-            const std::filesystem::path picture = entry.Exists ? ProjectLibrary::FindProjectPicture(entry.File) : std::filesystem::path();
-            if (!picture.empty())
-                entry.Thumbnail = TextureImporter::LoadTexture2D(picture, { .flip = false, .generateMips = false });
-        }
-        m_Selected = m_Projects.empty() ? -1 : std::clamp(m_Selected, 0, static_cast<int>(m_Projects.size()) - 1);
+        RefreshEntries();
+        BuildUI();
     }
 
     ProjectManagerLayer::~ProjectManagerLayer()
     {
+        *m_Alive = false;
         for (Entry& entry : m_Projects)
             if (entry.Thumbnail)
                 Renderer::DeferAssetRelease(entry.Thumbnail);
@@ -141,19 +103,32 @@ namespace Nox
                 Renderer::DeferAssetRelease(picture);
     }
 
-    void ProjectManagerLayer::Open(const std::filesystem::path& projectFile, bool createBasicScene)
+    void ProjectManagerLayer::OnUpdate(Timestep /*ts*/)
     {
-        std::error_code error;
-        if (m_Opening)
+    }
+
+    void ProjectManagerLayer::OpenProjectFile(const std::filesystem::path& projectFile, bool createBasicScene)
+    {
+        if (m_Opening || projectFile.empty())
             return;
+
+        std::error_code error;
         if (!std::filesystem::exists(projectFile, error))
         {
-            m_Error = "The project file " + projectFile.generic_string() + " does not exist (moved or deleted?).";
+            if (m_OpenErrorLabel)
+            {
+                m_OpenErrorLabel->Text = "The project file " + projectFile.generic_string() + " does not exist (moved or deleted?).";
+                m_OpenErrorLabel->Visible = true;
+            }
             return;
         }
+
+        if (m_OpenErrorLabel)
+            m_OpenErrorLabel->Visible = false;
+
         ProjectLibrary::RememberRecentProject(projectFile);
         m_Opening = true;
-        // After this frame: this layer goes, the editor comes with the project (the layers are not walked then).
+
         const std::filesystem::path file = projectFile;
         Application::Get().QueueAfterFrame([file, createBasicScene]()
         {
@@ -163,321 +138,488 @@ namespace Nox
         });
     }
 
-    void ProjectManagerLayer::OnImGuiRender()
+    void ProjectManagerLayer::RefreshEntries()
     {
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->WorkPos);
-        ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::SetNextWindowViewport(viewport->ID);
-        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                                           ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking;
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f, 20.0f));
-        ImGui::Begin("Nox Project Manager", nullptr, flags);
-        ImGui::PopStyleVar();
+        for (Entry& entry : m_Projects)
+            if (entry.Thumbnail)
+                Renderer::DeferAssetRelease(entry.Thumbnail);
+        m_Projects.clear();
 
-        if (m_Opening)
+        auto pushEntry = [this](const std::filesystem::path& file, bool isSample)
         {
-            ImGui::TextUnformatted("Opening the project...");
-            ImGui::End();
-            return;
+            std::error_code error;
+            Entry e;
+            e.File = file;
+            e.Exists = std::filesystem::exists(file, error);
+            e.Sample = isSample;
+            e.Name = e.Exists ? ProjectLibrary::ReadProjectName(file) : file.stem().string();
+            e.Modified = e.Exists ? Age(file) : std::string();
+            const std::filesystem::path pic = e.Exists ? ProjectLibrary::FindProjectPicture(file) : std::filesystem::path();
+            if (!pic.empty())
+                e.Thumbnail = TextureImporter::LoadTexture2D(pic, { .flip = false, .generateMips = false });
+            m_Projects.push_back(std::move(e));
+        };
+
+        const std::filesystem::path sample = ProjectLibrary::FindSampleProject();
+        for (const std::filesystem::path& file : ProjectLibrary::LoadRecentProjects())
+        {
+            const bool isSample = !sample.empty() && file == sample;
+            pushEntry(file, isSample);
         }
 
-        ImGui::SetWindowFontScale(1.6f);
-        ImGui::TextUnformatted("Nox Project Manager");
-        ImGui::SetWindowFontScale(1.0f);
-        ImGui::TextDisabled("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        const float footer = ImGui::GetFrameHeightWithSpacing() * 2.0f;
-        const float height = ImGui::GetContentRegionAvail().y - footer;
-        const float listWidth = ImGui::GetContentRegionAvail().x * 0.58f;
-
-        ImGui::BeginChild("Projects", ImVec2(listWidth, height), ImGuiChildFlags_Borders);
-        DrawProjectList(height);
-        ImGui::EndChild();
-        ImGui::SameLine();
-        ImGui::BeginChild("NewProject", ImVec2(0.0f, height), ImGuiChildFlags_Borders);
-        DrawNewProject();
-        ImGui::EndChild();
-
-        if (!m_Error.empty())
-            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", m_Error.c_str());
-        else
-            ImGui::NewLine();
-        if (ImGui::Checkbox("Always open the last project at startup", &m_OpenLast))
-            ProjectLibrary::SetOpenLastProjectAtStartup(m_OpenLast);
-        ImGui::SetItemTooltip("Skip this window and open the most recent project when the editor starts.\n"
-                              "In the editor, File > Project Manager... comes back here.");
-        ImGui::End();
+        if (!sample.empty())
+        {
+            const bool alreadyListed = std::any_of(m_Projects.begin(), m_Projects.end(),
+                [&sample](const Entry& e) { return e.File == sample; });
+            if (!alreadyListed)
+                pushEntry(sample, true);
+        }
     }
 
-    void ProjectManagerLayer::DrawProjectList(float height)
+    void ProjectManagerLayer::RebuildProjectList()
     {
-        ImGui::TextUnformatted("Projects");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputTextWithHint("##search", "Search projects...", m_Search, sizeof(m_Search));
-        ImGui::Spacing();
+        if (!m_ProjectList)
+            return;
 
-        // What the list does this frame happens after it is drawn (taking a project off the list rebuilds it, which must not happen
-        // halfway through drawing it or between a BeginDisabled and its EndDisabled).
-        int open = -1;
-        std::filesystem::path forget;
+        m_ProjectList->ClearChildren();
+        const std::string needle = ToLower(m_SearchFilter);
+        const NoxUI::UIColor muted = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        const NoxUI::UIColor accent = NoxUI::ThemeColor("Accent", { 0.26f, 0.53f, 0.96f, 1.0f });
+        const NoxUI::UIColor missingRed = NoxUI::ThemeColor("StatusError", { 0.84f, 0.31f, 0.33f, 1.0f });
 
-        const std::string filter = Lower(m_Search);
-        const float buttonsHeight = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
-        ImGui::BeginChild("List", ImVec2(0.0f, ImGui::GetContentRegionAvail().y - buttonsHeight));
-        if (m_Projects.empty())
-            ImGui::TextDisabled("No projects yet: make one on the right, or Browse... for a .nproj file.");
-        constexpr ImVec2 kThumbnail(128.0f, 72.0f); // 16:9, as the pictures are taken
-        for (int i = 0; i < static_cast<int>(m_Projects.size()); ++i)
+        int shown = 0;
+        for (const Entry& entry : m_Projects)
         {
-            const Entry& entry = m_Projects[i];
-            if (!filter.empty() && Lower(entry.Name + " " + entry.File.generic_string()).find(filter) == std::string::npos)
-                continue;
-            ImGui::PushID(i);
-            const ImVec2 rowSize(0.0f, kThumbnail.y + 8.0f);
-            if (ImGui::Selectable("##row", m_Selected == i, ImGuiSelectableFlags_AllowDoubleClick, rowSize))
+            if (!needle.empty())
             {
-                m_Selected = i;
-                m_Error.clear();
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    open = i;
+                const std::string hayName = ToLower(entry.Name);
+                const std::string hayPath = ToLower(entry.File.generic_string());
+                if (hayName.find(needle) == std::string::npos && hayPath.find(needle) == std::string::npos)
+                    continue;
             }
-            if (ImGui::BeginPopupContextItem())
-            {
-                m_Selected = i;
-                if (ImGui::MenuItem("Open", nullptr, false, entry.Exists))
-                    open = i;
-                if (ImGui::MenuItem("Show in Folder", nullptr, false, entry.Exists))
-                    ShowInFolder(entry.File.parent_path());
-                if (ImGui::MenuItem("Remove from List", nullptr, false, !entry.Sample))
-                    forget = entry.File;
-                ImGui::EndPopup();
-            }
+            ++shown;
 
-            // The project's picture (or a tile with its initial until it has one), then its name and path (red when the file is gone).
-            const ImVec2 rowMin = ImGui::GetItemRectMin();
-            const ImVec2 rowMax = ImGui::GetItemRectMax();
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            const ImVec2 imageMin(rowMin.x + 4.0f, rowMin.y + 4.0f);
-            const ImVec2 imageMax(imageMin.x + kThumbnail.x, imageMin.y + kThumbnail.y);
-            if (entry.Thumbnail && entry.Thumbnail->getImTextureID())
-                drawList->AddImageRounded(entry.Thumbnail->getImTextureID(), imageMin, imageMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 4.0f);
+            Ref<NoxUI::UIElement> thumbWidget;
+            if (entry.Thumbnail)
+            {
+                auto thumb = NoxUI::MakeUI<NoxUI::UIImage>(entry.Thumbnail->GetDescriptorIndexSlot(), NoxUI::UIVec2{ 128.0f, 72.0f });
+                thumb->CornerRadius = NoxUI::UICornerRadius::All(4.0f);
+                thumbWidget = thumb;
+            }
             else
             {
-                drawList->AddRectFilled(imageMin, imageMax, IM_COL32(45, 55, 75, 255), 4.0f);
                 const std::string initial(1, entry.Name.empty() ? '?' : static_cast<char>(std::toupper(static_cast<unsigned char>(entry.Name.front()))));
-                const float fontSize = ImGui::GetFontSize() * 2.2f;
-                const ImVec2 textSize = ImGui::CalcTextSize(initial.c_str());
-                const float scale = fontSize / ImGui::GetFontSize();
-                drawList->AddText(ImGui::GetFont(), fontSize,
-                                  ImVec2(imageMin.x + (kThumbnail.x - textSize.x * scale) * 0.5f, imageMin.y + (kThumbnail.y - textSize.y * scale) * 0.5f),
-                                  IM_COL32(200, 210, 230, 255), initial.c_str());
+                auto initialLabel = NoxUI::Label(initial, 38.0f)
+                    .Fill()
+                    .Align(NoxUI::UIAlignment::Center, NoxUI::UIAlignment::Center);
+                initialLabel->UseColorOverride = true;
+                initialLabel->ColorOverride = NoxUI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
+                auto placeholder = NoxUI::VStack(0.0f, { initialLabel })
+                    .FixedSize(128.0f, 72.0f)
+                    .Style("Card")
+                    .Background(true);
+                thumbWidget = placeholder;
             }
 
-            const ImVec2 namePos(imageMax.x + 12.0f, rowMin.y + 10.0f);
-            const std::string title = entry.Name + (entry.Sample ? "  (sample project)" : "");
-            drawList->AddText(namePos, ImGui::GetColorU32(ImGuiCol_Text), title.c_str());
+            auto titleRow = NoxUI::HStack(8.0f, {
+                NoxUI::Label(entry.Name).VAlign(NoxUI::UIAlignment::Center)
+            });
+            if (entry.Sample)
+            {
+                auto badge = NoxUI::MakeUI<NoxUI::UIBadge>("Sample", accent);
+                badge->VAlign = NoxUI::UIAlignment::Center;
+                titleRow->AddChild(badge);
+            }
+            if (!entry.Exists)
+            {
+                auto missing = NoxUI::MakeUI<NoxUI::UIBadge>("Missing", missingRed);
+                missing->VAlign = NoxUI::UIAlignment::Center;
+                titleRow->AddChild(missing);
+            }
             if (!entry.Modified.empty())
             {
-                const float width = ImGui::CalcTextSize(entry.Modified.c_str()).x;
-                drawList->AddText(ImVec2(rowMax.x - width - 6.0f, namePos.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), entry.Modified.c_str());
+                auto modLabel = NoxUI::Label(entry.Modified).VAlign(NoxUI::UIAlignment::Center);
+                modLabel->UseColorOverride = true;
+                modLabel->ColorOverride = muted;
+                titleRow->AddChild(modLabel);
             }
-            const std::string path = entry.File.generic_string() + (entry.Exists ? "" : "   (missing)");
-            drawList->AddText(ImVec2(namePos.x, namePos.y + ImGui::GetTextLineHeightWithSpacing() * 1.4f),
-                              entry.Exists ? ImGui::GetColorU32(ImGuiCol_TextDisabled) : IM_COL32(230, 110, 100, 255), path.c_str());
-            ImGui::PopID();
-        }
-        ImGui::EndChild();
-        (void)height;
 
-        const bool hasSelection = m_Selected >= 0 && m_Selected < static_cast<int>(m_Projects.size());
-        if (hasSelection && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::GetIO().WantTextInput)
-        {
-            if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
-                open = m_Selected;
-            else if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !m_Projects[m_Selected].Sample)
-                forget = m_Projects[m_Selected].File;
+            auto pathLabel = NoxUI::Label(entry.File.parent_path().generic_string()).FillWidth();
+            pathLabel->WordWrap = true;
+            pathLabel->UseColorOverride = true;
+            pathLabel->ColorOverride = entry.Exists ? muted : missingRed;
+
+            auto infoCol = NoxUI::VStack(4.0f, { titleRow, pathLabel }).FillWidth().VAlign(NoxUI::UIAlignment::Center);
+
+            auto openBtn = NoxUI::Button("Open", [this, file = entry.File]()
+            {
+                OpenProjectFile(file);
+            }).Primary().Enabled(entry.Exists).VAlign(NoxUI::UIAlignment::Center);
+
+            auto folderBtn = NoxUI::Button("Folder", [folder = entry.File.parent_path()]()
+            {
+                ShowInFolder(folder);
+            }).Tooltip("Show in Folder").Enabled(entry.Exists).VAlign(NoxUI::UIAlignment::Center);
+
+            auto actions = NoxUI::HStack(6.0f, { openBtn, folderBtn }).VAlign(NoxUI::UIAlignment::Center);
+            if (!entry.Sample)
+            {
+                auto removeBtn = NoxUI::Button("X", [this, file = entry.File]()
+                {
+                    ProjectLibrary::ForgetRecentProject(file);
+                    RefreshEntries();
+                    RebuildProjectList();
+                }).Tooltip("Remove from recent list").VAlign(NoxUI::UIAlignment::Center);
+                actions->AddChild(removeBtn);
+            }
+
+            auto card = NoxUI::HStack(12.0f, { thumbWidget, infoCol, actions })
+                .Style("Panel")
+                .Background(true)
+                .Padding(10.0f)
+                .FillWidth();
+            card->HeightMode = NoxUI::UISizeMode::Auto;
+
+            m_ProjectList->AddChild(card);
         }
 
-        ImGui::BeginDisabled(!hasSelection || !m_Projects[m_Selected].Exists);
-        if (ImGui::Button("Open"))
-            open = m_Selected;
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button("Browse..."))
+        if (shown == 0)
         {
-            const std::string file = Utility::OpenFile("Nox Project\0nproj\0");
-            if (!file.empty())
-                Open(file);
+            auto empty = NoxUI::Label("No matching projects. Create one on the right or Browse for a .nproj file.");
+            empty->UseColorOverride = true;
+            empty->ColorOverride = muted;
+            m_ProjectList->AddChild(empty);
         }
-        ImGui::SetItemTooltip("Open a project that is not in the list (pick its .nproj file).");
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!hasSelection || m_Projects[m_Selected].Sample);
-        if (ImGui::Button("Remove from List") && hasSelection)
-            forget = m_Projects[m_Selected].File;
-        ImGui::EndDisabled();
-        ImGui::SetItemTooltip("Only takes it off this list: no file is deleted.");
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!hasSelection || !m_Projects[m_Selected].Exists);
-        if (ImGui::Button("Show in Folder") && hasSelection)
-            ShowInFolder(m_Projects[m_Selected].File.parent_path());
-        ImGui::EndDisabled();
-
-        if (!forget.empty())
-        {
-            ProjectLibrary::ForgetRecentProject(forget);
-            Refresh();
-        }
-        else if (open >= 0 && open < static_cast<int>(m_Projects.size()))
-            Open(m_Projects[open].File);
     }
 
-    void ProjectManagerLayer::DrawTemplateTiles()
+    void ProjectManagerLayer::UpdateNewProjectPreview()
     {
-        // Unreal's template browser: a tile per template with its picture, its name and what it starts with; click to pick.
-        struct TemplateInfo
+        for (int i = 0; i < 2; ++i)
+        {
+            if (m_TemplateTiles[i])
+                m_TemplateTiles[i]->StyleVariant = (m_TemplateIndex == i) ? "selected" : "";
+        }
+
+        const std::vector<std::string> qualities = QualityChoices();
+        m_QualityIndex = std::clamp(m_QualityIndex, 0, static_cast<int>(qualities.size()) - 1);
+
+        ProjectLibrary::NewProjectSettings settings;
+        settings.Template = (m_TemplateIndex == 0)
+            ? ProjectLibrary::ProjectTemplate::Basic
+            : ProjectLibrary::ProjectTemplate::Blank;
+        settings.Name = m_NewName;
+        settings.Location = m_NewLocation;
+        settings.WorldUnitsPerMeter = (m_UnitsIndex == 0) ? 100.0f : 1.0f;
+        settings.RenderQuality = qualities[m_QualityIndex];
+        settings.CreateScripts = m_CreateScripts;
+
+        const std::string err = ProjectLibrary::ValidateNewProject(settings);
+        if (m_CreatesLabel)
+        {
+            if (err.empty())
+            {
+                const std::filesystem::path nproj = settings.Location / settings.Name / (settings.Name + ".nproj");
+                m_CreatesLabel->Text = "Creates: " + nproj.generic_string();
+                m_CreatesLabel->Visible = true;
+            }
+            else
+                m_CreatesLabel->Visible = false;
+        }
+        if (m_CreatesDetailsLabel)
+        {
+            if (err.empty())
+            {
+                m_CreatesDetailsLabel->Text = settings.Template == ProjectLibrary::ProjectTemplate::Basic
+                    ? "with Assets/ (Scenes with the Main scene, Scripts) and a .gitignore."
+                    : "with Assets/ (Scenes, Scripts) and a .gitignore.";
+                m_CreatesDetailsLabel->Visible = true;
+            }
+            else
+                m_CreatesDetailsLabel->Visible = false;
+        }
+        if (m_ErrorLabel)
+        {
+            m_ErrorLabel->Text = err;
+            m_ErrorLabel->Visible = !err.empty();
+        }
+        if (m_CreateButton)
+            m_CreateButton->SetEnabled(err.empty());
+    }
+
+    void ProjectManagerLayer::BuildUI()
+    {
+        UILayer* uiLayer = Application::Get().GetUILayer();
+        if (!uiLayer)
+            return;
+
+        const NoxUI::UIColor muted = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.62f, 0.69f, 1.0f });
+        const NoxUI::UIColor errorRed = NoxUI::ThemeColor("StatusError", { 0.92f, 0.36f, 0.38f, 1.0f });
+
+        auto subtitle = NoxUI::Label("Open a project or make a new one. Every game is its own project: its own folder, assets, scenes and C# scripts.")
+            .FillWidth();
+        subtitle->WordWrap = true;
+        subtitle->UseColorOverride = true;
+        subtitle->ColorOverride = muted;
+
+        auto topBar = NoxUI::HStack(12.0f, {
+            NoxUI::VStack(2.0f, {
+                NoxUI::Label("Nox Project Manager"),
+                subtitle
+            }).FillWidth(),
+            NoxUI::CheckBox("Open the last project when the editor starts", m_OpenLast, [this](bool v)
+            {
+                m_OpenLast = v;
+                ProjectLibrary::SetOpenLastProjectAtStartup(v);
+            }).VAlign(NoxUI::UIAlignment::Center),
+            NoxUI::Button("Browse...", [this]()
+            {
+                Utility::OpenFileAsync("Nox Project\0nproj\0", [this, alive = m_Alive](std::string file)
+                {
+                    if (*alive && !file.empty())
+                        OpenProjectFile(file);
+                });
+            }).VAlign(NoxUI::UIAlignment::Center)
+        })
+        .Style("TopBar")
+        .Background(true)
+        .Padding(16.0f, 12.0f)
+        .FillWidth();
+        topBar->HeightMode = NoxUI::UISizeMode::Auto;
+
+        m_OpenErrorLabel = NoxUI::Label().FillWidth();
+        m_OpenErrorLabel->WordWrap = true;
+        m_OpenErrorLabel->UseColorOverride = true;
+        m_OpenErrorLabel->ColorOverride = errorRed;
+        m_OpenErrorLabel->Visible = false;
+
+        auto searchBar = NoxUI::MakeUI<NoxUI::UISearchBar>("Search recent projects...");
+        searchBar->OnSearchChanged = [this](const std::string& q)
+        {
+            m_SearchFilter = q;
+            RebuildProjectList();
+        };
+
+        m_ProjectList = NoxUI::Scroll({}, 10.0f);
+        RebuildProjectList();
+
+        auto leftColumn = NoxUI::Card("Projects", {
+            m_OpenErrorLabel,
+            searchBar,
+            m_ProjectList
+        }).Fill(1.45f);
+
+        struct TemplateCardInfo
         {
             const char* Name;
             const char* Summary;
             const char* Tooltip;
         };
-        static constexpr TemplateInfo kTemplates[2] = {
-            { "Basic", "Sky, sun, floor, camera",
-              "Starts on a scene with a procedural sky (clouds, sun, moon at night), a sun light, a 50 m floor\n"
-              "with collision and a camera: Unreal's default level. Saved as Scenes/Main, the project's Start Scene." },
-            { "Blank", "Empty scene",
-              "Starts on an empty scene: nothing in it, so the view is black until you add a sky or lights." },
+        static constexpr TemplateCardInfo kTemplates[2] = {
+            {
+                "Basic",
+                "Sky, sun, floor, camera",
+                "Starts on a scene with a procedural sky (clouds, sun, moon at night), a sun light, a 50 m floor\n"
+                "with collision and a camera: Unreal's default level. Saved as Scenes/Main, the project's Start Scene."
+            },
+            {
+                "Blank",
+                "Empty scene",
+                "Starts on an empty scene: nothing in it, so the view is black until you add a sky or lights."
+            }
         };
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float width = std::min((ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f, 240.0f);
-        const ImVec2 picture(width, width * 9.0f / 16.0f);
-        const float textHeight = ImGui::GetTextLineHeightWithSpacing() * 2.0f + 6.0f;
+
+        auto templateRow = NoxUI::HStack(10.0f, {}).FillWidth();
+        templateRow->HeightMode = NoxUI::UISizeMode::Auto;
         for (int i = 0; i < 2; ++i)
         {
-            if (i > 0)
-                ImGui::SameLine();
-            ImGui::PushID(i);
-            if (ImGui::InvisibleButton("##template", ImVec2(picture.x, picture.y + textHeight)))
-                m_Template = i;
-            ImGui::SetItemTooltip("%s", kTemplates[i].Tooltip);
-            const bool selected = m_Template == i;
-            const bool hovered = ImGui::IsItemHovered();
-            const ImVec2 min = ImGui::GetItemRectMin();
-            const ImVec2 max = ImGui::GetItemRectMax();
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(min, max, ImGui::GetColorU32(selected ? ImGuiCol_HeaderActive : hovered ? ImGuiCol_HeaderHovered : ImGuiCol_FrameBg), 6.0f);
-            const ImVec2 imageMin(min.x + 4.0f, min.y + 4.0f);
-            const ImVec2 imageMax(max.x - 4.0f, min.y + picture.y - 4.0f);
-            if (m_TemplatePictures[i] && m_TemplatePictures[i]->getImTextureID())
-                drawList->AddImageRounded(m_TemplatePictures[i]->getImTextureID(), imageMin, imageMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 4.0f);
+            const uint32_t picSlot = m_TemplatePictures[i] ? m_TemplatePictures[i]->GetDescriptorIndexSlot() : ~0u;
+            Ref<NoxUI::UIElement> pic;
+            if (picSlot != ~0u)
+            {
+                auto img = NoxUI::MakeUI<NoxUI::UIImage>(picSlot, NoxUI::UIVec2{ 160.0f, 90.0f });
+                img->WidthMode = NoxUI::UISizeMode::Fill;
+                img->HeightMode = NoxUI::UISizeMode::Auto;
+                img->AspectRatio = 16.0f / 9.0f;
+                img->CornerRadius = NoxUI::UICornerRadius::All(4.0f);
+                pic = img;
+            }
             else
             {
-                drawList->AddRectFilled(imageMin, imageMax, IM_COL32(20, 22, 28, 255), 4.0f);
-                drawList->AddText(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f), ImGui::GetColorU32(ImGuiCol_TextDisabled), "(no picture)");
+                auto fallbackLabel = NoxUI::Label(kTemplates[i].Name, 22.0f)
+                    .Fill()
+                    .Align(NoxUI::UIAlignment::Center, NoxUI::UIAlignment::Center);
+                fallbackLabel->UseColorOverride = true;
+                fallbackLabel->ColorOverride = NoxUI::ThemeColor("ProjectInitial", { 0.78f, 0.84f, 0.94f, 1.0f });
+                auto fallbackBox = NoxUI::VStack(0.0f, { fallbackLabel })
+                    .Style("Card")
+                    .Background(true)
+                    .FillWidth();
+                fallbackBox->HeightMode = NoxUI::UISizeMode::Fixed;
+                fallbackBox->FixedSize.y = 90.0f;
+                pic = fallbackBox;
             }
-            if (selected)
-                drawList->AddRect(min, max, IM_COL32(90, 160, 255, 255), 6.0f, 0, 2.0f);
-            const float textY = min.y + picture.y + 2.0f;
-            drawList->AddText(ImVec2(min.x + 8.0f, textY), ImGui::GetColorU32(ImGuiCol_Text), kTemplates[i].Name);
-            drawList->AddText(ImVec2(min.x + 8.0f, textY + ImGui::GetTextLineHeightWithSpacing()), ImGui::GetColorU32(ImGuiCol_TextDisabled),
-                              kTemplates[i].Summary);
-            ImGui::PopID();
+
+            auto nameLabel = NoxUI::Label(kTemplates[i].Name);
+            auto descLabel = NoxUI::Label(kTemplates[i].Summary).FillWidth();
+            descLabel->WordWrap = true;
+            descLabel->UseColorOverride = true;
+            descLabel->ColorOverride = muted;
+
+            auto tile = NoxUI::VStack(6.0f, { pic, nameLabel, descLabel })
+                .Style("TemplateCard", m_TemplateIndex == i ? "selected" : "")
+                .Background(true)
+                .Padding(8.0f)
+                .Tooltip(kTemplates[i].Tooltip)
+                .FillWidth();
+            tile->HeightMode = NoxUI::UISizeMode::Auto;
+            tile->VAlign = NoxUI::UIAlignment::Start;
+            tile->HitTestMode = NoxUI::UIHitTestMode::Self;
+            tile->Focusable = true;
+            tile->OnMouseUp = [this, i](const NoxUI::UIPointerEvent& e)
+            {
+                if (e.Button == 1 && m_TemplateTiles[i] && m_TemplateTiles[i]->GetBounds().Contains(e.Position))
+                {
+                    m_TemplateIndex = i;
+                    UpdateNewProjectPreview();
+                    return true;
+                }
+                return false;
+            };
+
+            m_TemplateTiles[i] = tile.Get();
+            templateRow->AddChild(tile);
         }
-    }
 
-    void ProjectManagerLayer::DrawNewProject()
-    {
-        ImGui::TextUnformatted("New Project");
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        const float labelWidth = 150.0f;
-        auto label = [&](const char* text)
+        m_NameInput = NoxUI::TextInput(m_NewName, "Project name").FillWidth();
+        m_NameInput->Tooltip = "Also the C# namespace of its scripts: letters, digits and _.";
+        m_NameInput->OnChanged = [this](const std::string& s)
         {
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(text);
-            ImGui::SameLine(labelWidth);
+            m_NewName = s;
+            UpdateNewProjectPreview();
         };
 
-        DrawTemplateTiles();
-        ImGui::Spacing();
-
-        label("Project Name");
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputText("##name", m_Name, sizeof(m_Name));
-        ImGui::SetItemTooltip("Also the C# namespace of its scripts: letters, digits and _.");
-
-        label("Location");
-        ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Browse...").x - ImGui::GetStyle().FramePadding.x * 2.0f - ImGui::GetStyle().ItemSpacing.x);
-        ImGui::InputText("##location", m_Location, sizeof(m_Location));
-        ImGui::SameLine();
-        if (ImGui::Button("Browse...##location"))
+        m_LocationInput = NoxUI::TextInput(m_NewLocation, "Folder path").FillWidth();
+        m_LocationInput->OnChanged = [this](const std::string& s)
         {
-            const std::string folder = Utility::OpenFolder(m_Location[0] ? m_Location : nullptr);
-            if (!folder.empty())
-                std::snprintf(m_Location, sizeof(m_Location), "%s", std::filesystem::path(folder).generic_string().c_str());
-        }
+            m_NewLocation = s;
+            UpdateNewProjectPreview();
+        };
 
-        label("World Units");
-        ImGui::SetNextItemWidth(-1.0f);
-        const char* units[] = { "Centimeters (1 unit = 1 cm, like Unreal)", "Meters (1 unit = 1 m, like Godot / Unity)" };
-        ImGui::Combo("##units", &m_Units, units, IM_ARRAYSIZE(units));
-        ImGui::SetItemTooltip("What one unit of a position is. Imported models are scaled to it; it cannot be changed later\nwithout re-placing what is built.");
+        auto browseFolderBtn = NoxUI::Button("Browse...", [this]()
+        {
+            Utility::OpenFolderAsync(m_NewLocation.empty() ? nullptr : m_NewLocation.c_str(), [this, alive = m_Alive](std::string folder)
+            {
+                if (!*alive || folder.empty())
+                    return;
+                m_NewLocation = std::filesystem::path(folder).generic_string();
+                if (m_LocationInput)
+                    m_LocationInput->Text = m_NewLocation;
+                UpdateNewProjectPreview();
+            });
+        });
 
-        label("Render Quality");
-        ImGui::SetNextItemWidth(-1.0f);
+        auto unitsDropdown = NoxUI::MakeUI<NoxUI::UIDropdown>(
+            &uiLayer->GetContext(),
+            std::vector<std::string>{
+                "Centimeters (1 unit = 1 cm, like Unreal)",
+                "Meters (1 unit = 1 m, like Godot / Unity)"
+            },
+            m_UnitsIndex,
+            [this](int idx) { m_UnitsIndex = idx; }
+        );
+        unitsDropdown->WidthMode = NoxUI::UISizeMode::Fill;
+        unitsDropdown->Tooltip = "What one unit of a position is. Imported models are scaled to it; it cannot be changed later\nwithout re-placing what is built.";
+
         const std::vector<std::string> qualities = QualityChoices();
-        m_Quality = std::clamp(m_Quality, 0, static_cast<int>(qualities.size()) - 1);
-        if (ImGui::BeginCombo("##quality", qualities[m_Quality].c_str()))
+        auto qualityDropdown = NoxUI::MakeUI<NoxUI::UIDropdown>(
+            &uiLayer->GetContext(),
+            qualities,
+            m_QualityIndex,
+            [this](int idx) { m_QualityIndex = idx; }
+        );
+        qualityDropdown->WidthMode = NoxUI::UISizeMode::Fill;
+        qualityDropdown->Tooltip = "The renderer preset the project opens with (Auto: the one this GPU should run). Changeable later in Settings.";
+
+        m_CreatesLabel = NoxUI::Label().FillWidth();
+        m_CreatesLabel->WordWrap = true;
+        m_CreatesLabel->UseColorOverride = true;
+        m_CreatesLabel->ColorOverride = muted;
+        m_CreatesLabel->Visible = false;
+
+        m_CreatesDetailsLabel = NoxUI::Label().FillWidth();
+        m_CreatesDetailsLabel->WordWrap = true;
+        m_CreatesDetailsLabel->UseColorOverride = true;
+        m_CreatesDetailsLabel->ColorOverride = muted;
+        m_CreatesDetailsLabel->Visible = false;
+
+        m_ErrorLabel = NoxUI::Label().FillWidth();
+        m_ErrorLabel->WordWrap = true;
+        m_ErrorLabel->UseColorOverride = true;
+        m_ErrorLabel->ColorOverride = errorRed;
+        m_ErrorLabel->Visible = false;
+
+        m_CreateButton = NoxUI::Button("Create & Open", [this]()
         {
-            for (int i = 0; i < static_cast<int>(qualities.size()); ++i)
-                if (ImGui::Selectable(qualities[i].c_str(), i == m_Quality))
-                    m_Quality = i;
-            ImGui::EndCombo();
-        }
-        ImGui::SetItemTooltip("The renderer preset the project opens with (Auto: the one this GPU should run). Changeable later in Settings.");
+            const std::vector<std::string> qualityList = QualityChoices();
+            const int qIdx = std::clamp(m_QualityIndex, 0, static_cast<int>(qualityList.size()) - 1);
 
-        label("C# Scripts");
-        ImGui::Checkbox("Create the scripts project (with an example Rotator behaviour)", &m_CreateScripts);
+            ProjectLibrary::NewProjectSettings settings;
+            settings.Template = (m_TemplateIndex == 0)
+                ? ProjectLibrary::ProjectTemplate::Basic
+                : ProjectLibrary::ProjectTemplate::Blank;
+            settings.Name = m_NewName;
+            settings.Location = m_NewLocation;
+            settings.WorldUnitsPerMeter = (m_UnitsIndex == 0) ? 100.0f : 1.0f;
+            settings.RenderQuality = qualityList[qIdx];
+            settings.CreateScripts = m_CreateScripts;
 
-        ProjectLibrary::NewProjectSettings settings;
-        settings.Name = m_Name;
-        settings.Location = m_Location;
-        settings.WorldUnitsPerMeter = m_Units == 0 ? 100.0f : 1.0f;
-        settings.RenderQuality = qualities[m_Quality];
-        settings.CreateScripts = m_CreateScripts;
-        settings.Template = m_Template == 0 ? ProjectLibrary::ProjectTemplate::Basic : ProjectLibrary::ProjectTemplate::Blank;
-        const std::string problem = ProjectLibrary::ValidateNewProject(settings);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        if (problem.empty())
-        {
-            ImGui::TextDisabled("Creates:");
-            ImGui::TextWrapped("%s", (settings.Location / settings.Name / (settings.Name + ".nproj")).generic_string().c_str());
-            ImGui::TextDisabled(settings.Template == ProjectLibrary::ProjectTemplate::Basic
-                                    ? "with Assets/ (Scenes with the Main scene, Scripts) and a .gitignore."
-                                    : "with Assets/ (Scenes, Scripts) and a .gitignore.");
-        }
-        else
-            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f), "%s", problem.c_str());
-        ImGui::Spacing();
-
-        ImGui::BeginDisabled(!problem.empty());
-        if (ImGui::Button("Create & Open", ImVec2(-1.0f, ImGui::GetFrameHeight() * 1.5f)))
-        {
             std::string error;
-            const std::filesystem::path projectFile = ProjectLibrary::CreateProject(settings, error);
-            if (projectFile.empty())
-                m_Error = "New Project: " + error;
-            else
-                Open(projectFile, settings.Template == ProjectLibrary::ProjectTemplate::Basic);
-        }
-        ImGui::EndDisabled();
+            const std::filesystem::path created = ProjectLibrary::CreateProject(settings, error);
+            if (created.empty())
+            {
+                if (m_ErrorLabel)
+                {
+                    m_ErrorLabel->Text = "New Project: " + error;
+                    m_ErrorLabel->Visible = true;
+                }
+                return;
+            }
+            ProjectLibrary::SetDefaultProjectLocation(settings.Location);
+            OpenProjectFile(created, settings.Template == ProjectLibrary::ProjectTemplate::Basic);
+        }).Primary().HAlign(NoxUI::UIAlignment::End);
+
+        auto rightFormScroll = NoxUI::Scroll({
+            templateRow,
+            NoxUI::Label("Project Name"),
+            m_NameInput,
+            NoxUI::Label("Location"),
+            NoxUI::HStack(6.0f, { m_LocationInput, browseFolderBtn }).FillWidth(),
+            NoxUI::Label("World Units"),
+            unitsDropdown,
+            NoxUI::Label("Render Quality"),
+            qualityDropdown,
+            NoxUI::CheckBox("Create the scripts project (with an example Rotator behaviour)", m_CreateScripts, [this](bool v) { m_CreateScripts = v; }),
+            NoxUI::Separator(),
+            m_CreatesLabel,
+            m_CreatesDetailsLabel,
+            m_ErrorLabel
+        }, 8.0f);
+
+        auto rightColumn = NoxUI::Card("New Project", {
+            rightFormScroll,
+            m_CreateButton
+        }).Fill(1.0f);
+
+        UpdateNewProjectPreview();
+
+        uiLayer->SetRoot(
+            NoxUI::VStack(14.0f, {
+                topBar,
+                NoxUI::HStack(14.0f, { leftColumn, rightColumn }).Fill()
+            })
+            .Padding(16.0f)
+            .Style("Background")
+            .Background(true)
+        );
     }
 }

@@ -26,17 +26,14 @@ namespace Nox
 {
     namespace
     {
-        // --- The terrain: one height function over the whole world (meters), so the tiles meet without seams ---
-
         float Hash(int32_t x, int32_t z)
         {
             uint32_t h = static_cast<uint32_t>(x) * 0x8DA6B343u ^ static_cast<uint32_t>(z) * 0xD8163841u;
             h = (h ^ (h >> 13)) * 0x85EBCA6Bu;
             h ^= h >> 16;
-            return static_cast<float>(h & 0xFFFFFF) / static_cast<float>(0xFFFFFF); // 0..1
+            return static_cast<float>(h & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
         }
 
-        // Value noise, smoothly interpolated: 0..1.
         float Noise(float x, float z)
         {
             const float fx = std::floor(x), fz = std::floor(z);
@@ -48,14 +45,13 @@ namespace Nox
             return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * tz;
         }
 
-        // Rolling hills with ridges, 0..~45 m.
         float HeightMeters(float x, float z)
         {
             float height = 0.0f, amplitude = 26.0f, frequency = 1.0f / 420.0f;
             for (int octave = 0; octave < 6; ++octave)
             {
                 const float n = Noise(x * frequency + 17.3f * octave, z * frequency - 9.1f * octave);
-                height += (octave == 1 ? 1.0f - std::abs(n * 2.0f - 1.0f) : n) * amplitude; // the second octave: ridges
+                height += (octave == 1 ? 1.0f - std::abs(n * 2.0f - 1.0f) : n) * amplitude;
                 amplitude *= 0.47f;
                 frequency *= 2.03f;
             }
@@ -64,7 +60,6 @@ namespace Nox
 
         glm::vec3 Mix(const glm::vec3& a, const glm::vec3& b, float t) { return a + (b - a) * std::clamp(t, 0.0f, 1.0f); }
 
-        // The ground's colour (sRGB, 0..1) from height, slope (0 flat .. 1 vertical) and fine detail.
         glm::vec3 GroundColor(float heightMeters, float slope, float detail)
         {
             const glm::vec3 grass(0.22f, 0.33f, 0.13f), dry(0.45f, 0.42f, 0.24f), rock(0.40f, 0.38f, 0.35f), snow(0.88f, 0.89f, 0.92f);
@@ -77,15 +72,12 @@ namespace Nox
         std::filesystem::path TileName(uint32_t x, uint32_t z) { return "Tile_" + std::to_string(x) + "_" + std::to_string(z); }
         std::filesystem::path MeshPath(const std::string& folder, uint32_t x, uint32_t z) { return std::filesystem::path(folder) / "Meshes" / (TileName(x, z).string() + ".nsmesh"); }
         std::filesystem::path TexturePath(const std::string& folder, uint32_t x, uint32_t z) { return std::filesystem::path(folder) / "Textures" / (TileName(x, z).string() + ".ntex"); }
-        // Where a mesh's load looks for its material's .nmat (written by the cook, as here; one missing is written and registered then).
         std::filesystem::path MaterialPath(const std::string& folder, uint32_t x, uint32_t z)
         {
             MaterialData material;
             material.Name = TileName(x, z).string();
             return MeshImporter::MaterialAssetPath(MeshPath(folder, x, z), material, 0);
         }
-
-        // --- Props: a few meshes every cell shares (as a real world reuses its rocks and trees), scattered by the hundred a cell ---
 
         enum class Prop : uint8_t { Rock, Pine, Stump, Count };
         constexpr const char* PropNames[] = { "Prop_Rock", "Prop_Pine", "Prop_Stump" };
@@ -98,7 +90,6 @@ namespace Nox
             return MeshImporter::MaterialAssetPath(PropMeshPath(folder, prop), material, 0);
         }
 
-        // A basic shape (meters, centered on the origin) cooked as a prop's mesh, with its material.
         bool WritePropMesh(const std::filesystem::path& assetDirectory, const std::string& folder, Prop prop, std::string& outError)
         {
             static constexpr PrimitiveShape Shapes[] = { PrimitiveShape::Sphere, PrimitiveShape::Cone, PrimitiveShape::Cylinder };
@@ -138,12 +129,11 @@ namespace Nox
             return true;
         }
 
-        // A small deterministic generator (PCG32): the same world every time.
         struct Random
         {
             uint64_t State;
             explicit Random(uint64_t seed) : State(seed * 6364136223846793005ull + 1442695040888963407ull) {}
-            float Next() // 0..1
+            float Next()
             {
                 const uint64_t old = State;
                 State = old * 6364136223846793005ull + 1442695040888963407ull;
@@ -155,8 +145,6 @@ namespace Nox
             float Range(float low, float high) { return low + (high - low) * Next(); }
         };
 
-        // One tile: its height field mesh (cooked, cluster LOD) and its texture (BC1), at assetDirectory / their paths. Returns the
-        // bytes written; its height range (world units) in min / max.
         uint64_t WriteTile(const std::filesystem::path& assetDirectory, const StreamingTestWorldGenerator::Settings& settings, uint32_t tileX,
                            uint32_t tileZ, float& outMin, float& outMax, std::string& outError)
         {
@@ -166,14 +154,12 @@ namespace Nox
             const float stepMeters = tileMeters / static_cast<float>(quads);
             const float originX = tileX * tileMeters, originZ = tileZ * tileMeters;
 
-            // Heights on the vertex grid, one ring wider for the normals.
             std::vector<float> heights(static_cast<size_t>(side + 2) * (side + 2));
             auto heightAt = [&](int32_t i, int32_t j) -> float& { return heights[static_cast<size_t>(j + 1) * (side + 2) + (i + 1)]; };
             for (int32_t j = -1; j <= static_cast<int32_t>(side); ++j)
                 for (int32_t i = -1; i <= static_cast<int32_t>(side); ++i)
                     heightAt(i, j) = HeightMeters(originX + i * stepMeters, originZ + j * stepMeters);
 
-            // The mesh, in the tile's space (the entity stands at the tile's corner), world units.
             MeshData mesh;
             mesh.Name = TileName(tileX, tileZ).string();
             mesh.Vertices.resize(static_cast<size_t>(side) * side);
@@ -200,7 +186,7 @@ namespace Nox
                 for (uint32_t i = 0; i < quads; ++i)
                 {
                     const uint32_t v00 = j * side + i, v10 = v00 + 1, v01 = v00 + side, v11 = v01 + 1;
-                    indices.insert(indices.end(), { v00, v01, v10, v10, v01, v11 }); // counter-clockwise seen from above
+                    indices.insert(indices.end(), { v00, v01, v10, v10, v01, v11 });
                 }
             }
             MeshImporter::BuildCookedGeometry(mesh, std::move(indices), true);
@@ -215,7 +201,6 @@ namespace Nox
             std::error_code error;
             std::filesystem::create_directories(meshFile.parent_path(), error);
             MeshSerializer::SerializeStaticMesh(meshFile, { mesh }, { material });
-            // Its material too, as a model's cook writes them: a load that has to write it (and register it) is a hitch.
             const std::filesystem::path materialFile = assetDirectory / MaterialPath(settings.Folder, tileX, tileZ);
             std::filesystem::create_directories(materialFile.parent_path(), error);
             if (!MaterialSerializer::Serialize(materialFile, material))
@@ -224,7 +209,6 @@ namespace Nox
                 return 0;
             }
 
-            // The texture: height and slope from the vertex grid, fine detail per texel (every tile's texels are its own).
             const uint32_t size = std::max(settings.TextureSize, 4u);
             TextureData texture;
             texture.Width = texture.Height = size;
@@ -237,7 +221,6 @@ namespace Nox
                 {
                     for (uint32_t x = 0; x < size; ++x)
                     {
-                        // Texel centre in vertex grid units.
                         const float gx = (x + 0.5f) / size * quads, gz = (y + 0.5f) / size * quads;
                         const int32_t i = std::min(static_cast<int32_t>(gx), static_cast<int32_t>(quads) - 1);
                         const int32_t j = std::min(static_cast<int32_t>(gz), static_cast<int32_t>(quads) - 1);
@@ -274,7 +257,6 @@ namespace Nox
         NOX_CORE_INFO("Streaming test world: {:.1f} GB of {} m tiles into '{}'", m_Settings.TargetGigabytes, m_Settings.CellSizeMeters, m_Settings.Folder);
         m_Job = NoxTasks::JobSystem::Get().Async("Generate Streaming Test World", NoxTasks::JobPriority::Normal, [this](const NoxTasks::CancellationToken& token)
         {
-            // The props every cell shares, then the tiles: the first tells the size of one; the grid is the target over that.
             if (m_Settings.PropsPerCell > 0)
             {
                 for (int prop = 0; prop < static_cast<int>(Prop::Count); ++prop)
@@ -322,7 +304,6 @@ namespace Nox
         const uint32_t grid = m_Grid;
         if (grid == 0)
             return 0.0f;
-        // The tiles (on workers) are most of the time; the cells (main thread) the rest.
         const float cells = static_cast<float>(grid) * grid;
         if (m_Cooking)
             return 0.9f + 0.1f * static_cast<float>(m_CellsCooked) / cells;
@@ -359,7 +340,6 @@ namespace Nox
             }
             BeginCells();
         }
-        // The cells, a slice a frame: with hundreds of props a cell, all of them at once would hold the editor for a minute.
         const auto start = std::chrono::steady_clock::now();
         while (m_CellsWritten < grid * grid && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(12))
         {
@@ -373,8 +353,6 @@ namespace Nox
         if (m_CellsWritten < grid * grid)
             return false;
 
-        // Then their cooked files (§5.13.4), as a save writes them, on the workers: the text is checked entity by entity against
-        // what the binary form makes, too slow for the main thread with hundreds of entities a cell.
         if (!m_Cooking)
         {
             m_Cooking = true;
@@ -410,8 +388,6 @@ namespace Nox
 
     void StreamingTestWorldGenerator::BeginCells()
     {
-        // Main thread from here: the assets registered (a new one, or the one already at that path: generated again), the cells
-        // written with the index, then the scene.
         EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
         if (m_Settings.PropsPerCell > 0)
         {
@@ -434,7 +410,6 @@ namespace Nox
 
     bool StreamingTestWorldGenerator::WriteCell(uint32_t x, uint32_t z)
     {
-        // One tile and its props, one cell (written as a save writes a cell). The props stand inside the tile: the cell is theirs too.
         EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
         WorldPartition& partition = m_World->GetWorldPartition();
         Scene& scene = *m_CellScene;
@@ -454,7 +429,7 @@ namespace Nox
 
         float top = tile.MaxHeight;
         Random random((static_cast<uint64_t>(x) << 32) | z);
-        constexpr float Margin = 3.0f; // meters: more than the widest prop's half width
+        constexpr float Margin = 3.0f;
         const float side = m_Settings.CellSizeMeters;
         for (uint32_t index = 0; index < m_Settings.PropsPerCell; ++index)
         {
@@ -464,8 +439,8 @@ namespace Nox
             const float kind = random.Next();
             Prop prop;
             glm::vec3 scale, rotation(0.0f, random.Range(0.0f, 6.2831853f), 0.0f);
-            float y; // the shape's center, meters
-            if (kind < 0.5f) // a rock, partly sunk, a little tilted
+            float y;
+            if (kind < 0.5f)
             {
                 prop = Prop::Rock;
                 const float size = random.Range(0.6f, 2.4f);
@@ -473,7 +448,7 @@ namespace Nox
                 rotation.x = random.Range(-0.25f, 0.25f);
                 y = groundHeight + scale.y * 0.3f;
             }
-            else if (kind < 0.85f) // a pine
+            else if (kind < 0.85f)
             {
                 prop = Prop::Pine;
                 const float height = random.Range(6.0f, 12.0f);
@@ -520,7 +495,6 @@ namespace Nox
 
     void StreamingTestWorldGenerator::FinishScene()
     {
-        // What stays in the scene file: the camera over the middle (with the test, when named), the sun and the sky.
         EditorAssetManager& assets = *Project::GetActive()->GetEditorAssetManager();
         const uint32_t grid = m_Grid;
         const float cellSize = WorldUnits::FromMeters(m_Settings.CellSizeMeters);
@@ -533,7 +507,6 @@ namespace Nox
         camera.GetComponent<TransformComponent>().Rotation = glm::vec3(-0.2f, 0.0f, 0.0f);
         CameraComponent& cameraComponent = camera.AddComponent<CameraComponent>();
         cameraComponent.Primary = true;
-        // (A new camera is orthographic: a 10 unit box, nothing of a 3D world in it.)
         cameraComponent.Camera.SetPerspective(glm::radians(60.0f), WorldUnits::FromMeters(0.1f), WorldUnits::FromMeters(1000.0f));
         if (!m_Settings.CameraScript.empty())
             camera.AddComponent<ScriptComponent>().ClassNames.push_back(m_Settings.CameraScript);

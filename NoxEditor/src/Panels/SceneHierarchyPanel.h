@@ -1,115 +1,118 @@
 #pragma once
+
+#include <cstdint>
 #include <functional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-#include <imgui.h>
-
 #include "NoxCore/Asset/PrimitiveShapes.h"
-#include "NoxCore/Core/core.h"
+#include "NoxCore/Core/Ref.h"
 #include "NoxCore/Scene/Entity.h"
 #include "NoxCore/Scene/Scene.h"
+#include <NoxUI/Core/UITypes.h>
+#include "EditorSelection.h"
+
+namespace NoxUI
+{
+        class UIElement;
+        class UILabel;
+        class UISearchBar;
+        class UITreeView;
+        struct UITreeNode;
+    }
 
 namespace Nox
 {
+
     class SceneHierarchyPanel
     {
     public:
-        SceneHierarchyPanel() = default;
-        SceneHierarchyPanel(const Ref<Scene>& context);
-        
-        void SetContext(const Ref<Scene>& context);
-        
-        void OnImGuiRender();
-        
-        const std::vector<Entity>& GetSelectedEntities() const { return m_SelectionContexts; };
-        Entity GetSelectedEntity() const { return m_SelectionContexts.empty() ? Entity{} : m_SelectionContexts.back(); }
-        void SetSelectedEntity(Entity entity);
-        
-        bool IsSelected(Entity entity) const;
-        void ToggleSelectedEntity(Entity entity);
-        void ClearSelection();
-        void SelectRange(Entity entity);
-        // Called with an asset's handle when its reference field in the inspector is double-clicked (e.g. the
-        // Animator's Graph); EditorLayer decides what opening means per AssetType.
-        void SetOpenAssetCallback(std::function<void(AssetHandle)> callback) { m_OpenAsset = std::move(callback); }
-        // Model assets dropped from the Content Browser onto a folder row (folder path) or blank space (""): EditorLayer places them.
-        // "Create Prefab" in an entity's right-click menu: EditorLayer creates the prefab from it (or from the selection it is part of).
-        void SetCreatePrefabCallback(std::function<void(UUID)> callback) { m_CreatePrefabFromEntity = std::move(callback); }
-        void SetPlaceAssetsCallback(std::function<void(const std::vector<AssetHandle>&, const std::string&)> callback) { m_PlaceAssets = std::move(callback); }
-        // Double-clicking an entity's row (not its rename/arrow): EditorLayer frames the editor camera on it, like UE5's Outliner.
-        void SetFocusEntityCallback(std::function<void(Entity)> callback) { m_FocusEntity = std::move(callback); }
-        // Right-click > Shapes > Cube / Sphere / ...: EditorLayer places the shape, in the folder (or "" for the top level).
-        void SetCreateShapeCallback(std::function<void(PrimitiveShape, const std::string&)> callback) { m_CreateShape = std::move(callback); }
-        // An Acoustic Probe Volume's Bake / Bake All / Cancel: EditorLayer bakes (the volume's id, 0 = every volume) on its thread;
-        // the status shows in the Inspector while it runs.
-        struct AcousticBakeStatus
-        {
-            bool Running = false;
-            float Progress = 0.0f;
-            std::string Status;
-        };
-        void SetAcousticBakeCallbacks(std::function<void(UUID)> bake, std::function<void()> cancel, std::function<AcousticBakeStatus()> status)
-        {
-            m_BakeAcoustics = std::move(bake);
-            m_CancelAcousticBake = std::move(cancel);
-            m_AcousticBakeStatus = std::move(status);
-        }
+        SceneHierarchyPanel();
+        explicit SceneHierarchyPanel(const Ref<Scene>& context);
+        ~SceneHierarchyPanel();
 
-        ImVec2 left;
-        bool leftFocused;
-        bool leftHovered;
-        bool leftPropFocused;
-        bool leftPropHovered;
+        const Ref<NoxUI::UIElement>& BuildUI();
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
+
+        void SetContext(const Ref<Scene>& context);
+        void Update();
+        void MarkDirty() { m_Dirty = true; }
+
+        // The editor's selection this panel shows and changes (null: a selection of its own). The selection is not the panel's:
+        // the viewport, the inspector and the shortcuts change it too, and the rows follow.
+        void SetSelection(EditorSelection* selection) { m_Selection = selection; }
+        bool IsSelected(Entity entity) const;
+        void SetSelectedEntity(Entity entity);
+        void ToggleSelectedEntity(Entity entity);
+        void SelectRangeTo(Entity targetEntity);
+        void ClearSelection();
+
+        void FocusSearch();
+        void DeleteSelection();
+        void DuplicateSelection();
+
+        void SetFocusEntityCallback(std::function<void(Entity)> callback) { m_FocusEntity = std::move(callback); }
+        void SetCreateShapeCallback(std::function<void(PrimitiveShape, const std::string&)> callback) { m_CreateShape = std::move(callback); }
+        void SetCreatePrefabCallback(std::function<void(UUID)> callback) { m_CreatePrefab = std::move(callback); }
+        void SetSceneMutatedCallback(std::function<void()> callback) { m_OnSceneMutated = std::move(callback); }
+
     private:
-        template<typename T>
-        void DisplayAddComponentEntry(const std::string& entryName);
-        
-        void DrawEntityNode(Entity entity);
-        void DrawComponents(Entity entity);
-        // Outliner folders (FolderComponent paths; Scene::GetFolders keeps empty ones): a folder only groups rows.
-        void DrawFolderNode(const std::string& path, const std::set<std::string>& allFolders);
-        // Every folder shown: the scene's, those entities are filed under, and the folders above them.
+        enum class NodeKind : uint8_t { Entity, Folder };
+        struct NodeMapping
+        {
+            NodeKind Kind = NodeKind::Entity;
+            UUID EntityId = 0;
+            std::string FolderPath;
+        };
+
+        void RebuildTree();
+        uint64_t ComputeSceneSignature() const;
         std::set<std::string> CollectFolderPaths() const;
-        // The entity rows in the order they are drawn (folders first, then the top-level entities), inside open folders and open
-        // rows only: what a Shift-click selects a range of.
-        std::vector<Entity> CollectVisibleRows() const;
-        // A folder's top-level entities, its subfolders' included; shown / hidden together (the folder's eye).
         std::vector<Entity> CollectFolderContents(const std::string& path) const;
         void SetFolderContentsActive(const std::string& path, bool active);
-        void FileEntities(UUID dragged, const std::string& path);
-        void AcceptAssetDrop(const std::string& folder);
-        // The "Shapes" submenu of a right-click menu; shapes made from it are filed in `folder` ("" = top level).
-        void DrawCreateShapeMenu(const std::string& folder);
-    private:
-        Ref<Scene> m_Context;
-        std::vector<Entity> m_SelectionContexts;
-        Entity m_SelectionAnchor;
-        std::unordered_set<UUID> m_OpenRows; // entity rows drawn open (their children are rows too)
+        void FileEntities(const std::vector<Entity>& entities, const std::string& folderPath);
+        void ReparentEntities(const std::vector<Entity>& entities, Entity parent);
+        bool MoveFolder(const std::string& sourcePath, const std::string& targetParentFolder);
 
-        // Deletes requested while drawing. Destroying entities inside the registry view being
-        // iterated invalidates it, so they're applied after the loop, resolved by UUID so an entity
-        // already destroyed as a child of another pending delete is skipped.
-        std::vector<UUID> m_PendingDestroy;
-        // Split Into Separate Entities, asked for while the instance's components were drawn: applied at the start of the next draw
-        // (it may destroy the instance root).
-        UUID m_PendingSplit = 0;
-        std::string m_PendingFolderDelete;
-        float m_RowHeight = 0.0f;     // a closed top-level row, measured: the height of each one not built (out of view)
-        Entity m_PendingSingleSelect; // a plain click on a selected entity narrows the selection on release, so it can be dragged as a group
-        std::string m_RenameFolderPath;
-        char m_FolderNameBuffer[128] = {};
-        bool m_OpenFolderRename = false;
-        bool m_MaterialShowAll = false; // Material component: show every slot instead of just this entity's own submesh
-        std::function<void(AssetHandle)> m_OpenAsset;
-        std::function<void(const std::vector<AssetHandle>&, const std::string&)> m_PlaceAssets;
-        std::function<void(UUID)> m_CreatePrefabFromEntity;
+        void ShowContextMenuForNode(uint64_t nodeId, const NoxUI::UIVec2& screenPos);
+        void ShowBlankContextMenu(const NoxUI::UIVec2& screenPos);
+        void ShowAddMenu(const NoxUI::UIVec2& screenPos);
+
+        void SyncTreeSelection();
+        void UpdateCountLabel();
+        EditorSelection& Sel() { return m_Selection ? *m_Selection : m_OwnSelection; }
+        const EditorSelection& Sel() const { return m_Selection ? *m_Selection : m_OwnSelection; }
+        uint64_t NodeIdForEntity(UUID uuid) const;
+        uint64_t NodeIdForFolder(const std::string& path);
+
+        Ref<Scene> m_Context;
+        EditorSelection* m_Selection = nullptr;
+        EditorSelection m_OwnSelection;
+        uint64_t m_SeenSelectionVersion = 0;
+        Entity m_SelectionAnchor; // where Shift+click ranges start
+        size_t m_TotalEntities = 0;
+        size_t m_MatchedEntities = 0;
+        bool m_Filtering = false;
+        std::unordered_set<UUID> m_OpenRows;
+
+        std::string m_SearchFilter;
+        uint64_t m_LastSignature = 0;
+        bool m_Dirty = true;
+
+        std::unordered_map<uint64_t, NodeMapping> m_NodeMap;
+        std::unordered_map<std::string, uint64_t> m_FolderIdCache;
+
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UISearchBar> m_SearchBar;
+        Ref<NoxUI::UITreeView> m_TreeView;
+        Ref<NoxUI::UILabel> m_CountLabel;
+
         std::function<void(Entity)> m_FocusEntity;
         std::function<void(PrimitiveShape, const std::string&)> m_CreateShape;
-        std::function<void(UUID)> m_BakeAcoustics;
-        std::function<void()> m_CancelAcousticBake;
-        std::function<AcousticBakeStatus()> m_AcousticBakeStatus;
+        std::function<void(UUID)> m_CreatePrefab;
+        std::function<void()> m_OnSceneMutated;
     };
 }

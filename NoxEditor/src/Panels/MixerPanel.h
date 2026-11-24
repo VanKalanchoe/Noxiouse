@@ -1,53 +1,67 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "NoxCore/Audio/AudioMixer.h"
+#include "NoxCore/Core/Ref.h"
+#include <NoxUI/Core/UITypes.h>
+
+namespace NoxUI
+{
+        class UIContext;
+        class UIElement;
+        class UIStackBox;
+    }
 
 namespace Nox
 {
-    // The Mixer panel (docs/Audio_Architecture_Plan_2026.md §7.1; Unity's Audio Mixer window, Godot's Audio bottom panel): every bus of
-    // the project's mixer side by side as a channel strip -- fader, live level meter, mute / solo / bypass, its effects -- and below,
-    // the selected bus in full: Output To, its effect chain with every parameter, its sends and its ducking. Snapshots across the top:
-    // pick one to hear it and to store changes in it. Edits are heard at once (also in Play), saved with File > Save (Ctrl+S) or the
-    // panel's Save, undone with Ctrl+Z / Ctrl+Y while the panel has focus. Window > Mixer, or double-click the .nmixer asset.
+
+    // Window > Mixer: the project's audio mixer (.nmixer) -- a strip per bus (name, where it plays into, meter, fader, the live gain
+    // reduction, mute / solo / bypass, its effects), the selected bus's details (name, Output To, volume, effects with their
+    // parameters, sends, ducking), snapshots, the voice budget, headphones and the acoustics (Steam Audio reflections, baked reverb).
+    // Values a snapshot being edited overrides are marked (orange dot); right-click a value: Reset, Remove from Snapshot. Its own
+    // history (the whole mixer per finished change, 100 steps): Ctrl+Z / Ctrl+Y while the window has the keyboard.
     class MixerPanel
     {
     public:
-        void OnImGuiRender();
-
-        bool IsOpen() const { return m_Open; }
-        void SetOpen(bool open) { m_Open = open; }
-        // Opens and brings it to the front.
-        void Focus() { m_Open = true; m_FocusRequested = true; }
+        const Ref<NoxUI::UIElement>& BuildUI(NoxUI::UIContext* context);
+        const Ref<NoxUI::UIElement>& GetRoot() const { return m_Root; }
+        // Once a frame while shown: meters, values, the history.
+        void Update();
 
     private:
-        void DrawToolbar(AudioMixerData& data);
-        void DrawSnapshots(AudioMixerData& data);
-        void DrawStrips(AudioMixerData& data);
-        void DrawStrip(AudioMixerData& data, AudioMixerBus& bus, float height);
-        void DrawDetails(AudioMixerData& data);
-        void DrawEffect(AudioMixerData& data, AudioMixerBus& bus, size_t index, int& moveFrom, int& moveTo, int& removed);
-        void DrawSends(AudioMixerData& data, AudioMixerBus& bus);
-        void DrawDucking(AudioMixerData& data, AudioMixerBus& bus);
-
-        // A snapshot-aware number: shown orange when the edited snapshot overrides it; right-click to reset or take it out.
-        bool ValueSlider(const char* label, const AudioMixerValueKey& key, float min, float max, const char* format, bool logarithmic, float resetValue);
-        void DeleteBus(AudioMixerData& data, uint64_t id);
+        uint64_t StructureSignature() const;
+        void Rebuild();
+        void BuildToolbar(NoxUI::UIStackBox& into);
+        void BuildSnapshots(NoxUI::UIStackBox& into);
+        void BuildStrips(NoxUI::UIStackBox& into);
+        void BuildDetails(NoxUI::UIStackBox& into);
+        void ShowAcoustics(const NoxUI::UIRect& anchor);
+        // A value a snapshot can override: a field with the override dot, right-click Reset / Remove from Snapshot.
+        Ref<NoxUI::UIElement> ValueRow(const std::string& label, const AudioMixerValueKey& key, float min, float max, const char* format, float resetValue,
+                                    const std::string& tooltip = {});
+        void DeleteBus(uint64_t id);
         void Changed(bool structure);
-        void UpdateUndo(AudioMixerData& data);
-        void Undo(AudioMixerData& data);
-        void Redo(AudioMixerData& data);
+        void CommitHistory();
+        void Undo();
+        void Redo();
+        bool HandleKey(const NoxUI::UIKeyEvent& e);
 
-    private:
-        bool m_Open = false;
-        bool m_FocusRequested = false;
+        NoxUI::UIContext* m_Context = nullptr;
+        Ref<NoxUI::UIElement> m_Root;
+        Ref<NoxUI::UIStackBox> m_Body;
+        uint64_t m_Signature = 0;
+        bool m_Rebuild = true;
         uint64_t m_SelectedBus = NoxAudio::kAudioBusMaster;
-        int32_t m_RenamingSnapshot = -1;
-        char m_RenameBuffer[64] = {};
+        std::unordered_map<uint64_t, bool> m_CollapsedEffects;
 
-        // Undo / redo: the whole mixer before each change (it is small).
+        // History: the whole mixer before each finished change (it is small).
         std::vector<AudioMixerData> m_UndoStack;
         std::vector<AudioMixerData> m_RedoStack;
         AudioMixerData m_Committed;

@@ -39,6 +39,31 @@ namespace Nox {
         return handle;
     }
 
+    void NoxJoltJobSystem::CreateJobs(const char* inJobName, JPH::ColorArg inColor,
+                                      const JobFunction& inJobFunction, JobHandle* outJobs, JPH::uint32 inNumJobs,
+                                      JPH::uint32 inNumDependencies)
+    {
+        for (JPH::uint32 i = 0; i < inNumJobs; ++i)
+        {
+            uint32_t index;
+            for (;;)
+            {
+                index = mJobs.ConstructObject(inJobName, inColor, this, inJobFunction, inNumDependencies);
+                if (index != AvailableJobs::cInvalidObjectIndex)
+                    break;
+                JPH_ASSERT(false, "No jobs available in NoxJoltJobSystem!");
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+            }
+            outJobs[i] = JobHandle(&mJobs.Get(index));
+        }
+
+        if (inNumDependencies == 0)
+        {
+            for (JPH::uint32 i = 0; i < inNumJobs; ++i)
+                QueueJob(outJobs[i].GetPtr());
+        }
+    }
+
     void NoxJoltJobSystem::QueueJob(Job* inJob)
     {
         inJob->AddRef();
