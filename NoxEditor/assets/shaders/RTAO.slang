@@ -40,6 +40,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload RTAOPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -74,12 +75,12 @@ float hash12(float2 p)
 
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
     uint i0 = indices[primIndex * 3 + 0];
     uint i1 = indices[primIndex * 3 + 1];
     uint i2 = indices[primIndex * 3 + 2];
 
-    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+    BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
     float2 uv0 = vertices[i0].uv0;
     float2 uv1 = vertices[i1].uv0;
     float2 uv2 = vertices[i2].uv0;
@@ -97,19 +98,19 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 // tiny value made everything darken sharply: a real occluder 2 world-units away and one sitting right at the edge
 // of a 50-unit radius weighted identically. SSAO already avoids exactly this with its own distance-based
 // rangeCheck; the caller applies the equivalent falloff to this distance instead.
-float trace_occlusion_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
+float trace_occlusion_ray(UniformBufferObject ubo, float3 rayOrigin, float3 rayDir, float maxDist)
 {
-    if (ubo->tlasDeviceAddress == 0)
+    if (ubo.tlasDeviceAddress == 0)
         return -1.0;
 
     RayDesc rayDesc;
     rayDesc.Origin = rayOrigin;
     rayDesc.Direction = rayDir;
     // Keep a nonempty trace interval. A fixed shadow bias prevents self-intersection acne.
-    rayDesc.TMin = 0.005 * ubo->unitsPerMeter;
+    rayDesc.TMin = 0.005 * ubo.unitsPerMeter;
     rayDesc.TMax = maxDist;
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
              RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
@@ -117,12 +118,12 @@ float trace_occlusion_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 ray
                    RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
     sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, rayDesc);
 
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (sq.Proceed())
     {
-        uint instanceID = sq.CandidateRayInstanceCustomIndex();
+        uint instanceID = sq.CandidateInstanceID();
         uint primIndex = sq.CandidatePrimitiveIndex();
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
@@ -158,11 +159,11 @@ float trace_occlusion_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 ray
 RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
 {
     RTAOOutput output;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     // At a lower ray tracing resolution one pixel of each block (shaderIO.h); RTUpsample.slang fills in the others.
     int2 pixelCoord = rt_trace_pixel(ubo, input.pos.xy, pushConstant.viewportSize);
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0)
     {
@@ -175,7 +176,7 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     float4 worldPosH = mul(pushConstant.invViewProj, float4(ndc, depth, 1.0));
     float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     float3 rawNormal = normalTex.Load(int3(pixelCoord, 0)).rgb;
     float lenN = length(rawNormal);
     float3 N = lenN > 1e-6 ? (rawNormal / lenN) : float3(0.0, 1.0, 0.0);
@@ -185,7 +186,7 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     // its noisy inputs to (it accumulates them over frames): a pattern fixed to the screen is image detail to it, and slid over the
     // surfaces as noise whenever the camera moved.
     const float2 noiseSeed = float2(pixelCoord) +
-                             (ubo->rayReconstructionActive != 0 ? float(ubo->frameIndex % 64u) * float2(5.588238, 3.45367) : float2(0.0));
+                             (ubo.rayReconstructionActive != 0 ? float(ubo.frameIndex % 64u) * float2(5.588238, 3.45367) : float2(0.0));
     float angle = hash12(noiseSeed) * 6.28318530718;
     float3 up = abs(N.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
     float3 tangent0 = normalize(cross(up, N));
@@ -194,10 +195,9 @@ RTAOOutput fragMain(MSOutput input, uniform PushConstantRTAO pushConstant)
     float3 bitangent = -tangent0 * sin(angle) + bitangent0 * cos(angle);
     float3x3 TBN = float3x3(tangent, bitangent, N);
 
-    float4* kernel = (float4*)pushConstant.kernelReference;
     // Off the surface by 1 cm (depth-buffer precision), or by the LOD's simplification error where that is more (shaderIO.h): either
     // would let rays self-intersect the surface (black acne).
-    float originBias = raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
+    float originBias = raster_surface_bias(ubo, worldPos, 0.01 * ubo.unitsPerMeter);
     float3 rayOrigin = worldPos + N * originBias;
     const float radius = ambient_occlusion_radius(pushConstant.invViewProj, ndc, depth, worldPos, pushConstant.viewportSize,
                                                   pushConstant.radius, pushConstant.shortRangePixels);

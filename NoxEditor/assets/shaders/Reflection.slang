@@ -38,6 +38,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReflectionPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -77,9 +78,9 @@ float interleaved_gradient_noise(float2 pixelCoord, uint frameIndex)
 
 // No reflection traced at a pixel (background, unlit, too rough, facing away): no radiance at "miss" distance, which is
 // also what the DLSS-RR hit distance guide reads (RRGuides.slang).
-float4 noReflection(UniformBufferObject* ubo, uint denoiserMode)
+float4 noReflection(UniformBufferObject ubo, uint denoiserMode)
 {
-    return NRD_PackSignal(denoiserMode, float3(0.0), reflection_miss_distance(ubo), 1.0, 1.0, ubo->unitsPerMeter);
+    return NRD_PackSignal(denoiserMode, float3(0.0), reflection_miss_distance(ubo), 1.0, 1.0, ubo.unitsPerMeter);
 }
 
 // GGX Visible Normal Distribution Function (VNDF) Importance Sampling (Heitz 2018), isotropic.
@@ -134,17 +135,17 @@ float4 fragMain(
     uniform PushConstantReflection pushConstant
 ) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     // At a lower ray tracing resolution one pixel of each block (shaderIO.h); RTUpsample.slang fills in the others.
     // The smooth fill pass traces every pixel itself.
     const bool smoothFill = pushConstant.smoothFillRoughness > 0.0;
     int2 pixelCoord = smoothFill ? int2(input.pos.xy) : rt_trace_pixel(ubo, input.pos.xy, pushConstant.viewportSize);
 
     // 1. Check Visibility Buffer and Depth
-    Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
+    Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
     uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
 
     // Reverse-Z: 0.0 is background / skybox -> no reflection to cast
@@ -154,8 +155,8 @@ float4 fragMain(
     }
 
     // 2. Fetch G-Buffer Normal & Material
-    Texture2D normalTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+    Texture2D normalTex   = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
 
     float4 normalSample   = normalTex.Load(int3(pixelCoord, 0));
     float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
@@ -179,7 +180,7 @@ float4 fragMain(
         discard; // rough enough: the upsampled reduced-resolution result stays
 
     // Up to RTReflectionMaxRoughness (shaderIO.h); DeferredLighting.slang fades the same way.
-    if (roughness > RTReflectionMaxRoughness || ubo->enableRTReflections == 0 || ubo->tlasDeviceAddress == 0)
+    if (roughness > RTReflectionMaxRoughness || ubo.enableRTReflections == 0 || ubo.tlasDeviceAddress == 0)
     {
         return noReflection(ubo, pushConstant.denoiserMode);
     }
@@ -191,7 +192,7 @@ float4 fragMain(
     float4 worldPosH = mul(pushConstant.invViewProj, ndc);
     float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-    float3 V = normalize(ubo->cameraWorldPos.xyz - worldPos);
+    float3 V = normalize(ubo.cameraWorldPos.xyz - worldPos);
     // A normal-mapped normal facing away from the camera reflects nothing it could see: bent back to facing it (lobe_facing_normal),
     // instead of no reflection -- the black spots a coat with a strong normal map showed.
     normal = lobe_facing_normal(normal, V);
@@ -219,7 +220,7 @@ float4 fragMain(
     {
         // Glossy surface with active denoiser (NRD / DLSS-RR): GGX VNDF jitter
         // The noise by the block, not the traced pixel: traced pixels 2 apart got nearly the same gradient noise.
-        const float2 noisePixel = (smoothFill || ubo->rtSubsample <= 1u) ? float2(pixelCoord) : floor(input.pos.xy);
+        const float2 noisePixel = (smoothFill || ubo.rtSubsample <= 1u) ? float2(pixelCoord) : floor(input.pos.xy);
         float ign = interleaved_gradient_noise(noisePixel, pushConstant.frameIndex);
         float2 u = float2(ign, frac(ign * 1.6180339887 + 0.314159));
         const float3 M = sample_ggx_vndf(V, normal, roughness, u);
@@ -236,26 +237,26 @@ float4 fragMain(
 
     // 5. Trace Reflection Ray against TLAS
     // Use robust bias to prevent depth-buffer precision self-intersection (same as DeferredLighting)
-    float3 rayOrigin = worldPos + surfaceNormal * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
+    float3 rayOrigin = worldPos + surfaceNormal * raster_surface_bias(ubo, worldPos, 0.01 * ubo.unitsPerMeter);
 
     RayDesc reflectionRayDesc;
     reflectionRayDesc.Origin = rayOrigin;
     reflectionRayDesc.Direction = R;
-    reflectionRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
-    reflectionRayDesc.TMax = 100000.0 * ubo->unitsPerMeter; // 100 km: it used to stop at 10000 units (100 m in centimeters)
+    reflectionRayDesc.TMin = 0.005 * ubo.unitsPerMeter;
+    reflectionRayDesc.TMax = 100000.0 * ubo.unitsPerMeter; // 100 km: it used to stop at 10000 units (100 m in centimeters)
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
     let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 
     rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, reflectionRayDesc);
 
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (rq.Proceed())
     {
-        uint instanceID = rq.CandidateRayInstanceCustomIndex();
+        uint instanceID = rq.CandidateInstanceID();
         uint primIndex = rq.CandidatePrimitiveIndex();
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
@@ -282,26 +283,26 @@ float4 fragMain(
     bool hit = (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
 
     // 6. Evaluate Reflected Radiance
-    if (!hit && ubo->prefilteredMapIndex != 0xFFFFFFFF)
+    if (!hit && ubo.prefilteredMapIndex != 0xFFFFFFFF)
     {
         // Ray Miss: Sample skybox environment cubemap at the correct roughness mip level
-        TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+        TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
         SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-        float lod = roughness * ubo->prefilteredCubeMipLevels;
-        float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, lod).rgb * ubo->scaleIBLAmbient;
-        return NRD_PackSignal(pushConstant.denoiserMode, skyColor, reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
+        float lod = roughness * ubo.prefilteredCubeMipLevels;
+        float3 skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, R, lod).rgb * ubo.scaleIBLAmbient;
+        return NRD_PackSignal(pushConstant.denoiserMode, skyColor, reflection_miss_distance(ubo), abs(mul(ubo.view, float4(worldPos, 1.0)).z), roughness, ubo.unitsPerMeter);
     }
     if (!hit)
-        return NRD_PackSignal(pushConstant.denoiserMode, float3(0.0), reflection_miss_distance(ubo), abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
+        return NRD_PackSignal(pushConstant.denoiserMode, float3(0.0), reflection_miss_distance(ubo), abs(mul(ubo.view, float4(worldPos, 1.0)).z), roughness, ubo.unitsPerMeter);
 
     // Ray Hit: the hit's lighting (RayHitShading.slang), its emission included. (Sampling the emissive triangles as lights here,
     // MIS-weighted against this ray, drew a string light's reflection as a ring with a dark middle where the path tracer shows a soft
     // glow: removed.)
     float hitT = rq.CommittedRayT();
-    float3 finalRadiance = shadeRayHit(ubo, rq.CommittedRayInstanceCustomIndex(), rq.CommittedPrimitiveIndex(), rq.CommittedTriangleBarycentrics(),
+    float3 finalRadiance = shadeRayHit(ubo, rq.CommittedInstanceID(), rq.CommittedPrimitiveIndex(), rq.CommittedTriangleBarycentrics(),
                                        rayOrigin, R, hitT);
 
     // Incoming radiance (de-modulated: the lighting multiplies the specular factor back) with the ray's hit distance,
     // packed for the denoiser (NRDFrontEnd.slang).
-    return NRD_PackSignal(pushConstant.denoiserMode, finalRadiance, hitT, abs(mul(ubo->view, float4(worldPos, 1.0)).z), roughness, ubo->unitsPerMeter);
+    return NRD_PackSignal(pushConstant.denoiserMode, finalRadiance, hitT, abs(mul(ubo.view, float4(worldPos, 1.0)).z), roughness, ubo.unitsPerMeter);
 }

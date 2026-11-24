@@ -30,22 +30,22 @@ struct ParticleVertex
 
 // The sun hidden from the particle? Blended and transmissive occluders let it through (forwardShadowed in
 // Material_TransparentLit_Mesh.slang decides the same way; alpha-masked ones count as solid here).
-bool particleShadowed(UniformBufferObject* ubo, float3 origin, float3 direction)
+bool particleShadowed(UniformBufferObject ubo, float3 origin, float3 direction)
 {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
-    ray.TMin = 0.01 * ubo->unitsPerMeter;
-    ray.TMax = 100000.0 * ubo->unitsPerMeter;
+    ray.TMin = 0.01 * ubo.unitsPerMeter;
+    ray.TMax = 100000.0 * ubo.unitsPerMeter;
 
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure tlas = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
     query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, ray);
 
-    GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> rtInstances = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     while (query.Proceed())
     {
-        GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
+        GpuRayTracingInstance occluder = rtInstances[query.CandidateInstanceID()];
         if (occluder.alphaMode == 2 || ray_see_through(occluder.transmissionFactor, occluder.alphaMode))
             continue;
         query.CommitNonOpaqueTriangleHit();
@@ -54,32 +54,32 @@ bool particleShadowed(UniformBufferObject* ubo, float3 origin, float3 direction)
 }
 
 // What a particle of this color reflects towards the camera.
-float3 litParticle(UniformBufferObject* ubo, float3 albedo, float3 position, float3 toCamera, bool traceShadow)
+float3 litParticle(UniformBufferObject ubo, float3 albedo, float3 position, float3 toCamera, bool traceShadow)
 {
     // The environment: probes where DDGI runs, the irradiance cubemap otherwise (seen from the camera's side and from above:
     // a puff is lit all around, not like a wall).
     float3 ambient = float3(0.0);
-    if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+    if (ubo.enableDDGI != 0 && ubo.ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo.ddgiDistanceTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D ddgiIrradiance = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-        Texture2D ddgiDistance = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+        Texture2D ddgiIrradiance = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiIrradianceTextureIndex, 0));
+        Texture2D ddgiDistance = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiDistanceTextureIndex, 0));
         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
         ambient = sample_ddgi_diffuse(ubo, position, toCamera, ddgiIrradiance, ddgiDistance, ddgiSampler);
     }
-    else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    else if (ubo.irradianceMapIndex != 0xFFFFFFFF)
     {
-        TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        TextureCube irradiance = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
         SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
         ambient = 0.5 * (irradiance.SampleLevel(irradianceSampler, toCamera, 0).rgb +
-                         irradiance.SampleLevel(irradianceSampler, float3(0.0, 1.0, 0.0), 0).rgb) * ubo->scaleIBLAmbient;
+                         irradiance.SampleLevel(irradianceSampler, float3(0.0, 1.0, 0.0), 0).rgb) * ubo.scaleIBLAmbient;
     }
 
     float3 direct = float3(0.0);
-    LightData* lights = (LightData*)ubo->lightDataReference;
+    BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
     bool sunTested = false;
     // Every light, unshadowed but for the sun (once per particle: cheap). It used to be the first 8 -- and the light buffer puts point
     // and spot lights first, so with 8 lamps the sun no longer lit any particle.
-    for (uint i = 0; i < ubo->lightCount; ++i)
+    for (uint i = 0; i < ubo.lightCount; ++i)
     {
         LightData light = lights[i];
         const uint lightType = (uint)light.position.w;
@@ -91,10 +91,10 @@ float3 litParticle(UniformBufferObject* ubo, float3 albedo, float3 position, flo
         if (lightType == 0)
             irradiance *= cloud_shadow(ubo, position, i, sample.direction);
         const float3 l = sample.direction;
-        if (lightType == 0 && i == ubo->shadowMaskLightIndex && ubo->sunShadowCascadesReference != 0)
+        if (lightType == 0 && i == ubo.shadowMaskLightIndex && ubo.sunShadowCascadesReference != 0)
         {
             // The sun's shadow maps (Settings > Sun Shadows: Shadow Maps), looked up at the particle's middle facing the sun.
-            irradiance *= sun_shadow_map(ubo, (GpuShadowCascades*)ubo->sunShadowCascadesReference, position, l, 0.5);
+            irradiance *= sun_shadow_map(ubo, BufferRef<GpuShadowCascades>(ubo.sunShadowCascadesReference)[0], position, l, 0.5);
         }
         else if (lightType == 0 && traceShadow && !sunTested)
         {
@@ -127,12 +127,12 @@ void meshMain(
     if (threadID >= inGroup)
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    GpuParticle* particles = (GpuParticle*)pushConstant.particlesReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<GpuParticle> particles = BufferRef<GpuParticle>(pushConstant.particlesReference);
     const GpuParticle particle = particles[pushConstant.firstParticle + groupFirst + threadID];
 
     // Facing the camera's position (round from every side, also at the edges of a wide view).
-    const float3 camera = ubo->cameraWorldPos.xyz;
+    const float3 camera = ubo.cameraWorldPos.xyz;
     float3 forward = particle.position - camera;
     const float distance = length(forward);
     forward = distance > 1e-5 ? forward / distance : float3(0.0, 0.0, -1.0);
@@ -148,7 +148,7 @@ void meshMain(
     float4 color = particle.color;
     if ((pushConstant.flags & PARTICLE_LIT) != 0)
     {
-        const bool shadow = (pushConstant.flags & PARTICLE_SHADOW) != 0 && ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0;
+        const bool shadow = (pushConstant.flags & PARTICLE_SHADOW) != 0 && ubo.enableRTShadows != 0 && ubo.tlasDeviceAddress != 0;
         color.rgb = litParticle(ubo, color.rgb, particle.position, -forward, shadow);
     }
 
@@ -158,9 +158,9 @@ void meshMain(
         const float3 cornerOffset = (rotatedRight * corners[corner].x + rotatedUp * corners[corner].y) * halfSize;
         const float3 worldPos = particle.position + cornerOffset;
         ParticleVertex vertex;
-        vertex.pos = mul(ubo->proj, mul(ubo->view, float4(worldPos, 1.0)));
-        vertex.currentClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
-        vertex.previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(particle.previousPosition + cornerOffset, 1.0)));
+        vertex.pos = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
+        vertex.currentClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(worldPos, 1.0)));
+        vertex.previousClip = mul(ubo.prevProj, mul(ubo.prevView, float4(particle.previousPosition + cornerOffset, 1.0)));
         vertex.worldPos = worldPos;
         vertex.uv = float2(corners[corner].x * 0.5 + 0.5, 0.5 - corners[corner].y * 0.5);
         vertex.color = color;
@@ -190,7 +190,7 @@ struct ParticleOITOutput
 ParticleOITOutput fragMainOIT(ParticleVertex input, uniform PushConstantParticles pushConstant)
 {
     const float4 shaded = shadeParticle(input, pushConstant);
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const OITOutput oit = oit_output(ubo, shaded.rgb, float3(1.0 - saturate(shaded.a)), input.worldPos, input.pos.xy);
     ParticleOITOutput output;
     output.accum = oit.accum;
@@ -198,29 +198,29 @@ ParticleOITOutput fragMainOIT(ParticleVertex input, uniform PushConstantParticle
     return output;
 }
 
-bool particleDepthFade(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant, float2 pixel, out float fade);
-float4 particleTexel(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant);
+bool particleDepthFade(UniformBufferObject ubo, ParticleVertex input, PushConstantParticles pushConstant, float2 pixel, out float fade);
+float4 particleTexel(UniformBufferObject ubo, ParticleVertex input, PushConstantParticles pushConstant);
 
 // AVBOIT's prepasses (Renderer::addAVBOITPasses), at the transmittance volume's resolution: the alpha-blended particles' depth slices,
 // then their extinction (OITShared.slang). The scene depth is tested at the middle of the fragment's column.
 [shader("fragment")]
 void fragMainAVBOITOccupancy(ParticleVertex input, uniform PushConstantParticles pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     float fade;
     if (particleDepthFade(ubo, input, pushConstant, avboit_full_resolution_pixel(input.pos.xy), fade))
-        avboit_mark_occupied(ubo, length(input.worldPos - ubo->cameraWorldPos.xyz));
+        avboit_mark_occupied(ubo, length(input.worldPos - ubo.cameraWorldPos.xyz));
 }
 
 [shader("fragment")]
 void fragMainAVBOITSplat(ParticleVertex input, uniform PushConstantParticles pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     float fade;
     if (!particleDepthFade(ubo, input, pushConstant, avboit_full_resolution_pixel(input.pos.xy), fade))
         return;
     const float alpha = saturate(input.color.a * particleTexel(ubo, input, pushConstant).a * fade);
-    avboit_splat(ubo, uint2(input.pos.xy), length(input.worldPos - ubo->cameraWorldPos.xyz), float3(1.0 - alpha));
+    avboit_splat(ubo, uint2(input.pos.xy), length(input.worldPos - ubo.cameraWorldPos.xyz), float3(1.0 - alpha));
 }
 
 // The particles' motion into the velocity target (GBufferVelocity's convention: the uv offset to where the pixel was last frame),
@@ -239,12 +239,12 @@ float2 fragMainMotion(ParticleVertex input, uniform PushConstantParticles pushCo
 }
 
 // Behind the scene's geometry at `pixel` (full resolution): hidden (false). Soft: `fade` over the last softDistance in front of it.
-bool particleDepthFade(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant, float2 pixel, out float fade)
+bool particleDepthFade(UniformBufferObject ubo, ParticleVertex input, PushConstantParticles pushConstant, float2 pixel, out float fade)
 {
     fade = 1.0;
     if (pushConstant.depthTextureIndex == 0xFFFFFFFF)
         return true;
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     uint width, height;
     depthTex.GetDimensions(width, height);
     const int2 texel = clamp(int2(pixel), int2(0), int2(int(width) - 1, int(height) - 1));
@@ -252,9 +252,9 @@ bool particleDepthFade(UniformBufferObject* ubo, ParticleVertex input, PushConst
     if (sceneDepth <= 0.0) // reverse Z: 0 is the sky
         return true;
     const float2 uv = pixel / float2(width, height);
-    const float4 world = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, sceneDepth, 1.0));
-    const float sceneDistance = length(world.xyz / world.w - ubo->cameraWorldPos.xyz);
-    const float particleDistance = length(input.worldPos - ubo->cameraWorldPos.xyz);
+    const float4 world = mul(ubo.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, sceneDepth, 1.0));
+    const float sceneDistance = length(world.xyz / world.w - ubo.cameraWorldPos.xyz);
+    const float particleDistance = length(input.worldPos - ubo.cameraWorldPos.xyz);
     if (particleDistance > sceneDistance)
         return false;
     if ((pushConstant.flags & PARTICLE_SOFT) != 0 && pushConstant.softDistance > 0.0)
@@ -263,7 +263,7 @@ bool particleDepthFade(UniformBufferObject* ubo, ParticleVertex input, PushConst
 }
 
 // The particle's texel: its flipbook frame, or a soft round dot without a texture.
-float4 particleTexel(UniformBufferObject* ubo, ParticleVertex input, PushConstantParticles pushConstant)
+float4 particleTexel(UniformBufferObject ubo, ParticleVertex input, PushConstantParticles pushConstant)
 {
     float4 texel = float4(1.0);
     if (pushConstant.textureIndex != 0xFFFFFFFF)
@@ -274,7 +274,7 @@ float4 particleTexel(UniformBufferObject* ubo, ParticleVertex input, PushConstan
         const uint frame = input.frame % (columns * rows);
         const float2 cell = float2(float(frame % columns), float(frame / columns));
         const float2 uv = (cell + input.uv) / float2(columns, rows);
-        Texture2D sheet = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.textureIndex, 0));
+        Texture2D sheet = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.textureIndex, 0));
         SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
         texel = sheet.Sample(linearClamp, uv);
     }
@@ -290,7 +290,7 @@ float4 particleTexel(UniformBufferObject* ubo, ParticleVertex input, PushConstan
 
 float4 shadeParticle(ParticleVertex input, PushConstantParticles pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
     // Behind the scene's geometry: hidden. Soft: fading over the last softDistance in front of it.
     float fade;

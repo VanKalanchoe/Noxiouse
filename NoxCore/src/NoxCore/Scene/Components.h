@@ -2,7 +2,9 @@
 #include "WorldPartition.h"
 #include "NoxCore/Renderer/PostProcessSettings.h"
 #include <entt/entt.hpp>
+#ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include <glm/gtx/quaternion.hpp>
 
 #include <algorithm>

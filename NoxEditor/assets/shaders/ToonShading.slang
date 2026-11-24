@@ -19,7 +19,7 @@
 static const float ToonInvPi = 0.31830988618379067;
 
 // The material's toon settings, as the G-buffer carries them (the forward pass reads the material directly).
-ToonSettings toon_settings(GpuMaterial* material)
+ToonSettings toon_settings(GpuMaterial material)
 {
     ToonSettings toon;
     toon.rampTexture = material.toonRampTextureIndex;
@@ -50,7 +50,7 @@ float toon_bands(ToonSettings toon, float x)
 }
 
 // The diffuse tone at light amount `x`: the bands' level (grey) or the ramp's colour.
-float3 toon_tone(UniformBufferObject* ubo, ToonSettings toon, float x)
+float3 toon_tone(UniformBufferObject ubo, ToonSettings toon, float x)
 {
     if (toon.rampTexture != 0xFFFFFFFFu)
     {
@@ -63,7 +63,7 @@ float3 toon_tone(UniformBufferObject* ubo, ToonSettings toon, float x)
 // One light on a toon surface: diffuse tone + highlight + rim, in the units Default Lit's evaluateDirectLight returns.
 // `diffuseColor`: the surface's diffuse albedo (the metallic part removed); `baseColor` and `metallic` colour the highlight;
 // `NdotL` > 0 (the caller skips the unlit side), `shadow` the light's visibility (0..1), `radiance` its unshadowed radiance.
-float3 toon_direct_light(UniformBufferObject* ubo, ToonSettings toon, float3 diffuseColor, float3 baseColor, float metallic,
+float3 toon_direct_light(UniformBufferObject ubo, ToonSettings toon, float3 diffuseColor, float3 baseColor, float metallic,
                          float3 n, float3 v, float3 l, float NdotL, float shadow, float3 radiance)
 {
     const float x = saturate(NdotL) * saturate(shadow);

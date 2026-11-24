@@ -8,8 +8,8 @@
 // (numRegirBuildSamples draws combined via streaming RIS, not a single full-light-list pass) both
 // match the reference implementation exactly.
 
-static LightData* g_LightData;
-static uint2* g_RISBuffer;
+static BufferRef<LightData> g_LightData;
+static RWBufferRef<uint2> g_RISBuffer;
 static PushConstantReSTIRDIPresampleReGIR g_PushConstant;
 #define RTXDI_RIS_BUFFER g_RISBuffer
 
@@ -77,8 +77,8 @@ void compMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConstant
         return;
 
     g_PushConstant = pushConstant;
-    g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_RISBuffer = (uint2*)pushConstant.risBufferReference;
+    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    g_RISBuffer = RWBufferRef<uint2>(pushConstant.risBufferReference);
 
     ReGIR_Parameters regirParams;
     regirParams.commonParams.localLightSamplingFallbackMode = ReSTIRDI_LocalLightSamplingMode_POWER_RIS;

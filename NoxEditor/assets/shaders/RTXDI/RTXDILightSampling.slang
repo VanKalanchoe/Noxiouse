@@ -5,8 +5,8 @@
 #include "shaderIO.h"
 #include "Rtxdi/DI/ReSTIRDIParameters.h"
 
-static LightData* g_LightData;
-static uint2* g_RISBuffer;
+static BufferRef<LightData> g_LightData;
+static BufferRef<uint2> g_RISBuffer;
 #define RTXDI_RIS_BUFFER g_RISBuffer
 
 #undef RTXDI_REGIR_MODE
@@ -175,8 +175,8 @@ RTXDI_DIReservoir RTXDI_SampleLightsAt(
     RTXDILightSamplingParams sampling,
     out RAB_LightSample selectedSample)
 {
-    g_LightData = (LightData*)sampling.lightDataReference;
-    g_RISBuffer = (uint2*)sampling.risBufferReference;
+    g_LightData = BufferRef<LightData>(sampling.lightDataReference);
+    g_RISBuffer = BufferRef<uint2>(sampling.risBufferReference);
 
     RTXDI_DIInitialSamplingParameters initial;
     initial.numLocalLightSamples = sampling.numLocalLightSamples;

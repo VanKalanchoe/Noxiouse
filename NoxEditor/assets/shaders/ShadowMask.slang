@@ -35,6 +35,7 @@
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload ShadowPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,
@@ -60,12 +61,12 @@
 
     float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
     {
-        uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+        BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
         uint i0 = indices[primIndex * 3 + 0];
         uint i1 = indices[primIndex * 3 + 1];
         uint i2 = indices[primIndex * 3 + 2];
 
-        PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+        BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
         float2 uv0 = vertices[i0].uv0;
         float2 uv1 = vertices[i1].uv0;
         float2 uv2 = vertices[i2].uv0;
@@ -77,19 +78,19 @@
         return ray_hit_uv(lut, w0 * uv0 + w1 * uv1 + w2 * uv2); // through the material's UV channel 0
     }
 
-    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist, out float hitT)
+    bool trace_shadow_ray(UniformBufferObject ubo, float3 rayOrigin, float3 rayDir, float maxDist, out float hitT)
     {
         hitT = maxDist;
-        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+        if (ubo.enableRTShadows == 0 || ubo.tlasDeviceAddress == 0)
             return false;
 
         RayDesc shadowRayDesc;
         shadowRayDesc.Origin = rayOrigin;
         shadowRayDesc.Direction = rayDir;
-        shadowRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
+        shadowRayDesc.TMin = 0.005 * ubo.unitsPerMeter;
         shadowRayDesc.TMax = maxDist;
 
-        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+        RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
 
         RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
                  RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
@@ -98,12 +99,12 @@
 
         sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, shadowRayDesc);
 
-        GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
         while (sq.Proceed())
         {
-            uint instanceID = sq.CandidateRayInstanceCustomIndex();
+            uint instanceID = sq.CandidateInstanceID();
             uint primIndex = sq.CandidatePrimitiveIndex();
 
             GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
@@ -168,11 +169,11 @@
     )
     {
         ShadowMaskOutput output;
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         // At a lower ray tracing resolution one pixel of each block (shaderIO.h); RTUpsample.slang fills in the others.
         int2 pixelCoord = rt_trace_pixel(ubo, input.pos.xy, pushConstant.viewportSize);
 
-        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
         float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
 
         // Reverse-Z: 0.0 is sky/background -> fully lit, maximum distance
@@ -188,21 +189,21 @@
         float4 worldPosH = mul(pushConstant.invViewProj, ndc);
         float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-        Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+        Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
         float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
         float lenSqN = dot(normalSample.rgb, normalSample.rgb);
         float3 normal = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
 
         // The sun's shadow: the first directional light (Renderer::updateLightBuffer). None: every light traces its own rays in the
         // deferred lighting.
-        if (ubo->shadowMaskLightIndex >= ubo->lightCount || ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+        if (ubo.shadowMaskLightIndex >= ubo.lightCount || ubo.enableRTShadows == 0 || ubo.tlasDeviceAddress == 0)
         {
             output.shadowData = float2(NRD_FP16_MAX, 1.0);
             return output;
         }
 
-        LightData* lights = (LightData*)ubo->lightDataReference;
-        LightData light = lights[ubo->shadowMaskLightIndex];
+        BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
+        LightData light = lights[ubo.shadowMaskLightIndex];
 
         uint lightType = (uint)light.position.w;
         float sourceRadius = light.spotParams.z;
@@ -226,7 +227,7 @@
         // A double-sided surface (a leaf, a curtain) lit from behind is shadowed from that side: the deferred lighting lets the light
         // through it by its diffuse transmission with this mask, denoised like the rest. It traced its own hard ray before -- leaves
         // lit in single sparkling pixels wherever that ray found a gap in the canopy, flickering with the jitter.
-        Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+        Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
         if (gbuffer_double_sided(materialTex.Load(int3(pixelCoord, 0)).a) && dot(normal, unjitteredLightDir) < 0.0)
             normal = -normal;
 
@@ -238,7 +239,7 @@
             return output;
         }
 
-        float3 rayOrigin = worldPos + normal * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter);
+        float3 rayOrigin = worldPos + normal * raster_surface_bias(ubo, worldPos, 0.02 * ubo.unitsPerMeter);
 
         if (sourceRadius <= 1e-4)
         {
@@ -251,7 +252,7 @@
         }
 
         // The noise by the block, not the traced pixel: traced pixels 2 apart got nearly the same gradient noise.
-        const float2 noisePixel = ubo->rtSubsample <= 1u ? float2(pixelCoord) : floor(input.pos.xy);
+        const float2 noisePixel = ubo.rtSubsample <= 1u ? float2(pixelCoord) : floor(input.pos.xy);
         float ign = interleaved_gradient_noise(noisePixel, pushConstant.frameIndex);
         float phiOffset = ign;
         float rOffset = frac(ign * 1.6180339887 + 0.314159);

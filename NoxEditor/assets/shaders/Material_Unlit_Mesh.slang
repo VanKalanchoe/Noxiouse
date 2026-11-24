@@ -7,14 +7,14 @@
     struct VSOutput
     {
         float4 pos : SV_Position;
-        float3 worldPos;
-        float3 normal;
-        float2 uv0;
-        float2 uv1;
-        float4 color; // vertex color (Material_PBR_Mesh.slang's meshMain)
-        nointerpolation uint drawID;
-        nointerpolation int entityID;
-        float4 tangent; // Material_PBR_Mesh.slang's output, unused here
+        float3 worldPos : TEXCOORD0;
+        float3 normal : TEXCOORD1;
+        float2 uv0 : TEXCOORD2;
+        float2 uv1 : TEXCOORD3;
+        float4 color : TEXCOORD4; // vertex color (Material_PBR_Mesh.slang's meshMain)
+        nointerpolation uint drawID : TEXCOORD5;
+        nointerpolation int entityID : TEXCOORD6;
+        float4 tangent : TEXCOORD7; // Material_PBR_Mesh.slang's output, unused here
     };
 
     struct FSOutput
@@ -43,7 +43,7 @@
     FSOutputOIT fragMainOIT(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     {
         const FSOutput shaded = shadeUnlit(vertIn, pushConstant);
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         // An unlit surface lets nothing through but its uncovered share.
         const OITOutput oit = oit_output(ubo, shaded.color.rgb, float3(1.0 - saturate(shaded.color.a)), vertIn.worldPos, vertIn.pos.xy);
         FSOutputOIT output;
@@ -57,26 +57,26 @@
     [shader("fragment")]
     void fragMainAVBOITOccupancy(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         if (avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
-            avboit_mark_occupied(ubo, length(vertIn.worldPos - ubo->cameraWorldPos.xyz));
+            avboit_mark_occupied(ubo, length(vertIn.worldPos - ubo.cameraWorldPos.xyz));
     }
 
     [shader("fragment")]
     void fragMainAVBOITSplat(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         if (!avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
             return;
         const FSOutput shaded = shadeUnlit(vertIn, pushConstant);
-        avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo->cameraWorldPos.xyz), float3(1.0 - saturate(shaded.color.a)));
+        avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo.cameraWorldPos.xyz), float3(1.0 - saturate(shaded.color.a)));
     }
 
     FSOutput shadeUnlit(VSOutput vertIn, PushConstantMeshlets pushConstant)
     {
         FSOutput output;
 
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[vertIn.drawID];
 

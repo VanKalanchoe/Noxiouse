@@ -41,6 +41,7 @@
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload PTPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,

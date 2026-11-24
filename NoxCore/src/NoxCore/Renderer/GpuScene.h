@@ -303,6 +303,12 @@ namespace Nox
         uint64_t m_GeometryVertexBase = 0;
         uint64_t m_GeometryColorBase = 0;
         uint64_t m_GeometryIndexBase = 0;
+        // Byte offset shift for shader BufferRef handles (0 on Vulkan BDA, 32 on D3D12 where high 32 bits hold byte offset).
+        uint32_t m_BufferRefOffsetShift = 0;
+        uint64_t offsetBufferRef(uint64_t base, uint64_t byteOffset) const
+        {
+            return base ? (base + (byteOffset << m_BufferRefOffsetShift)) : 0ull;
+        }
 
         std::vector<nri::AccelerationStructureInstance> m_TlasInstances; // by instance slot, inactive: no BLAS reference
         uint32_t m_TlasInstanceCount = 0;

@@ -23,8 +23,8 @@ void taskMain(uniform PushConstantGrid pushConstant)
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float4 color;
-    float3 world;
+    float4 color : TEXCOORD0;
+    float3 world : TEXCOORD1;
 };
 
 // The plane's normal is world axis c; a and b are the other two (Godot: a = (c + 1) % 3, b = (c + 2) % 3). A grid point is (u, v) in them.
@@ -51,12 +51,13 @@ float3 axisColor(int axis)
 [numthreads(1, 1, 1)]
 void meshMain
 (
+    in payload GridPayLoad _payload,
     out indices uint2 lines[1], out vertices VSOutput vertices[2],
     uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantGrid pushConstant
 )
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
     // Godot's colors are (0.56, 0.5) and (0.38, 0.5) on its dark background; on a lit floor they vanish, so ours are brighter and stronger.
     const float4 primaryColor = float4(0.78, 0.78, 0.80, 0.75);
@@ -122,17 +123,18 @@ void meshMain
         }
     }
 
-    SetMeshOutputCounts(draw ? 2 : 0, draw ? 1 : 0);
-    if (!draw)
-        return;
-
-    vertices[0].pos = mul(ubo.nonJitteredProj, mul(ubo.view, float4(from, 1.0)));
-    vertices[0].color = color;
-    vertices[0].world = from;
-    vertices[1].pos = mul(ubo.nonJitteredProj, mul(ubo.view, float4(to, 1.0)));
-    vertices[1].color = color;
-    vertices[1].world = to;
-    lines[0] = uint2(0, 1);
+    const uint drawCount = WaveReadLaneFirst(draw ? 1u : 0u);
+    SetMeshOutputCounts(drawCount * 2u, drawCount);
+    if (drawCount > 0u)
+    {
+        vertices[0].pos = mul(ubo.nonJitteredProj, mul(ubo.view, float4(from, 1.0)));
+        vertices[0].color = color;
+        vertices[0].world = from;
+        vertices[1].pos = mul(ubo.nonJitteredProj, mul(ubo.view, float4(to, 1.0)));
+        vertices[1].color = color;
+        vertices[1].world = to;
+        lines[0] = uint2(0, 1);
+    }
 }
 
 struct FSOutput
@@ -144,7 +146,7 @@ struct FSOutput
 [shader("fragment")]
 FSOutput fragMain(VSOutput vertIn, uniform PushConstantGrid pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const float3 camera = ubo.cameraWorldPos.xyz;
     const int c = pushConstant.planeAxis;
 

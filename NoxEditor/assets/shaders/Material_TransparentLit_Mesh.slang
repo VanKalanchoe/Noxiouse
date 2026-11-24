@@ -42,14 +42,14 @@ import Math;
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float3 worldPos;
-    float3 normal;
-    float2 uv0;
-    float2 uv1;
-    float4 color; // vertex color (glTF COLOR_0)
-    nointerpolation uint drawID;
-    nointerpolation int entityID;
-    float4 tangent; // world tangent, w the bitangent handedness (Material_PBR_Mesh.slang)
+    float3 worldPos : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+    float2 uv0 : TEXCOORD2;
+    float2 uv1 : TEXCOORD3;
+    float4 color : TEXCOORD4; // vertex color (glTF COLOR_0)
+    nointerpolation uint drawID : TEXCOORD5;
+    nointerpolation int entityID : TEXCOORD6;
+    float4 tangent : TEXCOORD7; // world tangent, w the bitangent handedness (Material_PBR_Mesh.slang)
 };
 
 static const float PBR_WORKFLOW_METALLIC_ROUGHNESS = 0.0;
@@ -62,27 +62,27 @@ static const uint ShadowedLightCount = 4;
 // One shadow ray against the TLAS (ray query). Alpha-masked occluders are cut out like ShadowMask.slang does; blended and
 // transmissive ones let the light through, so glass neither throws a black shadow nor shadows itself. Every candidate is
 // decided here (glass and blended / masked surfaces are non-opaque instances in the TLAS; opaque ones the hardware accepts).
-// [noinline]: one copy of this secondary-ray code, called where it is needed, instead of being inlined into every caller -- the forward
+// NOX_NOINLINE: one copy of this secondary-ray code, called where it is needed, instead of being inlined into every caller -- the forward
 // shader inlined it several times over (refraction -> hit shading -> lights -> shadow rays): a single 276,000-line function, 4.7 MB of
 // SPIR-V for fragMain, 20 s in Slang and about 30 s in the GPU driver. With these six: 1.2 MB, 3 s (the main lighting stays inlined).
-[noinline]
-bool forwardShadowed(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
+NOX_NOINLINE
+bool forwardShadowed(UniformBufferObject ubo, float3 origin, float3 direction, float maxDistance)
 {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
-    ray.TMin = 0.005 * ubo->unitsPerMeter;
+    ray.TMin = 0.005 * ubo.unitsPerMeter;
     ray.TMax = maxDistance;
 
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure tlas = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
     query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, ray);
 
-    GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> rtInstances = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
     while (query.Proceed())
     {
-        GpuRayTracingInstance occluder = rtInstances[query.CandidateRayInstanceCustomIndex()];
+        GpuRayTracingInstance occluder = rtInstances[query.CandidateInstanceID()];
         if (occluder.alphaMode == 2 || ray_see_through(occluder.transmissionFactor, occluder.alphaMode))
             continue;
         if (occluder.alphaMode == 1 && RayHitAlphaTested(occluder))
@@ -107,8 +107,8 @@ static const uint TracedRefractionMaxInternalBounces = 6;
 
 // The closest hit along the ray: surfaces that let light through are passed (blended, transmissive) and alpha-masked ones cut out,
 // as the shadow rays do. With `self` >= 0 (a ray inside that glass instance) its own surface counts too: its far side.
-[noinline]
-bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance, int self, out uint instanceSlot,
+NOX_NOINLINE
+bool traceRefractionRay(UniformBufferObject ubo, float3 origin, float3 direction, float maxDistance, int self, out uint instanceSlot,
                         out uint primitive, out float2 barycentrics, out float hitT)
 {
     instanceSlot = 0;
@@ -122,15 +122,15 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
     ray.TMin = 0.0;
     ray.TMax = maxDistance;
 
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure tlas = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
 
-    GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> rtInstances = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     SamplerState samp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
     while (query.Proceed())
     {
-        const uint candidate = query.CandidateRayInstanceCustomIndex();
+        const uint candidate = query.CandidateInstanceID();
         // Inside a glass volume: its own surface (where the ray leaves it), or anything solid inside it (a lamp's filament in its
         // bulb) -- not other glass, as everywhere else.
         if (self >= 0 && candidate == uint(self))
@@ -152,7 +152,7 @@ bool traceRefractionRay(UniformBufferObject* ubo, float3 origin, float3 directio
     }
     if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
         return false;
-    instanceSlot = query.CommittedRayInstanceCustomIndex();
+    instanceSlot = query.CommittedInstanceID();
     primitive = query.CommittedPrimitiveIndex();
     barycentrics = query.CommittedTriangleBarycentrics();
     hitT = query.CommittedRayT();
@@ -165,7 +165,7 @@ float3 rayHitNormal(GpuRayTracingInstance surface, uint primitive, float2 baryce
     uint i0 = primitive * 3 + 0, i1 = primitive * 3 + 1, i2 = primitive * 3 + 2;
     if (surface.indexBufferAddress != 0)
     {
-        uint* indices = (uint*)surface.indexBufferAddress;
+        BufferRef<uint> indices = BufferRef<uint>(surface.indexBufferAddress);
         i0 = indices[i0];
         i1 = indices[i1];
         i2 = indices[i2];
@@ -180,96 +180,101 @@ float3 rayHitNormal(GpuRayTracingInstance surface, uint primitive, float2 baryce
 // mesh -- the glass's own far side, found with a second ray that only sees this instance (total internal reflection mirrors it
 // back instead); a mesh that is not closed falls back to a slab of the given thickness (out parallel to the way in). The ray
 // then goes on through the scene, past other see-through surfaces; a miss is the environment.
-[noinline]
-float3 tracedRefraction(UniformBufferObject* ubo, InstanceData instance, uint selfSlot, float3 position, float3 n, float3 v, float ior, float modelScale)
+NOX_NOINLINE
+float3 tracedRefraction(UniformBufferObject ubo, InstanceData instance, uint selfSlot, float3 position, float3 n, float3 v, float ior,
+                        float modelScale, bool isReflection = false)
 {
-    const float bias = 0.002 * ubo->unitsPerMeter;
-    const float maxDistance = 1000.0 * ubo->unitsPerMeter;
-    float3 origin = position - v * bias;
-    float3 direction = -v;
-    // What the volume absorbs on the way through it (KHR_materials_volume attenuation, its distance scaled with the model).
-    float3 absorbed = float3(1.0);
-
-    if (instance.thickness > 0.0)
+    const float bias = 0.002 * ubo.unitsPerMeter;
+    const float maxDistance = 1000.0 * ubo.unitsPerMeter;
+    const float3 entry = position - n * bias;
+    float3 inside = -v;
+    if (!isReflection && instance.thickness > 0.0)
     {
-        float3 inside = refract(-v, n, 1.0 / ior);
+        inside = refract(-v, n, 1.0 / ior);
         inside = dot(inside, inside) > 1e-6 ? normalize(inside) : -v;
-        const float3 entry = position - n * bias;
-
-        // Through the volume to where the ray leaves it. Total internal reflection at the far side mirrors the ray back inside, and it
-        // goes on to the next side, as the path tracer follows it: in DispersionTest's prisms seen from the front 22% of the rays
-        // (IOR 1.5) to 93% (IOR 2.42) reflect at the first side they reach, up to 10% more than once. One reflection that then went
-        // on as if outside passed the prism's other sides unseen (glass is skipped) and showed what lay along the mirrored line.
-        GpuRayTracingInstance* rtInstances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
-        float3 position = entry;
-        float3 travel = inside;
-        float insideDistance = 0.0;
-        bool left = false;
-        for (uint bounce = 0; bounce < TracedRefractionMaxInternalBounces && !left; ++bounce)
-        {
-            uint slot, primitive;
-            float2 barycentrics;
-            float hitT;
-            if (!traceRefractionRay(ubo, position, travel, maxDistance, int(selfSlot), slot, primitive, barycentrics, hitT))
-            {
-                if (bounce > 0)
-                    break; // a mesh that is not closed: out where the ray is
-                // No far side at all (an open mesh): a slab of the given thickness.
-                const float slab = instance.thickness * modelScale / max(dot(inside, -n), 0.1);
-                position = entry + inside * slab - v * bias;
-                insideDistance = slab;
-                travel = -v;
-                left = true;
-                break;
-            }
-            insideDistance += hitT;
-            // Something solid inside the volume before its far side (a filament in a bulb): that is what is seen, through the
-            // front surface and what the volume absorbs on the way. The ray used to look for the glass's own far side only and went
-            // through it (the hybrid's dark filament the path tracer and the raster's screen-space refraction both show lit).
-            if (slot != selfSlot)
-                return shadeRayHit(ubo, slot, primitive, barycentrics, position, travel, hitT) *
-                       volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, insideDistance);
-            float3 outward = rayHitNormal(rtInstances[slot], primitive, barycentrics);
-            if (dot(outward, travel) < 0.0)
-                outward = -outward;
-            const float3 exitPoint = position + travel * hitT;
-            const float3 outside = refract(travel, -outward, ior);
-            if (dot(outside, outside) > 1e-6)
-            {
-                travel = normalize(outside);
-                position = exitPoint + travel * bias;
-                left = true;
-            }
-            else
-            {
-                travel = reflect(travel, outward); // total internal reflection: back into the volume
-                position = exitPoint + travel * bias;
-            }
-        }
-        // Still inside after the last reflection followed: it goes on from there (rare: a few per cent of the rays in a prism).
-        direction = travel;
-        origin = position;
-        absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, insideDistance);
     }
 
-    uint slot, primitive;
-    float2 barycentrics;
-    float hitT;
-    if (traceRefractionRay(ubo, origin, direction, maxDistance, -1, slot, primitive, barycentrics, hitT))
-        return shadeRayHit(ubo, slot, primitive, barycentrics, origin, direction, hitT) * absorbed;
+    bool inVolume = !isReflection && instance.thickness > 0.0;
+    float3 currPos = isReflection ? (position + n * bias) : (inVolume ? entry : (position - v * bias));
+    float3 travel = isReflection ? normalize(reflect(-v, n)) : inside;
+    float insideDistance = 0.0;
 
-    if (ubo->prefilteredMapIndex == 0xFFFFFFFF)
+    uint slot = 0, primitive = 0;
+    float2 barycentrics = float2(0.0);
+    float hitT = 0.0;
+    bool hitScene = false;
+    BufferRef<GpuRayTracingInstance> rtInstances = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
+
+    // Through the volume (when inVolume) and then one final trace through the scene outside it (inVolume == false), with a single
+    // traceRefractionRay call site so inlining on D3D12 emits only one copy of the ray-query loop.
+    [loop]
+    for (uint bounce = 0; bounce <= TracedRefractionMaxInternalBounces; ++bounce)
+    {
+        const bool hit = traceRefractionRay(ubo, currPos, travel, maxDistance, inVolume ? int(selfSlot) : -1, slot, primitive, barycentrics, hitT);
+        if (!inVolume)
+        {
+            hitScene = hit;
+            break;
+        }
+        if (!hit)
+        {
+            if (bounce == 0)
+            {
+                // No far side at all (an open mesh): a slab of the given thickness.
+                const float slab = instance.thickness * modelScale / max(dot(inside, -n), 0.1);
+                currPos = entry + inside * slab - v * bias;
+                insideDistance = slab;
+                travel = -v;
+            }
+            inVolume = false;
+            continue;
+        }
+        insideDistance += hitT;
+        // Something solid inside the volume before its far side (a filament in a bulb): that is what is seen, through the
+        // front surface and what the volume absorbs on the way.
+        if (slot != selfSlot)
+        {
+            hitScene = true;
+            break;
+        }
+        float3 outward = rayHitNormal(rtInstances[slot], primitive, barycentrics);
+        if (dot(outward, travel) < 0.0)
+            outward = -outward;
+        const float3 exitPoint = currPos + travel * hitT;
+        const float3 outside = refract(travel, -outward, ior);
+        if (dot(outside, outside) > 1e-6)
+        {
+            travel = normalize(outside);
+            currPos = exitPoint + travel * bias;
+            inVolume = false;
+        }
+        else
+        {
+            travel = reflect(travel, outward); // total internal reflection: back into the volume
+            currPos = exitPoint + travel * bias;
+            if (bounce + 1 == TracedRefractionMaxInternalBounces)
+                inVolume = false; // Still inside after the last reflection followed: it goes on from there
+        }
+    }
+
+    const float3 absorbed = (!isReflection && instance.thickness > 0.0)
+                                ? volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale, insideDistance)
+                                : float3(1.0);
+    if (hitScene)
+        return shadeRayHit(ubo, slot, primitive, barycentrics, currPos, travel, hitT) * absorbed;
+
+    if (ubo.prefilteredMapIndex == 0xFFFFFFFF)
         return float3(0.0);
-    TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+    TextureCube environment = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
     SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-    return environment.SampleLevel(samplerPrefiltered, direction, 0.0).rgb * ubo->scaleIBLAmbient * absorbed;
+    return environment.SampleLevel(samplerPrefiltered, travel, 0.0).rgb * ubo.scaleIBLAmbient * absorbed;
 }
 
-float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
+float3 getNormal(UniformBufferObject ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
     // The G-buffer's decoding and tangent frame (normal_from_map): the per-pixel derivative frame and a blue channel taken as stored
     // flattened two-channel maps (the Bistro's headlight and spotlight lenses) into clear glass.
-    return normal_from_map(SampleMaterialTextureBias(ubo, instance.normalTextureIndex, samplerState, instance_texture_uv(instance, instance.normalTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).xyz,
+    return normal_from_map(SampleMaterialTextureBias(ubo, instance.normalTextureIndex, samplerState, instance_texture_uv(instance, instance.normalTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).xyz,
                            vertIn.normal, vertIn.tangent, instance.normalScale);
 }
 
@@ -304,13 +309,13 @@ struct FSOutputOIT
 // `transmittance`: what the surface lets through of what is behind it, per color channel (OITShared.slang: the OIT targets, AVBOIT's
 // extinction) -- its uncovered share plus, for glass, the transmission tinted by its base color, its volume's absorption and less its
 // Fresnel reflection, as the refraction path tints what it shows.
-FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance);
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance, bool transmittanceOnly = false);
 
 [shader("fragment")]
 FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
     float3 transmittance;
-    return shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
+    return shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance, false);
 }
 
 // The other entry points are not in the Custom Lit build (its pipeline uses fragMain only): each one's code generation is time a
@@ -321,8 +326,8 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
     float3 transmittance;
-    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    const FSOutput shaded = shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance, false);
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const OITOutput oit = oit_output(ubo, shaded.color.rgb, transmittance, vertIn.worldPos, vertIn.pos.xy);
     FSOutputOIT output;
     output.accum = oit.accum;
@@ -336,31 +341,31 @@ FSOutputOIT fragMainOIT(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, unif
 [shader("fragment")]
 void fragMainAVBOITOccupancy(VSOutput vertIn, uniform PushConstantMeshlets pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     if (avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
-        avboit_mark_occupied(ubo, length(vertIn.worldPos - ubo->cameraWorldPos.xyz));
+        avboit_mark_occupied(ubo, length(vertIn.worldPos - ubo.cameraWorldPos.xyz));
 }
 
 [shader("fragment")]
 void fragMainAVBOITSplat(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     if (!avboit_in_front_of_scene(ubo, vertIn.pos.xy, vertIn.pos.z))
         return;
-    // The full shading for its transmittance (alpha, transmission textures, Fresnel): at 1/64 of the pixels, a small share of the
+    // The surface's transmittance (alpha, transmission textures, Fresnel): at 1/64 of the pixels, a small share of the
     // transparent pass.
     float3 transmittance;
-    shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance);
-    avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo->cameraWorldPos.xyz), transmittance);
+    shadeTransparent(vertIn, isFrontFace, pushConstant, transmittance, true);
+    avboit_splat(ubo, uint2(vertIn.pos.xy), length(vertIn.worldPos - ubo.cameraWorldPos.xyz), transmittance);
 }
 #endif
 
-FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance)
+FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlets pushConstant, out float3 transmittance, bool transmittanceOnly)
 {
     FSOutput output;
     transmittance = float3(1.0);
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[vertIn.drawID];
 
@@ -379,27 +384,27 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         graphIn.uv1 = vertIn.uv1;
         graphIn.uv1Dx = ddx(vertIn.uv1);
         graphIn.uv1Dy = ddy(vertIn.uv1);
-        graphIn.position = vertIn.worldPos + ubo->renderOrigin;
+        graphIn.position = vertIn.worldPos + ubo.renderOrigin;
         graphIn.positionDx = ddx(vertIn.worldPos);
         graphIn.positionDy = ddy(vertIn.worldPos);
         const float3 vertexNormal = normalize(vertIn.normal);
         graphIn.normal = instance.doubleSided != 0 && !isFrontFace ? -vertexNormal : vertexNormal;
         graphIn.vertexColor = vertIn.color;
-        graphIn.view = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);
-        const float4 graphClip = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0)));
+        graphIn.view = normalize(ubo.cameraWorldPos.xyz - vertIn.worldPos);
+        const float4 graphClip = mul(ubo.proj, mul(ubo.view, float4(vertIn.worldPos, 1.0)));
         graphIn.screenUV = graphClip.w > 1e-6 ? float2(graphClip.x / graphClip.w * 0.5 + 0.5, 0.5 - graphClip.y / graphClip.w * 0.5) : float2(0.5);
         graphIn.screenUVDx = ddx(graphIn.screenUV);
         graphIn.screenUVDy = ddy(graphIn.screenUV);
-        graphIn.time = ubo->timeSeconds;
-        graphIn.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+        graphIn.time = ubo.timeSeconds;
+        graphIn.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
         graphIn.material = instances.material(vertIn.drawID);
-        graphIn.mipFeedback = ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo->mipFeedbackFrame);
+        graphIn.mipFeedback = ubo.mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo.mipFeedbackFrame);
         graphIn.ubo = ubo;
     }
 #endif
 
     // Texture streaming: transparent surfaces never reach the G-buffer, so they report here (hardware derivatives).
-    if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo->mipFeedbackFrame))
+    if (ubo.mipFeedbackReference != 0 && isMipFeedbackPixel(int2(vertIn.pos.xy), ubo.mipFeedbackFrame))
     {
         const float2 ddxUV0 = ddx(vertIn.uv0), ddyUV0 = ddy(vertIn.uv0);
         const float2 ddxUV1 = ddx(vertIn.uv1), ddyUV1 = ddy(vertIn.uv1);
@@ -434,7 +439,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float4 maskBaseColor = instance.baseColorFactor;
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            maskBaseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias) * instance.baseColorFactor;
+            maskBaseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias) * instance.baseColorFactor;
         }
         if (maskBaseColor.a * vertIn.color.a < instance.alphaMaskCutoff)
         {
@@ -448,7 +453,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         metallic = instance.metallicFactor;
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
-            float4 mrSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias);
+            float4 mrSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias);
             perceptualRoughness *= mrSample.g;
             metallic *= mrSample.b;
         }
@@ -457,7 +462,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
         if (instance.baseColorTextureIndex != 0xFFFFFFFF)
         {
-            baseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias) * instance.baseColorFactor;
+            baseColor = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias) * instance.baseColorFactor;
         }
         else
         {
@@ -479,7 +484,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures): RGB (specular color) is hardware sRGB-decoded
             // on sample, alpha (glossiness) is always left linear by that format -- decoding either manually here on top
             // would be a double decode.
-            float4 specGlossSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias);
+            float4 specGlossSample = SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias);
             glossiness *= specGlossSample.a;
             specular *= specGlossSample.rgb;
         }
@@ -491,7 +496,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         {
             // Imported as SRGBA8 (EditorAssetManager::ImportMeshTextures: importTexture(BaseColorTexturePath, true)),
             // already hardware sRGB-decoded on sample -- decoding it again here was a double decode.
-            diffuseSample = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias) * instance.diffuseFactor;
+            diffuseSample = SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias) * instance.diffuseFactor;
         }
 
         float maxSpecular = max(max(specular.r, specular.g), specular.b);
@@ -532,7 +537,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float transmission = instance.transmissionFactor;
     if (instance.transmissionTextureIndex != 0xFFFFFFFF)
     {
-        transmission *= SampleMaterialTextureBias(ubo, instance.transmissionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.transmissionTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).r;
+        transmission *= SampleMaterialTextureBias(ubo, instance.transmissionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.transmissionTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).r;
     }
     // Opaque and masked surfaces drawn with this shader (the editor's extra views have no G-buffer, Renderer::addExtraViewPasses):
     // nothing shows through, whatever the base color's alpha or the transmission says.
@@ -554,10 +559,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // The lobes past the core model (MaterialLobes.slang), as the G-buffer evaluates them for opaque surfaces.
     GBufferLobes lobes = gbuffer_default_lobes();
     float3 anisotropicT = float3(0.0);
-    GpuMaterial* gpuMaterial = instances.material(vertIn.drawID);
+    GpuMaterial gpuMaterial = instances.material(vertIn.drawID);
     if (gpuMaterial.lobes != 0u && instance.shadingModel == ShadingModelDefaultLit && instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS)
     {
-        const float lodScale = exp2(ubo->textureLodBias); // as SampleMaterialTextureBias reads the base textures
+        const float lodScale = exp2(ubo.textureLodBias); // as SampleMaterialTextureBias reads the base textures
         MaterialSampleCoords coords;
         coords.material = gpuMaterial;
         coords.uv[0] = vertIn.uv0; coords.ddx[0] = ddx(vertIn.uv0) * lodScale; coords.ddy[0] = ddy(vertIn.uv0) * lodScale;
@@ -590,7 +595,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         n = -n;
     }
-    float3 v = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);
+    float3 v = normalize(ubo.cameraWorldPos.xyz - vertIn.worldPos);
     // Glass has no back: seen through from either side, its normal faces the viewer (as the path tracer turns a hit's normal to
     // the ray). A pane modeled facing away -- the Bistro's picture cover glass faces the picture -- was shaded as seen edge-on:
     // Fresnel 1, a perfect mirror of the room, the picture behind it gone.
@@ -603,7 +608,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
     if (lobes.coat > 0.0)
         lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, v); // a coat normal map tipped away from the camera
-    LobeShading lobeShading;
+    LobeShading lobeShading = (LobeShading)0;
     if (hasLobes)
         lobeShading = lobe_prepare(ubo, lobes, anisotropicT, n, v, NdotV, baseColor.rgb, metallic, alphaRoughness);
 
@@ -617,12 +622,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float3 customEmissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
             customEmissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle,
-                                                        instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+                                                        instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).rgb;
 #ifdef NOX_MATERIAL_GRAPH
         if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
             customEmissive = max(graphOut.emissive, float3(0.0));
 #endif
-        const float4 clip = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0)));
+        const float4 clip = mul(ubo.proj, mul(ubo.view, float4(vertIn.worldPos, 1.0)));
         const float2 screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
         customSurface = custom_lit_surface(ubo, gpuMaterial, vertIn.worldPos, n, v, baseColor.rgb, metallic, perceptualRoughness, 1.0,
                                            customEmissive, vertIn.uv0, customUVFootprint, screenUV);
@@ -647,11 +652,39 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         return output;
     }
 
+    if (transmittanceOnly)
+    {
+        output.color = float4(0.0, 0.0, 0.0, coverage * diffuseAlpha);
+        output.entityID = vertIn.entityID;
+        if (refraction)
+            transmittance = float3(1.0 - coverage);
+        else if (transmission > 0.0)
+        {
+            float3 transR0 = specularEnvironmentR0;
+            if (hasLobes && lobeShading.lobes.iridescence > 0.0)
+                transR0 = lerp(transR0, schlick_to_f0(lobeShading.iridescenceFresnel, NdotV), lobeShading.lobes.iridescence);
+            float3 lobeBelow = float3(1.0);
+            if (hasLobes && (lobeShading.lobes.coat > 0.0 || (lobes.flags & MaterialLobeSheen) != 0u))
+                lobeBelow = lobe_ambient(ubo, lobeShading, float3(1.0), float3(0.0), float3(0.0), NdotV);
+            const float4x4 model = instance.modelMatrix;
+            const float modelScale = (length(float3(model[0][0], model[1][0], model[2][0])) + length(float3(model[0][1], model[1][1], model[2][1])) +
+                                      length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
+            const float3 absorbed = volume_transmittance(instance.attenuationColor, instance.attenuationDistance * modelScale,
+                                                         instance.thickness * modelScale);
+            const float3 fresnel = transR0 + (1.0 - transR0) * pow(1.0 - NdotV, 5.0);
+            const float3 throughGlass = saturate(baseColor.rgb * (transmission * (1.0 - metallic)) * (1.0 - fresnel) * absorbed * lobeBelow);
+            transmittance = (1.0 - coverage) + coverage * throughGlass;
+        }
+        else
+            transmittance = float3(1.0 - output.color.a);
+        return output;
+    }
+
     // Direct analytic lights, the same evaluateDirectLight the deferred opaque path uses. The strongest ShadowedLightCount of them
     // get a shadow ray once all are summed (see file header).
     float3 directLighting = float3(0.0);
-    LightData* lights = (LightData*)ubo->lightDataReference;
-    const bool traceShadows = ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0;
+    BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
+    const bool traceShadows = ubo.enableRTShadows != 0 && ubo.tlasDeviceAddress != 0;
     float3 shadowedContribution[ShadowedLightCount];
     float3 shadowedDirection[ShadowedLightCount];
     float shadowedDistance[ShadowedLightCount];
@@ -666,11 +699,11 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 
     // The sun's shadow maps (Settings > Sun Shadows: Shadow Maps) instead of its shadow ray: looked up here, per pixel, with the
     // noise the resolve uses (ShadowMapResolve.slang) for the kernel's rotation.
-    GpuShadowCascades* sunCascades = (GpuShadowCascades*)ubo->sunShadowCascadesReference;
-    const float2 noisePixel = floor(vertIn.pos.xy) + float(ubo->frameIndex % 64u) * float2(5.588238, 3.45367);
+    const bool hasSunCascades = ubo.sunShadowCascadesReference != 0;
+    const float2 noisePixel = floor(vertIn.pos.xy) + float(ubo.frameIndex % 64u) * float2(5.588238, 3.45367);
     const float shadowNoise = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
 
-    for (uint i = 0; i < ubo->lightCount; i++)
+    for (uint i = 0; i < ubo.lightCount; i++)
     {
         LightData light = lights[i];
         uint lightType = (uint)light.position.w;
@@ -678,7 +711,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         float3 l;
         float attenuation = 1.0;
         bool shadowMapped = false;
-        float lightDistance = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
+        float lightDistance = 100000.0 * ubo.unitsPerMeter; // a directional light: as far as a shadow ray needs to go
         float3 contribution;
 
         // (A Custom Lit surface takes a rect / disc light as a point light at its centre: the punctual path below.)
@@ -693,7 +726,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             if (!any(contribution > 0.0))
                 continue;
             const float2 u = frac(float2(52.9829189 * frac(0.06711056 * vertIn.pos.x + 0.00583715 * vertIn.pos.y),
-                                         0.7548776662 * float(ubo->mipFeedbackFrame % 64u) + 0.5698402910 * (vertIn.pos.x + vertIn.pos.y)));
+                                         0.7548776662 * float(ubo.mipFeedbackFrame % 64u) + 0.5698402910 * (vertIn.pos.x + vertIn.pos.y)));
             const LightPointSample sample = sample_light_point(light, vertIn.worldPos, u);
             l = sample.direction;
             lightDistance = sample.distance;
@@ -713,9 +746,9 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             {
                 l = normalize(light.direction.xyz);
                 shadow = cloud_shadow(ubo, vertIn.worldPos, i, l);
-                if (i == ubo->shadowMaskLightIndex && sunCascades != nullptr && dot(n, l) > 0.0)
+                if (i == ubo.shadowMaskLightIndex && hasSunCascades && dot(n, l) > 0.0)
                 {
-                    shadow *= sun_shadow_map(ubo, sunCascades, vertIn.worldPos, n, shadowNoise);
+                    shadow *= sun_shadow_map(ubo, BufferRef<GpuShadowCascades>(ubo.sunShadowCascadesReference)[0], vertIn.worldPos, n, shadowNoise);
                     shadowMapped = true;
                 }
             }
@@ -830,11 +863,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // light that was summed: the loop skips the others).
     if (traceShadows)
     {
-        float3 shadowOrigin = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo->unitsPerMeter);
+        float3 shadowOrigin = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo.unitsPerMeter);
+        [loop]
         for (uint slot = 0; slot < ShadowedLightCount; ++slot)
         {
             if (shadowedWeight[slot] > 0.0 &&
-                forwardShadowed(ubo, shadowOrigin, shadowedDirection[slot], max(shadowedDistance[slot] - 0.01 * ubo->unitsPerMeter, 0.0)))
+                forwardShadowed(ubo, shadowOrigin, shadowedDirection[slot], max(shadowedDistance[slot] - 0.01 * ubo.unitsPerMeter, 0.0)))
                 directLighting -= shadowedContribution[slot];
         }
         directLighting = max(directLighting, float3(0.0));
@@ -879,7 +913,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (instance.occlusionTextureIndex != 0xFFFFFFFF)
     {
         ao = 1.0 + instance.occlusionStrength *
-                   (SampleMaterialTextureBias(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.occlusionTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).r - 1.0);
+                   (SampleMaterialTextureBias(ubo, instance.occlusionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.occlusionTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).r - 1.0);
     }
 #ifdef NOX_MATERIAL_GRAPH
     if ((graphOutputs & MaterialGraphOutputOcclusion) != 0u)
@@ -891,10 +925,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     if (pushConstant.ssaoTextureIndex != 0xFFFFFFFF && transmission <= 0.0)
     {
         float3 unusedIrradiance;
-        const bool onSurfaceBehind = ubo->screenGIDistanceTextureIndex == 0xFFFFFFFF || sample_screen_gi(ubo, vertIn.worldPos, unusedIrradiance);
+        const bool onSurfaceBehind = ubo.screenGIDistanceTextureIndex == 0xFFFFFFFF || sample_screen_gi(ubo, vertIn.worldPos, unusedIrradiance);
         if (onSurfaceBehind)
         {
-            Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
+            Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
             ao *= ssaoTex.Load(int3(int2(vertIn.pos.xy), 0)).r;
         }
     }
@@ -905,7 +939,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float volumeSkyVisibility = 1.0;
     float3 volumeOccludedRadiance = float3(0.0);
     bool volumeReflection = false;
-    if (ubo->screenGITextureIndex == 0xFFFFFFFF && ubo->enableDDGI == 0)
+    if (ubo.screenGITextureIndex == 0xFFFFFFFF && ubo.enableDDGI == 0)
         volumeReflection = irradiance_volume_reflection(ubo, vertIn.worldPos, n, environmentReflection, volumeSkyVisibility, volumeOccludedRadiance);
     IBLResult ibl = getIBLContributionOccluded(ubo, iblInputs, n, environmentReflection, ao, vertIn.worldPos, volumeSkyVisibility,
                                                volumeOccludedRadiance); // the reflection probes too
@@ -916,7 +950,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // GI, glass the DDGI cascades), and the sky's reflection only as far as the sky reaches, as the deferred lighting does.
     float3 sceneIrradiance;
     float sceneSpecularOcclusion = 1.0;
-    if ((ubo->screenGITextureIndex != 0xFFFFFFFF || ubo->enableDDGI != 0) && sample_scene_gi(ubo, vertIn.worldPos, n, normalize(vertIn.normal), v, sceneIrradiance))
+    if ((ubo.screenGITextureIndex != 0xFFFFFFFF || ubo.enableDDGI != 0) && sample_scene_gi(ubo, vertIn.worldPos, n, normalize(vertIn.normal), v, sceneIrradiance))
     {
         ambientDiffuse = sceneIrradiance * diffuseColor;
         sceneSpecularOcclusion = scene_gi_specular_occlusion(ubo, sceneIrradiance, n);
@@ -944,15 +978,15 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
     // Screen-space GI: what its rays found for the opaque surface right behind -- a decal's wall (the same point along the pixel's
     // ray: 1 %, at least 3 cm), as the deferred lighting applies it there; glass and what stands in front keeps the above.
-    if (ubo->ssgiTextureIndex != 0xFFFFFFFF && ubo->ssgiDepthTextureIndex != 0xFFFFFFFF && transmission <= 0.0)
+    if (ubo.ssgiTextureIndex != 0xFFFFFFFF && ubo.ssgiDepthTextureIndex != 0xFFFFFFFF && transmission <= 0.0)
     {
         const int2 pixel = int2(vertIn.pos.xy);
-        Texture2D<float2> ssgiDepthTex = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ssgiDepthTextureIndex, 0));
+        Texture2D<float2> ssgiDepthTex = Texture2D<float2>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ssgiDepthTextureIndex, 0));
         const float surfaceViewZ = ssgiDepthTex.Load(int3(pixel, 0)).x;
-        const float viewZ = mul(ubo->proj, mul(ubo->view, float4(vertIn.worldPos, 1.0))).w;
-        if (surfaceViewZ > 0.0 && abs(viewZ - surfaceViewZ) <= max(0.01 * viewZ, 0.03 * ubo->unitsPerMeter))
+        const float viewZ = mul(ubo.proj, mul(ubo.view, float4(vertIn.worldPos, 1.0))).w;
+        if (surfaceViewZ > 0.0 && abs(viewZ - surfaceViewZ) <= max(0.01 * viewZ, 0.03 * ubo.unitsPerMeter))
         {
-            Texture2D ssgiTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ssgiTextureIndex, 0));
+            Texture2D ssgiTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ssgiTextureIndex, 0));
             const float4 ssgi = ssgiTex.Load(int3(pixel, 0));
             ambientDiffuse = ssgi.rgb * diffuseColor + saturate(1.0 - ssgi.a) * ambientDiffuse;
             const float skyOcclusion = 1.0 - 0.85 * saturate(ssgi.a);
@@ -962,77 +996,104 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     }
 
     // Smooth glass with ray traced glass on: its reflection traced like its refraction (the room around a jar on a counter, not
-    // the sky the environment map holds), fading into the occluded environment reflection with roughness.
+    // the sky the environment map holds), fading into the occluded environment reflection with roughness. Evaluated in one loop
+    // together with traced refraction so D3D12 inlines only one copy of tracedRefraction / shadeRayHit per entry point.
     float tracedReflectionWeight = 0.0;
-    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && transmission > 0.0)
+    if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo.tlasDeviceAddress != 0 && transmission > 0.0)
         tracedReflectionWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
-    if (tracedReflectionWeight > 0.0 && ubo->brdfLutIndex != 0xFFFFFFFF)
+    float tracedWeight = 0.0;
+    if (refraction)
     {
-        const float3 reflected = normalize(reflect(-v, n));
-        const float3 origin = vertIn.worldPos + n * (0.002 * ubo->unitsPerMeter);
-        uint slot, primitive;
-        float2 barycentrics;
-        float hitT;
-        float3 radiance;
-        if (traceRefractionRay(ubo, origin, reflected, 1000.0 * ubo->unitsPerMeter, -1, slot, primitive, barycentrics, hitT))
-            radiance = shadeRayHit(ubo, slot, primitive, barycentrics, origin, reflected, hitT);
-        else
+        if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo.tlasDeviceAddress != 0 && instance.thickness > 0.0)
+            tracedWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
+        if (stackedGlass && (pushConstant.meshletCulling & MESHLET_GLASS_ADD) != 0)
+            tracedWeight = 1.0;
+    }
+    const bool doTracedReflection = tracedReflectionWeight > 0.0 && ubo.brdfLutIndex != 0xFFFFFFFF;
+    const bool doTracedRefraction = refraction && !(stackedGlass && (pushConstant.meshletCulling & MESHLET_GLASS_ADD) != 0) && tracedWeight > 0.0;
+    float3 tracedBehind = float3(0.0);
+    if (doTracedReflection || doTracedRefraction)
+    {
+        const float ior = max(instance.ior, 1.0);
+        const float4x4 model = instance.modelMatrix;
+        const float modelScale = (length(float3(model[0][0], model[1][0], model[2][0])) + length(float3(model[0][1], model[1][1], model[2][1])) +
+                                  length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
+        const bool dispersive = (gpuMaterial.lobes & MaterialLobeDispersion) != 0u;
+        const float3 iors = dispersive ? dispersion_iors(ior, gpuMaterial.dispersion) : float3(ior);
+        const uint firstRay = doTracedReflection ? 0u : 1u;
+        const uint endRay = doTracedRefraction ? (dispersive ? 4u : 2u) : 1u;
+        [loop]
+        for (uint rayIndex = firstRay; rayIndex < endRay; ++rayIndex)
         {
-            TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
-            radiance = environment.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0)), reflected, 0.0).rgb *
-                       ubo->scaleIBLAmbient;
+            const bool isRefl = (rayIndex == 0u);
+            const uint channel = rayIndex - 1u;
+            const float3 rayRadiance = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v,
+                                                        isRefl ? 1.0 : iors[channel], modelScale, isRefl);
+            if (isRefl)
+            {
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
+                const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)),
+                                                        float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
+                ambientSpecular = lerp(ambientSpecular, rayRadiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y),
+                                       tracedReflectionWeight);
+            }
+            else if (!dispersive)
+            {
+                tracedBehind = rayRadiance * tracedWeight;
+            }
+            else
+            {
+                tracedBehind[channel] = rayRadiance[channel] * tracedWeight;
+            }
         }
-        Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
-        const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
-        ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y), tracedReflectionWeight);
     }
 
     // Raster (no traced reflection): screen-space reflection, as the opaque surfaces get from SSR.slang -- the mirror ray marched
     // through this frame's opaque depth (SSRCommon.slang), what it hits read from the refraction source (the opaque scene lit this
     // frame, its blur mips for the roughness), over the environment / probes / volume above where it finds something on screen. The
     // glass showed only those (the sky, indoors) where the opaque surfaces around it reflected the room.
-    if (tracedReflectionWeight < 1.0 && ubo->transparentSSRDepthTextureIndex != 0xFFFFFFFF && pushConstant.refractionTextureIndex != 0xFFFFFFFF &&
-        ubo->transparentSSRNormalTextureIndex != 0xFFFFFFFF && ubo->transparentSSRHiZTextureIndex != 0xFFFFFFFF && perceptualRoughness < ubo->ssrMaxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF)
+    if (tracedReflectionWeight < 1.0 && ubo.transparentSSRDepthTextureIndex != 0xFFFFFFFF && pushConstant.refractionTextureIndex != 0xFFFFFFFF &&
+        ubo.transparentSSRNormalTextureIndex != 0xFFFFFFFF && ubo.transparentSSRHiZTextureIndex != 0xFFFFFFFF && perceptualRoughness < ubo.ssrMaxRoughness && ubo.brdfLutIndex != 0xFFFFFFFF)
     {
-        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRDepthTextureIndex, 0));
+        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.transparentSSRDepthTextureIndex, 0));
         uint depthWidth, depthHeight;
         depthTex.GetDimensions(depthWidth, depthHeight);
         const float2 viewportSize = float2(float(depthWidth), float(depthHeight));
         const float3 reflected = normalize(reflect(-v, n));
-        const float3 start = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo->unitsPerMeter);
-        Texture2D<float> hizTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRHiZTextureIndex, 0));
+        const float3 start = vertIn.worldPos + n * raster_surface_bias(ubo, vertIn.worldPos, 0.01 * ubo.unitsPerMeter);
+        Texture2D<float> hizTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.transparentSSRHiZTextureIndex, 0));
         float2 hitUV;
         float hitDepth;
         float rayConfidence;
-        if (ssr_march(ubo, depthTex, hizTex, ubo->transparentSSRHiZLevels, start, reflected, ubo->ssrMaxDistance, ubo->ssrThickness,
-                      ubo->ssrMaxSteps, viewportSize, hitUV, hitDepth, rayConfidence))
+        if (ssr_march(ubo, depthTex, hizTex, ubo.transparentSSRHiZLevels, start, reflected, ubo.ssrMaxDistance, ubo.ssrThickness,
+                      ubo.ssrMaxSteps, viewportSize, hitUV, hitDepth, rayConfidence))
         {
             const int2 hitPixel = int2(hitUV * viewportSize);
-            Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->transparentSSRNormalTextureIndex, 0));
+            Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.transparentSSRNormalTextureIndex, 0));
             const float3 hitNormalRaw = normalTex.Load(int3(hitPixel, 0)).rgb;
             // The back of a surface (its front faces along the ray) is not what the reflection sees.
             if (dot(hitNormalRaw, reflected) <= 0.1 * length(hitNormalRaw))
             {
-                const float4 hitWorldH = mul(ubo->invViewProj, float4(hitUV.x * 2.0 - 1.0, 1.0 - hitUV.y * 2.0, hitDepth, 1.0));
+                const float4 hitWorldH = mul(ubo.invViewProj, float4(hitUV.x * 2.0 - 1.0, 1.0 - hitUV.y * 2.0, hitDepth, 1.0));
                 const float3 hitWorld = hitWorldH.xyz / hitWorldH.w;
-                Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
+                Texture2D refractionSource = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
                 uint sourceWidth, sourceHeight, sourceLevels;
                 refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
                 // The roughness' cone where the ray lands: its blur mip (SSR.slang's).
-                const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+                const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z;
                 const float hitDistance = length(hitWorld - start);
-                const float hitZ = max(mul(ubo->view, float4(hitWorld, 1.0)).z, nearPlane);
-                const float focal = mul(ubo->proj, float4(0.0, 1.0, 0.0, 0.0)).y;
+                const float hitZ = max(mul(ubo.view, float4(hitWorld, 1.0)).z, nearPlane);
+                const float focal = mul(ubo.proj, float4(0.0, 1.0, 0.0, 0.0)).y;
                 const float coneDiameter = 2.0 * hitDistance * perceptualRoughness * perceptualRoughness;
                 const float conePixels = coneDiameter * focal * float(sourceHeight) / (2.0 * hitZ);
                 const float mip = clamp(log2(max(conePixels, 1.0)), 0.0, float(max(sourceLevels, 1u) - 1u));
                 SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
                 const float3 radiance = max(refractionSource.SampleLevel(linearClamp, hitUV, mip).rgb, float3(0.0));
 
-                const float roughnessFade = saturate((ubo->ssrMaxRoughness - perceptualRoughness) / 0.15);
-                const float distanceFade = 1.0 - smoothstep(0.8, 1.0, hitDistance / max(ubo->ssrMaxDistance, 1e-4));
+                const float roughnessFade = saturate((ubo.ssrMaxRoughness - perceptualRoughness) / 0.15);
+                const float distanceFade = 1.0 - smoothstep(0.8, 1.0, hitDistance / max(ubo.ssrMaxDistance, 1e-4));
                 const float confidence = rayConfidence * roughnessFade * distanceFade * ssr_edge_fade(hitUV) * (1.0 - tracedReflectionWeight);
-                Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
                 const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
                 ambientSpecular = lerp(ambientSpecular, radiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y), confidence);
             }
@@ -1067,7 +1128,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float3 emissive = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
     {
-        emissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+        emissive *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).rgb;
     }
 #ifdef NOX_MATERIAL_GRAPH
     if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
@@ -1093,36 +1154,14 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         const float modelScale = (length(float3(model[0][0], model[1][0], model[2][0])) + length(float3(model[0][1], model[1][1], model[2][1])) +
                                   length(float3(model[0][2], model[1][2], model[2][2]))) / 3.0;
 
-        // Smooth glass on the high rung: traced (H3); rougher glass, or the lower rungs: the color pyramid (H3b), both in between.
-        // Thin-walled glass (no volume) does not bend the view ray: what it shows is the lit scene right behind it, which the
-        // color pyramid already holds with everything the deferred lighting gives it (GI, reflections, shadows) -- tracing it
-        // again would only shade it more simply.
-        float tracedWeight = 0.0;
-        if ((pushConstant.meshletCulling & MESHLET_RT_REFRACTION) != 0 && ubo->tlasDeviceAddress != 0 && instance.thickness > 0.0)
-            tracedWeight = saturate((RTRefractionMaxRoughness - perceptualRoughness) / (RTRefractionMaxRoughness - RTRefractionFullRoughness));
-
-        float3 behind = float3(0.0);
-        // The glass's second pass (MESHLET_GLASS_ADD) for a thin smooth pane: its own light alone, what is behind was let through by
-        // the first.
-        if (stackedGlass && (pushConstant.meshletCulling & MESHLET_GLASS_ADD) != 0)
-            tracedWeight = 1.0;
-        else if (tracedWeight > 0.0)
-        {
-            // Dispersion (KHR_materials_dispersion): each color channel refracted at its own IOR, the spread from the Abbe number
-            // (the spec's half spread around the material's IOR, green's).
-            if ((gpuMaterial.lobes & MaterialLobeDispersion) != 0u)
-            {
-                const float3 iors = dispersion_iors(ior, gpuMaterial.dispersion);
-                behind = float3(tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, iors.r, modelScale).r,
-                                tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, iors.g, modelScale).g,
-                                tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, iors.b, modelScale).b) * tracedWeight;
-            }
-            else
-                behind = tracedRefraction(ubo, instance, vertIn.drawID, vertIn.worldPos, n, v, ior, modelScale) * tracedWeight;
-        }
+        // Smooth glass on the high rung: traced (H3, evaluated above into tracedBehind); rougher glass, or the lower rungs: the color
+        // pyramid (H3b), both in between. Thin-walled glass (no volume) does not bend the view ray: what it shows is the lit scene
+        // right behind it, which the color pyramid already holds with everything the deferred lighting gives it (GI, reflections,
+        // shadows) -- tracing it again would only shade it more simply.
+        float3 behind = tracedBehind;
         if (tracedWeight < 1.0)
         {
-            Texture2D refractionSource = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
+            Texture2D refractionSource = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.refractionTextureIndex, 0));
             uint sourceWidth, sourceHeight, sourceLevels;
             refractionSource.GetDimensions(0, sourceWidth, sourceHeight, sourceLevels);
 
@@ -1130,7 +1169,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // color channel with dispersion (each at its own IOR, dispersion_iors).
             const bool dispersive = (gpuMaterial.lobes & MaterialLobeDispersion) != 0u;
             const float3 iors = dispersive ? dispersion_iors(ior, gpuMaterial.dispersion) : float3(ior);
-            const float4x4 viewProjection = mul(ubo->proj, ubo->view);
+            const float4x4 viewProjection = mul(ubo.proj, ubo.view);
             const float4 surfaceClip = mul(viewProjection, float4(vertIn.worldPos, 1.0));
             float2 channelUV[3];
             float3 refracted = float3(0.0);
@@ -1153,7 +1192,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             // pixel describe what is seen through it (RTXPT's convention for transmission). A blur mip of that raw image is noise
             // grown into blotches RR takes for detail -- the glass that stayed noisy. A sharp read leaves the noise where the guides
             // are, for RR to remove; rough glass is a little less blurred.
-            if (ubo->rayReconstructionActive != 0)
+            if (ubo.rayReconstructionActive != 0)
                 lod = min(lod, 1.0);
             SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
             // Through the volume's thickness: what it absorbs on the way (KHR_materials_volume attenuation).
@@ -1214,14 +1253,14 @@ struct FSOutputProbeCapture
 [shader("fragment")]
 FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[vertIn.drawID];
     SamplerState sampLinearHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     float4 baseColor = instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS ? instance.baseColorFactor : instance.diffuseFactor;
     if (instance.baseColorTextureIndex != 0xFFFFFFFF)
-        baseColor *= SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias);
+        baseColor *= SampleMaterialTextureBias(ubo, instance.baseColorTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.baseColorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias);
     baseColor *= vertIn.color;
     if (instance.alphaMode == 1 && baseColor.a < instance.alphaMaskCutoff)
         discard;
@@ -1231,7 +1270,7 @@ FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFr
     {
         metallic = instance.metallicFactor;
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
-            metallic *= SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).b;
+            metallic *= SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).b;
         metallic = saturate(metallic);
     }
     else
@@ -1239,7 +1278,7 @@ FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFr
         // Specular-glossiness: the diffuse color is the albedo (what the specular color takes is not diffuse).
         float3 specular = instance.specularFactor.rgb;
         if (instance.metallicRoughnessTextureIndex != 0xFFFFFFFF)
-            specular *= SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+            specular *= SampleMaterialTextureBias(ubo, instance.metallicRoughnessTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.physicalDescriptorTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).rgb;
         baseColor.rgb *= 1.0 - max(max(specular.r, specular.g), specular.b);
     }
 
@@ -1249,7 +1288,7 @@ FSOutputProbeCapture captureFragMain(VSOutput vertIn, bool isFrontFace : SV_IsFr
 
     float3 emission = instance.emissiveFactor.rgb * instance.emissiveStrength;
     if (instance.emissiveTextureIndex != 0xFFFFFFFF)
-        emission *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo->textureLodBias).rgb;
+        emission *= SampleMaterialTextureBias(ubo, instance.emissiveTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.emissiveTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).rgb;
     float3 albedo = baseColor.rgb * (1.0 - metallic);
     if (instance.shadingModel == ShadingModelUnlit)
     {

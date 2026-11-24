@@ -4,17 +4,14 @@
 #include "PathTracerBridge.slang"
 #include "EmissiveLights.slang"
 
-[[vk::push_constant]]
-ConstantBuffer<PushConstantPathTracer> pushConstant;
-
 [shader("miss")]
-void missMain(inout PathPayload payload : SV_RayPayload)
+void missMain(inout PathPayload payload : SV_RayPayload, uniform PushConstantPathTracer pushConstant)
 {
     PathState path = PathPayload::unpack(payload);
 
     float3 rayDir = WorldRayDirection();
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
     // Sample environment cubemap
     // RTXPT defaults EnvironmentMapDiffuseSampleMIPLevel to 2. Keep mirror/delta and camera
@@ -46,7 +43,7 @@ void missMain(inout PathPayload payload : SV_RayPayload)
         {
             EnvMapSampler sampler = Bridge::environmentSampler(ubo, pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex);
             // The environment's share of the light samples: what the emissive meshes leave (PathTracerNEE.slang), over the lights.
-            float lightPdf = sampler.MIPDescentEvalPdf(rayDir) * (1.0 - EmissiveLights::branchProbability(ubo, true)) / float(ubo->lightCount + 1);
+            float lightPdf = sampler.MIPDescentEvalPdf(rayDir) * (1.0 - EmissiveLights::branchProbability(ubo, true)) / float(ubo.lightCount + 1);
             float bsdfPdf = path.bsdfScatterPdf;
             misWeight = bsdfPdf*bsdfPdf / max(bsdfPdf*bsdfPdf + lightPdf*lightPdf, 1e-30);
         }

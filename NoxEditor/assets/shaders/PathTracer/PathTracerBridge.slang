@@ -9,12 +9,12 @@
 
 namespace Bridge
 {
-    EnvMapSampler environmentSampler(UniformBufferObject* ubo, uint skyIndex, uint importanceIndex)
+    EnvMapSampler environmentSampler(UniformBufferObject ubo, uint skyIndex, uint importanceIndex)
     {
         EnvMapSceneParams scene = (EnvMapSceneParams)0;
         scene.Transform = float3x4(1,0,0,0, 0,1,0,0, 0,0,1,0);
         scene.InvTransform = scene.Transform;
-        scene.ColorMultiplier = float3(ubo->scaleIBLAmbient);
+        scene.ColorMultiplier = float3(ubo.scaleIBLAmbient);
         scene.Enabled = 1;
         EnvMapImportanceSamplingParams sampling;
         sampling.ImportanceInvDim = float2(1.0/512.0);
@@ -22,8 +22,8 @@ namespace Bridge
         sampling.padding0 = 0;
         return EnvMapSampler::make(
             SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP,0)),
-            Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset+importanceIndex,0)), sampling,
-            TextureCube<float4>.Handle(uint2(ubo->imageHeapIndexOffset+skyIndex,0)),
+            Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset+importanceIndex,0)), sampling,
+            TextureCube<float4>.Handle(uint2(ubo.imageHeapIndexOffset+skyIndex,0)),
             SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT,0)), scene);
     }
     struct SurfaceData
@@ -81,7 +81,7 @@ namespace Bridge
     // the upscaling bias (log2(render / display): DLSS renders fewer pixels than it shows) -- UniformBufferObject::pathTracerTexLodBias.
     // The footprint used to be clamped to one texel before the -1, so the bias never went below mip 0 of the clamp and close-ups
     // and every upscaled frame sampled a mip or two too coarse.
-    float textureLod(UniformBufferObject* ubo, uint textureIndex, float rayConeWidth, float uvPerWorld, float lodBias)
+    float textureLod(UniformBufferObject ubo, uint textureIndex, float rayConeWidth, float uvPerWorld, float lodBias)
     {
         uint width, height, levels;
         MaterialTextureSize(ubo, textureIndex, width, height, levels);
@@ -90,7 +90,7 @@ namespace Bridge
     }
 
     // Reverse-Z camera ray generation
-    Ray computeCameraRay(uint2 pixelPos, inout uint rngState, PushConstantPathTracer pc, UniformBufferObject* ubo, out float pixelSpreadAngle)
+    Ray computeCameraRay(uint2 pixelPos, inout uint rngState, PushConstantPathTracer pc, UniformBufferObject ubo, out float pixelSpreadAngle)
     {
         // The projection already carries RTXPT's default R2 jitter. Match its additional per-pixel policy:
         // 0.1 for RR, zero for DLSS-SR, and a full pixel for native progressive accumulation.
@@ -106,7 +106,7 @@ namespace Bridge
         float4 nearPosH = mul(pc.invViewProj, float4(ndc_xy, 0.001, 1.0));
         float3 nearPos = nearPosH.xyz / nearPosH.w;
 
-        float3 rayOrigin = ubo->cameraWorldPos.xyz;
+        float3 rayOrigin = ubo.cameraWorldPos.xyz;
         float3 rayDir = normalize(nearPos - rayOrigin);
 
         float2 adjacentNdc = ndc_xy + float2(2.0 / pc.viewportSize.x, 0.0);
@@ -158,18 +158,18 @@ namespace Bridge
         float2 barycentrics,
         float3 rayDir,
         float rayConeWidth,
-        UniformBufferObject* ubo,
+        UniformBufferObject ubo,
         float3x4 objToWorld
     )
     {
         SurfaceData surface;
-        GpuRayTracingInstance* lutBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        BufferRef<GpuRayTracingInstance> lutBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
         GpuRayTracingInstance lut = lutBuffer[instanceID];
 
         // 1. Fetch triangle indices and vertices
         uint3 idx;
         if (lut.indexBufferAddress != 0)
-            idx = ((uint3*)lut.indexBufferAddress)[primitiveIndex];
+            idx = BufferRef<uint3>(lut.indexBufferAddress)[primitiveIndex];
         else
             idx = uint3(primitiveIndex * 3 + 0, primitiveIndex * 3 + 1, primitiveIndex * 3 + 2);
 
@@ -183,7 +183,7 @@ namespace Bridge
         float3 localNormal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
         // Each texture reads the mesh UVs through its own UV channel (KHR_texture_transform: material_texture_uv); `uv` is the base
         // color's (alpha, the surface's footprint).
-        GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[lut.materialIndex];
+        GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[lut.materialIndex];
         const float2 meshUV0 = v0.uv0 * bary.x + v1.uv0 * bary.y + v2.uv0 * bary.z;
         const float2 meshUV1 = v0.uv1 * bary.x + v1.uv1 * bary.y + v2.uv1 * bary.z;
         float2 uv = material_texture_uv(material, material.baseColorTextureSet, meshUV0, meshUV1);
@@ -263,7 +263,7 @@ namespace Bridge
         if (lut.baseColorTextureIndex != 0xFFFFFFFF)
         {
             baseColor *= SampleMaterialTextureLevel(ubo, lut.baseColorTextureIndex, textureSampler, material_texture_uv(material, material.baseColorTextureSet, meshUV0, meshUV1),
-                textureLod(ubo, lut.baseColorTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.baseColorTextureSet), ubo->pathTracerTexLodBias));
+                textureLod(ubo, lut.baseColorTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.baseColorTextureSet), ubo.pathTracerTexLodBias));
         }
         baseColor *= RayTracingVertexColor(lut, idx, barycentrics); // glTF COLOR_0
 
@@ -276,7 +276,7 @@ namespace Bridge
         if (lut.metallicRoughnessTextureIndex != 0xFFFFFFFF)
         {
             float4 mrSample = SampleMaterialTextureLevel(ubo, lut.metallicRoughnessTextureIndex, textureSampler, material_texture_uv(material, material.physicalDescriptorTextureSet, meshUV0, meshUV1),
-                textureLod(ubo, lut.metallicRoughnessTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.physicalDescriptorTextureSet), ubo->pathTracerTexLodBias));
+                textureLod(ubo, lut.metallicRoughnessTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.physicalDescriptorTextureSet), ubo.pathTracerTexLodBias));
             if (lut.workflow == 1.0)
             {
                 roughness = 1.0 - lut.specularFactor.a * mrSample.a;
@@ -318,7 +318,7 @@ namespace Bridge
         if (lut.normalTextureIndex != 0xFFFFFFFF && !graphNormal)
         {
             float3 tangentNormal = SampleMaterialTextureLevel(ubo, lut.normalTextureIndex, textureSampler, material_texture_uv(material, material.normalTextureSet, meshUV0, meshUV1),
-                textureLod(ubo, lut.normalTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.normalTextureSet), ubo->pathTracerTexLodBias)).xyz;
+                textureLod(ubo, lut.normalTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.normalTextureSet), ubo.pathTracerTexLodBias)).xyz;
             // Match RTXPT's ApplyNormalMapRTXPT. Some Bistro DDNA maps omit Z and expect it to be
             // reconstructed; treating their stored zero as -1 bends highlights into the surface.
             tangentNormal.xy = tangentNormal.xy * 2.0 - 1.0;
@@ -349,7 +349,7 @@ namespace Bridge
         if (lut.transmissionTextureIndex != 0xFFFFFFFF)
         {
             transmission *= SampleMaterialTextureLevel(ubo, lut.transmissionTextureIndex, textureSampler, material_texture_uv(material, material.transmissionTextureSet, meshUV0, meshUV1),
-                textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.transmissionTextureSet), ubo->pathTracerTexLodBias)).r;
+                textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.transmissionTextureSet), ubo.pathTracerTexLodBias)).r;
         }
 
         // 5b. The glTF lobes (MaterialLobes.slang, StandardBSDF.slang's BSDFLobes): evaluated as the raster passes do, each texture at
@@ -366,7 +366,7 @@ namespace Bridge
             coords.ddx[0] = coords.ddx[1] = coords.ddy[0] = coords.ddy[1] = float2(0.0);
             coords.lod = -1.0;
             coords.footprint = max(rayConeWidth * uvPerWorld, 1e-20);
-            coords.lodBias = ubo->pathTracerTexLodBias;
+            coords.lodBias = ubo.pathTracerTexLodBias;
             const float3 tangentW = mul((float3x3)objToWorld, v0.tangent.xyz * bary.x + v1.tangent.xyz * bary.y + v2.tangent.xyz * bary.z);
             float3 anisotropicT;
             // The geometric normal as the mesh has it (normalW is turned to the ray for a back face: the lobes turn theirs alike).
@@ -413,9 +413,9 @@ namespace Bridge
                 bsdfLobes.sheenRoughness = lobes.sheenRoughness;
                 // The sheen's directional albedo E(N.V): the BRDF LUT's blue (BRDFIntegration.slang).
                 float sheenAlbedo = 0.0;
-                if (ubo->brdfLutIndex != 0xFFFFFFFF)
+                if (ubo.brdfLutIndex != 0xFFFFFFFF)
                 {
-                    Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
                     sheenAlbedo = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - lobes.sheenRoughness), 0).b;
                 }
                 bsdfLobes.sheenScaling = saturate(1.0 - max(max(lobes.sheenColor.r, lobes.sheenColor.g), lobes.sheenColor.b) * sheenAlbedo);
@@ -461,7 +461,7 @@ namespace Bridge
         if (lut.emissiveTextureIndex != 0xFFFFFFFF)
         {
             surface.emission *= SampleMaterialTextureLevel(ubo, lut.emissiveTextureIndex, textureSampler, material_texture_uv(material, material.emissiveTextureSet, meshUV0, meshUV1),
-                textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.emissiveTextureSet), ubo->pathTracerTexLodBias)).rgb;
+                textureLod(ubo, lut.emissiveTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.emissiveTextureSet), ubo.pathTracerTexLodBias)).rgb;
         }
 #ifdef NOX_MATERIAL_GRAPH_SURFACE
         if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
@@ -476,9 +476,9 @@ namespace Bridge
     }
 
     // Alpha test for AnyHit shader
-    bool AlphaTest(uint instanceID, uint primitiveIndex, float2 barycentrics, UniformBufferObject* ubo, float opacitySample = 0.5)
+    bool AlphaTest(uint instanceID, uint primitiveIndex, float2 barycentrics, UniformBufferObject ubo, float opacitySample = 0.5)
     {
-        GpuRayTracingInstance* lutBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        BufferRef<GpuRayTracingInstance> lutBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
         GpuRayTracingInstance lut = lutBuffer[instanceID];
 
         if (lut.alphaMode == 0)
@@ -488,7 +488,7 @@ namespace Bridge
 
         uint3 idx;
         if (lut.indexBufferAddress != 0)
-            idx = ((uint3*)lut.indexBufferAddress)[primitiveIndex];
+            idx = BufferRef<uint3>(lut.indexBufferAddress)[primitiveIndex];
         else
             idx = uint3(primitiveIndex * 3 + 0, primitiveIndex * 3 + 1, primitiveIndex * 3 + 2);
 
@@ -510,9 +510,9 @@ namespace Bridge
     // transmissive surfaces (glass) by their transmission and tint (two interfaces' reflection off), blended ones by 1 - alpha,
     // alpha-masked ones by their cut-out, opaque ones not at all. Glass then casts a tinted shadow and sunlight comes through
     // windows, instead of the black shadow a path tracer gives when only refracted paths (caustics) may carry light through it.
-    float3 OccluderTransmittance(uint instanceID, uint primitiveIndex, float2 barycentrics, UniformBufferObject* ubo)
+    float3 OccluderTransmittance(uint instanceID, uint primitiveIndex, float2 barycentrics, UniformBufferObject ubo)
     {
-        GpuRayTracingInstance* lutBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        BufferRef<GpuRayTracingInstance> lutBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
         GpuRayTracingInstance lut = lutBuffer[instanceID];
         // ExcludeFromNEE surfaces (RTXPT's window and lantern glass) let shadow rays through, tinted by their color only. Glass seen through lets them through
         // tinted, whatever its material file says: RTXPT blocks them there because its sun is part of the environment map, which a
@@ -532,7 +532,7 @@ namespace Bridge
 
         uint3 idx;
         if (lut.indexBufferAddress != 0)
-            idx = ((uint3*)lut.indexBufferAddress)[primitiveIndex];
+            idx = BufferRef<uint3>(lut.indexBufferAddress)[primitiveIndex];
         else
             idx = uint3(primitiveIndex * 3 + 0, primitiveIndex * 3 + 1, primitiveIndex * 3 + 2);
         Vertex v0 = LoadRayTracingVertex(lut, idx.x);
@@ -548,7 +548,7 @@ namespace Bridge
     }
 
     // Environment map / skybox sampling
-    float3 sampleSkybox(float3 dir, UniformBufferObject* ubo, uint skyboxTextureIndex, float lod = 0.0)
+    float3 sampleSkybox(float3 dir, UniformBufferObject ubo, uint skyboxTextureIndex, float lod = 0.0)
     {
         if (skyboxTextureIndex == 0xFFFFFFFF)
         {
@@ -556,27 +556,27 @@ namespace Bridge
         }
 
         SamplerState sampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        TextureCube skybox = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + skyboxTextureIndex, 0));
-        return skybox.SampleLevel(sampler, dir, lod).rgb * ubo->scaleIBLAmbient;
+        TextureCube skybox = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + skyboxTextureIndex, 0));
+        return skybox.SampleLevel(sampler, dir, lod).rgb * ubo.scaleIBLAmbient;
     }
 
     // RR's specular hit distance for a reflection that reaches the sky: its mirror image at infinity (only the camera's turning moves
     // it). RTXPT records the distance travelled so far there (often 0: the reflection then moved with the surface, smearing the sky
     // in windows and puddles).
-    float rrSkySpecularDistance(UniformBufferObject* ubo)
+    float rrSkySpecularDistance(UniformBufferObject ubo)
     {
-        return 10000.0 * ubo->unitsPerMeter;
+        return 10000.0 * ubo.unitsPerMeter;
     }
 
     // DLSS-RR's specular motion vector (RTXPT PostProcess.hlsl ComputeSpecularMotionVector): a planar reflector at the primary hit
     // shows the reflected point mirrored behind it, `reflectionRay` (its length the specular hit distance) further along the camera's
     // ray -- that image's motion between the frames, camera motion only. In the motion vectors' units (uv, current to previous).
-    float2 rrSpecularMotionVector(UniformBufferObject* ubo, float3 primaryHitPos, float3 primaryRayDir, float3 reflectionRay)
+    float2 rrSpecularMotionVector(UniformBufferObject ubo, float3 primaryHitPos, float3 primaryRayDir, float3 reflectionRay)
     {
         // RTXPT builds the image in the reflector's basis (its z mirrored); its distance along the camera's ray is the ray's length.
         const float3 image = primaryHitPos + primaryRayDir * length(reflectionRay);
-        const float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(image, 1.0)));
-        const float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(image, 1.0)));
+        const float4 currClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(image, 1.0)));
+        const float4 prevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(image, 1.0)));
         return (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5);
     }
 }

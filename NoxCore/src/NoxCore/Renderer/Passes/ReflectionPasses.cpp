@@ -98,7 +98,7 @@ namespace Nox
 
                 shaderio::PushConstantSSR push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
                 push.materialTextureIndex = context.Slot(res->GBufferMaterial);
@@ -136,7 +136,7 @@ namespace Nox
                 cmd.setColorBlendEnable(0, false);
                 cmd.setColorWriteMask(0, nri::ColorComponent::All);
                 shaderio::PushConstantSSRFilter push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.rawTextureIndex = context.Slot(rawSSR);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.materialTextureIndex = context.Slot(res->GBufferMaterial);
@@ -253,7 +253,7 @@ namespace Nox
                 cmd.setColorWriteMask(0, nri::ColorComponent::All);
                 shaderio::PushConstantSSGI push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
                 push.historyTextureIndex = context.Slot(sceneHistory);
@@ -303,7 +303,7 @@ namespace Nox
                 }
                 shaderio::PushConstantSSGIDenoise push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.rawTextureIndex = context.Slot(raw);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
@@ -442,15 +442,15 @@ namespace Nox
 
         if (!m_probeTableBuffers[frameIndex])
         {
-            m_probeTableBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_probeTableBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes, .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_probeTableBuffersMapped[frameIndex] = m_probeTableBuffers[frameIndex].map(0, sizeof(shaderio::GpuReflectionProbe) * shaderio::MaxReflectionProbes);
-            m_probeFaceBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(glm::mat4) * 6 + sizeof(glm::vec4), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_probeFaceBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(glm::mat4) * 6 + sizeof(glm::vec4), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_probeFaceBuffersMapped[frameIndex] = m_probeFaceBuffers[frameIndex].map(0, sizeof(glm::mat4) * 6 + sizeof(glm::vec4));
             for (uint32_t face = 0; face < 6; ++face)
             {
                 m_probeFaceUniforms[frameIndex][face] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
                 m_probeFaceUniformsMapped[frameIndex][face] = m_probeFaceUniforms[frameIndex][face].map(0, sizeof(shaderio::UniformBufferObject));
-                m_probeFaceCullViews[frameIndex][face] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
+                m_probeFaceCullViews[frameIndex][face] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_UNIFORM });
             }
         }
 
@@ -586,7 +586,7 @@ namespace Nox
                     [this, draws, uniformBuffer, skyboxSun](RGPassContext& context)
                     {
                         nri::CommandBuffer& cmd = context.Cmd();
-                        const uint64_t uniforms = uniformBuffer->getDeviceAddress();
+                        const uint64_t uniforms = bufferReadRef(*uniformBuffer);
                         MeshletDrawCursor cursor = beginMeshletDraws(context, draws);
                         cursor.references.matrixReference = uniforms;
                         cursor.references.ssaoTextureIndex = 0xFFFFFFFF;
@@ -641,9 +641,13 @@ namespace Nox
                     nri::CommandBuffer& cmd = context.Cmd();
                     const uint32_t size = target->Resolution;
                     shaderio::PushConstantProbeAssemble push{};
-                    push.facesReference = m_probeFaceBuffers[frameIndex].getDeviceAddress();
-                    for (uint32_t face = 0; face < 6; ++face)
-                        push.faceTextureIndex[face] = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[face]);
+                    push.facesReference = bufferReadRef(m_probeFaceBuffers[frameIndex]);
+                    push.faceTextureIndex0 = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[0]);
+                    push.faceTextureIndex1 = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[1]);
+                    push.faceTextureIndex2 = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[2]);
+                    push.faceTextureIndex3 = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[3]);
+                    push.faceTextureIndex4 = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[4]);
+                    push.faceTextureIndex5 = uniformData.imageHeapIndexOffset + context.Slot(faceHdr[5]);
                     push.outputStorageIndex = target->RawStorage[0];
                     push.outputSize = size;
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_probeAssemblePipeline);
@@ -718,7 +722,7 @@ namespace Nox
             table[i] = entries[i].Probe;
         if (count > 0)
         {
-            uniformData.reflectionProbesReference = m_probeTableBuffers[frameIndex].getDeviceAddress();
+            uniformData.reflectionProbesReference = bufferReadRef(m_probeTableBuffers[frameIndex]);
             uniformData.reflectionProbeCount = count;
         }
     }

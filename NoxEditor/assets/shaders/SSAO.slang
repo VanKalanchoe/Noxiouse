@@ -40,6 +40,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload SSAOPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -79,10 +80,10 @@ float hash12(float2 p)
 SSAOOutput fragMain(MSOutput input, uniform PushConstantSSAO pushConstant)
 {
     SSAOOutput output;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     int2 pixelCoord = int2(input.pos.xy);
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0) // reverse-Z background
     {
@@ -95,7 +96,7 @@ SSAOOutput fragMain(MSOutput input, uniform PushConstantSSAO pushConstant)
     float4 worldPosH = mul(pushConstant.invViewProj, float4(ndc, depth, 1.0));
     float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     float3 rawNormal = normalTex.Load(int3(pixelCoord, 0)).rgb;
     float lenN = length(rawNormal);
     float3 N = lenN > 1e-6 ? (rawNormal / lenN) : float3(0.0, 1.0, 0.0);
@@ -113,8 +114,8 @@ SSAOOutput fragMain(MSOutput input, uniform PushConstantSSAO pushConstant)
 
     const float radius = ambient_occlusion_radius(pushConstant.invViewProj, ndc, depth, worldPos, pushConstant.viewportSize,
                                                   pushConstant.radius, pushConstant.shortRangePixels);
-    float4* kernel = (float4*)pushConstant.kernelReference;
-    float3 cameraWorldPos = ubo->cameraWorldPos.xyz;
+    BufferRef<float4> kernel = BufferRef<float4>(pushConstant.kernelReference);
+    float3 cameraWorldPos = ubo.cameraWorldPos.xyz;
     float occlusion = 0.0;
 
     for (uint i = 0; i < pushConstant.kernelSize; i++)

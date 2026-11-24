@@ -42,9 +42,11 @@ if(WIN32)
     set(NOX_V2_SCRIPT_CORE_OUTPUT "${CMAKE_BINARY_DIR}/managed/Nox.ScriptCore")
     set(NOX_V2_FACERUN_SCRIPT_OUTPUT "${CMAKE_BINARY_DIR}/managed/Facerun")
 
+    file(GLOB NOX_V2_SLANG_DLLS "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang*.dll")
+    list(FILTER NOX_V2_SLANG_DLLS EXCLUDE REGEX "slang-llvm\\.dll$")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang.dll"
+            ${NOX_V2_SLANG_DLLS}
             $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${NOX_CORAL_RUNTIME_DIR}/Coral.Managed.dll"
@@ -65,6 +67,26 @@ if(WIN32)
             "${CMAKE_SOURCE_DIR}/NoxEditor/assets/Templates/Blank.png"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates"
     )
+    file(GLOB NOX_V2_SLANG_STD_MODULES LIST_DIRECTORIES true "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang-standard-module-*")
+    foreach(SLANG_MOD_DIR ${NOX_V2_SLANG_STD_MODULES})
+        get_filename_component(SLANG_MOD_NAME "${SLANG_MOD_DIR}" NAME)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+                "${SLANG_MOD_DIR}"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${SLANG_MOD_NAME}"
+        )
+    endforeach()
+    if(DEFINED CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION)
+        set(NOX_V2_WINSDK_X64_BIN "C:/Program Files (x86)/Windows Kits/10/bin/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/x64")
+        if(EXISTS "${NOX_V2_WINSDK_X64_BIN}/dxcompiler.dll" AND EXISTS "${NOX_V2_WINSDK_X64_BIN}/dxil.dll")
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${NOX_V2_WINSDK_X64_BIN}/dxcompiler.dll"
+                    "${NOX_V2_WINSDK_X64_BIN}/dxil.dll"
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            )
+        endif()
+    endif()
 
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
@@ -84,5 +106,11 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
             "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/Lib/$<IF:$<CONFIG:Debug>,Debug,Release>"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/AgilitySDK"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/AgilitySDK/D3D12Core.dll"
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/AgilitySDK/d3d12SDKLayers.dll"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/AgilitySDK"
     )
 endif()

@@ -9,10 +9,10 @@
 #define RTXDI_ENABLE_STORE_RESERVOIR 0
 #define RTXDI_LIGHT_RESERVOIR_BUFFER g_ReservoirBuffer
 
-static RTXDI_PackedDIReservoir* g_ReservoirBuffer; // buffer B, read only
+static BufferRef<RTXDI_PackedDIReservoir> g_ReservoirBuffer; // buffer B, read only
 static PushConstantReSTIRDIFinalShading g_PushConstant;
-static UniformBufferObject* g_UBO;
-static LightData* g_LightData;
+static UniformBufferObject g_UBO;
+static BufferRef<LightData> g_LightData;
 
 void build_orthonormal_basis(float3 n, out float3 b1, out float3 b2);
 
@@ -146,8 +146,8 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
         return float2(0.0);
     }
 
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
-    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
+    BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
 
     uint i0, i1, i2;
     if (lut.indexBufferAddress != 0)
@@ -171,36 +171,36 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 
 bool trace_visibility(float3 origin, float3 direction, float maxDist)
 {
-    if (g_UBO->tlasDeviceAddress == 0)
+    if (g_UBO.tlasDeviceAddress == 0)
     {
         return true;
     }
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(g_UBO->tlasDeviceAddress);
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(g_UBO.tlasDeviceAddress);
     RayDesc shadowRay;
     shadowRay.Origin = origin;
     shadowRay.Direction = direction;
     // World units (the project's: meters or centimeters).
-    shadowRay.TMin = 0.005 * g_UBO->unitsPerMeter;
-    shadowRay.TMax = max(0.01 * g_UBO->unitsPerMeter, maxDist);
+    shadowRay.TMin = 0.005 * g_UBO.unitsPerMeter;
+    shadowRay.TMax = max(0.01 * g_UBO.unitsPerMeter, maxDist);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
     shadowQuery.TraceRayInline(accelerationStructure,
         RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
         0xFF, shadowRay);
 
-    if (g_UBO->sceneRayTracingInstancesReference == 0)
+    if (g_UBO.sceneRayTracingInstancesReference == 0)
     {
         shadowQuery.Proceed();
         return shadowQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
     }
 
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)g_UBO->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(g_UBO.sceneRayTracingInstancesReference);
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (shadowQuery.Proceed())
     {
-        uint instanceID = shadowQuery.CandidateRayInstanceCustomIndex();
+        uint instanceID = shadowQuery.CandidateInstanceID();
         uint primIndex = shadowQuery.CandidatePrimitiveIndex();
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
 
@@ -325,6 +325,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRDIFinalShadingPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -379,15 +380,15 @@ PSOutput fragMain(
     }
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_ReservoirBuffer = (RTXDI_PackedDIReservoir*)pushConstant.reservoirReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    g_ReservoirBuffer = BufferRef<RTXDI_PackedDIReservoir>(pushConstant.reservoirReference);
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (rawDepth <= 0.00001) return outVal;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6) return outVal;
@@ -407,8 +408,8 @@ PSOutput fragMain(
 
     RTXDI_DIReservoir reservoir = RTXDI_LoadDIReservoir(resParams, pixelCoord, 0);
 
-    Texture2D albedoTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+    Texture2D albedoTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
     float4 albedoSample = albedoTex.Load(int3(pixelCoord, 0));
     float4 materialSample = materialTex.Load(int3(pixelCoord, 0));
 
@@ -429,7 +430,7 @@ PSOutput fragMain(
     float3 specularEnvironmentR0 = specularColor;
     float3 specularEnvironmentR90 = clamp(float3(reflectance * 50.0), 0.0, 1.0);
 
-    float3 v = normalize(g_UBO->cameraWorldPos.xyz - worldPos);
+    float3 v = normalize(g_UBO.cameraWorldPos.xyz - worldPos);
     float NdotV = clamp(dot(n, v), 0.001, 1.0);
 
     float3 diffuseLighting = float3(0.0);
@@ -437,7 +438,7 @@ PSOutput fragMain(
     float signalHitDistance = 0.0;
     uint reservoirLightIndex = RTXDI_GetDIReservoirLightIndex(reservoir);
     bool hasLocalReservoir = RTXDI_IsValidDIReservoir(reservoir) &&
-        reservoirLightIndex < g_UBO->lightCount &&
+        reservoirLightIndex < g_UBO.lightCount &&
         (uint)g_LightData[reservoirLightIndex].position.w != 0u;
 
     // Candidate zero is the single resampled LOCAL light. Directional lights are evaluated
@@ -469,7 +470,7 @@ PSOutput fragMain(
         if (isDirectional)
         {
             dir = normalize(lightSample.normal);
-            dist = 100000.0 * g_UBO->unitsPerMeter;
+            dist = 100000.0 * g_UBO.unitsPerMeter;
         }
         else
         {
@@ -491,7 +492,7 @@ PSOutput fragMain(
 
         // One stochastic shadow ray, matching RTXPT. The old soft-shadow loop issued up to 16
         // rays per light per pixel and was the source of the severe Bistro regression.
-        if (!trace_visibility(worldPos + shadowNormal * (0.02 * g_UBO->unitsPerMeter), dir, dist - 0.02 * g_UBO->unitsPerMeter))
+        if (!trace_visibility(worldPos + shadowNormal * (0.02 * g_UBO.unitsPerMeter), dir, dist - 0.02 * g_UBO.unitsPerMeter))
             continue;
 
         float NdotL = clamp(NdotLRaw, 0.001, 1.0);
@@ -530,10 +531,10 @@ PSOutput fragMain(
     float3 diffuseFactor, specularFactor;
     NRD_MaterialFactors(n, v, diffuseColor, specularColor, perceptualRoughness,
                         diffuseFactor, specularFactor);
-    float viewZ = abs(mul(g_UBO->view, float4(worldPos, 1.0)).z);
+    float viewZ = abs(mul(g_UBO.view, float4(worldPos, 1.0)).z);
     outVal.diffuse = NRD_PackSignal(pushConstant.denoiserMode,
-        diffuseLighting / diffuseFactor, signalHitDistance, viewZ, 1.0, g_UBO->unitsPerMeter);
+        diffuseLighting / diffuseFactor, signalHitDistance, viewZ, 1.0, g_UBO.unitsPerMeter);
     outVal.specular = NRD_PackSignal(pushConstant.denoiserMode,
-        specularLighting / specularFactor, signalHitDistance, viewZ, perceptualRoughness, g_UBO->unitsPerMeter);
+        specularLighting / specularFactor, signalHitDistance, viewZ, perceptualRoughness, g_UBO.unitsPerMeter);
     return outVal;
 }

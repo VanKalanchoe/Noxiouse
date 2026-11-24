@@ -49,17 +49,17 @@ namespace Nox
                 builder.Write(resources.SkinnedVertices);
             },
             [this, res = &resources, morphWeights = frameIndex < m_morphWeightBuffers.size() && m_morphWeightBuffers[frameIndex]
-                                                        ? m_morphWeightBuffers[frameIndex].getDeviceAddress() : 0](RGPassContext& context)
+                                                        ? bufferReadRef(m_morphWeightBuffers[frameIndex]) : 0](RGPassContext& context)
             {
                 shaderio::PushConstantSkinning push{};
-                push.sourceVerticesReference = nriGetBufferDeviceAddress(context.Buffer(res->SkinningSourceVertices));
-                push.sourceSkinReference = m_skinStream.GetDeviceAddress();
-                push.morphRangesReference = morphWeights != 0 ? m_morphRangeStream.GetDeviceAddress() : 0;
-                push.morphDeltasReference = m_morphDeltaStream.GetDeviceAddress();
+                push.sourceVerticesReference = bufferReadRef(context.Buffer(res->SkinningSourceVertices));
+                push.sourceSkinReference = bufferReadRef(m_skinStream.GetBuffer());
+                push.morphRangesReference = morphWeights != 0 ? bufferReadRef(m_morphRangeStream.GetBuffer()) : 0;
+                push.morphDeltasReference = bufferReadRef(m_morphDeltaStream.GetBuffer());
                 push.morphWeightsReference = morphWeights;
-                push.skinnedVerticesReference = nriGetBufferDeviceAddress(context.Buffer(res->SkinnedVertices));
-                push.boneMatricesReference = nriGetBufferDeviceAddress(context.Buffer(res->SkinningBoneMatrices));
-                push.workItemsReference = nriGetBufferDeviceAddress(context.Buffer(res->SkinningWorkItems));
+                push.skinnedVerticesReference = bufferWriteRef(context.Buffer(res->SkinnedVertices));
+                push.boneMatricesReference = bufferReadRef(context.Buffer(res->SkinningBoneMatrices));
+                push.workItemsReference = bufferReadRef(context.Buffer(res->SkinningWorkItems));
 
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_computeSkinningPipeline);
@@ -84,13 +84,13 @@ namespace Nox
                     builder.Read(resources.SkinnedVertices);
                 builder.Write(resources.RayTracingOffsetVertices);
             },
-            [this, res = &resources, uniforms = m_uniformBuffers[frameIndex].getDeviceAddress()](RGPassContext& context)
+            [this, res = &resources, uniforms = bufferReadRef(m_uniformBuffers[frameIndex])](RGPassContext& context)
             {
                 shaderio::PushConstantRayTracingOffset push{};
                 push.uniformsReference = uniforms;
-                push.workItemsReference = nriGetBufferDeviceAddress(context.Buffer(res->RayTracingOffsetWorkItems));
-                push.skinnedVerticesReference = res->SkinnedVertices.IsValid() ? nriGetBufferDeviceAddress(context.Buffer(res->SkinnedVertices)) : 0;
-                push.outputReference = nriGetBufferDeviceAddress(context.Buffer(res->RayTracingOffsetVertices));
+                push.workItemsReference = bufferReadRef(context.Buffer(res->RayTracingOffsetWorkItems));
+                push.skinnedVerticesReference = res->SkinnedVertices.IsValid() ? bufferReadRef(context.Buffer(res->SkinnedVertices)) : 0;
+                push.outputReference = bufferWriteRef(context.Buffer(res->RayTracingOffsetVertices));
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_rayTracingOffsetGraphPipeline);
                 cmd.pushData(&push, sizeof(push));
@@ -120,6 +120,16 @@ namespace Nox
             [this, buildsTLAS](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
+                if (m_rtIndexStream.GetBuffer())
+                {
+                    const nri::BufferBarrierDesc indexReady{
+                        .buffer = m_rtIndexStream.GetBuffer().handle(),
+                        .before = { nri::AccessBits::None, nri::StageBits::None },
+                        .after = { nri::AccessBits::ShaderRead | nri::AccessBits::AccelerationStructureRead,
+                                   nri::StageBits::AccelerationStructureBuild | nri::StageBits::RayTracing | nri::StageBits::Compute | nri::StageBits::Fragment }
+                    };
+                    cmd.resourceBarriers({}, std::span(&indexReady, 1));
+                }
                 const uint64_t scratchAddress = m_animatedBLASScratch.getDeviceAddress();
                 for (size_t index = 0; index < m_animatedBLASUpdates.size(); ++index)
                 {
@@ -255,7 +265,7 @@ namespace Nox
             const uint64_t jobBytes = sizeof(shaderio::ClusterIndexJob) * clusterJobs.size();
             nri::Buffer& jobBuffer = m_clusterIndexJobBuffers[frameIndex];
             if (!jobBuffer || jobBuffer.getSize() < jobBytes)
-                jobBuffer = m_device.createBuffer(nri::BufferDesc{ .size = std::max<uint64_t>(jobBytes + jobBytes / 2, 64 * 1024), .usage = NRI_BUFFER_USAGE_STORAGE });
+                jobBuffer = m_device.createBuffer(nri::BufferDesc{ .size = std::max<uint64_t>(jobBytes + jobBytes / 2, 64 * 1024), .usage = NRI_BUFFER_USAGE_UNIFORM });
             memcpy(jobBuffer.map(0, jobBytes), clusterJobs.data(), jobBytes);
             jobBuffer.unmap();
         }
@@ -269,11 +279,18 @@ namespace Nox
                 nri::CommandBuffer& cmd = context.Cmd();
                 if (jobCount > 0 && m_clusterIndicesPipeline)
                 {
+                    const nri::BufferBarrierDesc beforeWrite{
+                        .buffer = m_rtIndexStream.GetBuffer().handle(),
+                        .before = { nri::AccessBits::ShaderRead | nri::AccessBits::AccelerationStructureRead,
+                                    nri::StageBits::AccelerationStructureBuild | nri::StageBits::RayTracing | nri::StageBits::Compute | nri::StageBits::Fragment },
+                        .after = { nri::AccessBits::ShaderWrite, nri::StageBits::Compute }
+                    };
+                    cmd.resourceBarriers({}, std::span(&beforeWrite, 1));
                     // The streamed meshes' leaf cut triangles into the RT index stream, before the builds (and the hit shaders) read them.
                     shaderio::PushConstantClusterIndices push{};
-                    push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                    push.jobsReference = m_clusterIndexJobBuffers[frameIndex].getDeviceAddress();
-                    push.indicesReference = m_rtIndexStream.GetDeviceAddress();
+                    push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                    push.jobsReference = bufferReadRef(m_clusterIndexJobBuffers[frameIndex]);
+                    push.indicesReference = bufferWriteRef(m_rtIndexStream.GetBuffer());
                     push.jobCount = jobCount;
                     push.groupCount = std::min(jobCount, 4096u);
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_clusterIndicesPipeline);
@@ -389,22 +406,22 @@ namespace Nox
                 cmd.resourceBarriers({}, std::span(&cleared, 1));
 
                 shaderio::PushConstantGeometryFeedback push{};
-                push.drawListReference = m_drawListBuffers[frameIndex].getDeviceAddress();
-                push.feedbackReference = nriGetBufferDeviceAddress(buffer);
+                push.drawListReference = bufferReadRef(m_drawListBuffers[frameIndex]);
+                push.feedbackReference = bufferWriteRef(buffer);
                 push.drawCount = drawCount;
                 push.groupCount = std::min(drawCount, 4096u);
                 push.frame = static_cast<uint32_t>(m_sceneFrameCounter);
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_geometryFeedbackPipeline);
                 // The main view, then every editor view drawn this frame (other viewports, asset previews): each wants the detail
                 // its own camera needs. A page is reported once a frame whichever view asks first.
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch(push.groupCount, 1, 1);
                 for (const ExtraView& view : m_extraViews)
                 {
                     if (!view.Recorded || frameIndex >= view.UniformBuffers.size() || !view.UniformBuffers[frameIndex])
                         continue;
-                    push.matrixReference = view.UniformBuffers[frameIndex].getDeviceAddress();
+                    push.matrixReference = bufferReadRef(view.UniformBuffers[frameIndex]);
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch(push.groupCount, 1, 1);
                 }
@@ -481,15 +498,15 @@ namespace Nox
                 nri::CommandBuffer& cmd = context.Cmd();
 
                 shaderio::PushConstantInstanceCulling push{};
-                push.matrixReference = uniformBuffer->getDeviceAddress();
-                push.viewReference = cullViewBuffer->getDeviceAddress();
-                push.drawListReference = m_drawListBuffers[frameIndex].getDeviceAddress();
-                push.flagsReference = nriGetBufferDeviceAddress(context.Buffer(flags));
-                push.blocksReference = nriGetBufferDeviceAddress(context.Buffer(blocks));
-                push.countsReference = nriGetBufferDeviceAddress(context.Buffer(draws.Counts));
-                push.visibleInstancesReference = nriGetBufferDeviceAddress(context.Buffer(draws.VisibleInstances));
-                push.commandsReference = nriGetBufferDeviceAddress(context.Buffer(draws.Commands));
-                push.lateInstancesReference = nriGetBufferDeviceAddress(context.Buffer(draws.LateInstances));
+                push.matrixReference = bufferReadRef(*uniformBuffer);
+                push.viewReference = bufferReadRef(*cullViewBuffer);
+                push.drawListReference = bufferReadRef(m_drawListBuffers[frameIndex]);
+                push.flagsReference = context.BufferWriteRef(flags);
+                push.blocksReference = context.BufferWriteRef(blocks);
+                push.countsReference = context.BufferWriteRef(draws.Counts);
+                push.visibleInstancesReference = context.BufferWriteRef(draws.VisibleInstances);
+                push.commandsReference = context.BufferWriteRef(draws.Commands);
+                push.lateInstancesReference = context.BufferWriteRef(draws.LateInstances);
                 fillHiZPushConstants(m_renderGraph, context, hiZ, push);
 
                 // Visibility per entry, visible entries per block, offsets and draw counts, then the compacted writes. Each
@@ -673,11 +690,11 @@ namespace Nox
             [this, draws, entryCount, hiZ = resources.CameraHiZ](RGPassContext& context)
             {
                 shaderio::PushConstantInstanceCulling push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                push.viewReference = m_cullViewBuffers[frameIndex].getDeviceAddress();
-                push.countsReference = nriGetBufferDeviceAddress(context.Buffer(draws.Counts));
-                push.lateInstancesReference = nriGetBufferDeviceAddress(context.Buffer(draws.LateInstances));
-                push.lateCommandsReference = nriGetBufferDeviceAddress(context.Buffer(draws.LateCommands));
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.viewReference = bufferReadRef(m_cullViewBuffers[frameIndex]);
+                push.countsReference = context.BufferWriteRef(draws.Counts);
+                push.lateInstancesReference = context.BufferReadRef(draws.LateInstances);
+                push.lateCommandsReference = context.BufferWriteRef(draws.LateCommands);
                 fillHiZPushConstants(m_renderGraph, context, hiZ, push);
 
                 nri::CommandBuffer& cmd = context.Cmd();
@@ -742,8 +759,9 @@ namespace Nox
         const bool restirPTNeedsVelocity = m_frame.runPathTracer && m_restirPTEnabled && m_restirPTTemporalEnabled;
         const bool pathTracerNRDNeedsVelocity = m_frame.runPathTracer &&
                                                 m_nrdPTDenoiser != Nox::NRDDiffuseDenoiser::Off && nrdAvailable;
+        const bool taaNeedsVelocity = isTAAActive() && !m_frame.runPathTracer;
         const bool inspectVelocity = m_textureInspection.Name == "GBuffer Velocity";
-        const bool writeVelocity = dlssNeedsVelocity || nrdShadowsNeedVelocity || nrdReflectionsNeedVelocity ||
+        const bool writeVelocity = dlssNeedsVelocity || taaNeedsVelocity || nrdShadowsNeedVelocity || nrdReflectionsNeedVelocity ||
                                    restirGINeedsVelocity || screenProbeGINeedsVelocity || restirDINeedsVelocity || restirPTNeedsVelocity ||
                                    pathTracerNRDNeedsVelocity || m_debugMode == 15 || inspectVelocity || m_postEffects.MotionBlur;
         m_frame.gbufferVelocityWritten = writeVelocity;
@@ -853,17 +871,17 @@ namespace Nox
                 }
 
                 shaderio::PushConstantVisibilityDebug gbufferPush{};
-                gbufferPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                gbufferPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
 
                 bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && static_cast<bool>(m_boneBuffers[frameIndex]);
                 bool hasBones = !m_boneMatrices.empty();
-                gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex].getDeviceAddress() : 0;
+                gbufferPush.boneMatrixReference = (hasBones && hasBoneBuffers) ? bufferReadRef(m_boneBuffers[frameIndex]) : 0;
 
                 if (m_frame.computeSkinningAdded && res->SkinnedVertices.IsValid())
-                    gbufferPush.skinnedVertexReference = nriGetBufferDeviceAddress(context.Buffer(res->SkinnedVertices));
+                    gbufferPush.skinnedVertexReference = bufferReadRef(context.Buffer(res->SkinnedVertices));
                 if (m_frame.skinnedHistoryValid && res->PreviousSkinnedVertices.IsValid())
                 {
-                    gbufferPush.previousSkinnedVertexReference = nriGetBufferDeviceAddress(context.Buffer(res->PreviousSkinnedVertices));
+                    gbufferPush.previousSkinnedVertexReference = bufferReadRef(context.Buffer(res->PreviousSkinnedVertices));
                     gbufferPush.skinnedHistoryValid = 1;
                 }
 
@@ -1153,8 +1171,8 @@ namespace Nox
         for (const ParticleBatch& batch : m_particleBatches)
             lit |= batch.Settings.Lit;
         const bool shadows = lit && getRayTracedShadowsActive();
-        const uint64_t particles = m_particleBuffers[frameIndex].getDeviceAddress();
-        const uint64_t uniforms = m_uniformBuffers[frameIndex].getDeviceAddress();
+        const uint64_t particles = bufferReadRef(m_particleBuffers[frameIndex]);
+        const uint64_t uniforms = bufferReadRef(m_uniformBuffers[frameIndex]);
 
         auto declareParticles = [&](RGBuilder& builder)
         {
@@ -1399,7 +1417,7 @@ namespace Nox
                     cmd.setColorBlendEnable(1, false);
                     cmd.setColorWriteMask(1, 0u);
                     shaderio::PushConstantLightShapes lightShapesPush{};
-                    lightShapesPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    lightShapesPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     cmd.pushData(&lightShapesPush, sizeof(lightShapesPush));
                     nri::drawMeshTasks(cmd, 1, 1, 1);
                     cmd.setColorWriteMask(1, nri::ColorComponent::All);
@@ -1420,7 +1438,7 @@ namespace Nox
                     cmd.setColorWriteMask(1, nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A);
 
                     shaderio::PushConstantSkybox skyboxPush = skyboxSun;
-                    skyboxPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    skyboxPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     skyboxPush.cubemapIndex = m_environmentCubemap->GetDescriptorIndexSlot();
                     cmd.pushData(&skyboxPush, sizeof(shaderio::PushConstantSkybox));
                     nri::drawMeshTasks(cmd, 1, 1, 1);
@@ -1483,7 +1501,7 @@ namespace Nox
                     cmd.setColorWriteMask(1, nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A);
 
                     shaderio::PushConstantDDGIDebug debugPush{};
-                    debugPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    debugPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     debugPush.probeCountTotal = totalDDGIProbes;
                     debugPush.sphereRadius = WorldUnits::FromMeters(m_ddgiDebugSphereRadius);
                     debugPush.irradianceAtlasIndex = context.Slot(res->DDGIIrradiance[m_frame.ddgiWriteIndex]);

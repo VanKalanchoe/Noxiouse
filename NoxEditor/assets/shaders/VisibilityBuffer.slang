@@ -9,15 +9,15 @@
     struct VSOutput
     {
         float4 pos : SV_Position;
-        float2 uv0;
-        float2 uv1;
-        float vertexAlpha; // vertex color alpha (glTF COLOR_0): part of the base color's alpha the mask tests
-        nointerpolation uint drawID;
-        nointerpolation uint meshletID;
+        float2 uv0 : TEXCOORD0;
+        float2 uv1 : TEXCOORD1;
+        float vertexAlpha : TEXCOORD2; // vertex color alpha (glTF COLOR_0): part of the base color's alpha the mask tests
+        nointerpolation uint drawID : TEXCOORD3;
+        nointerpolation uint meshletID : TEXCOORD4;
 #ifdef NOX_MATERIAL_GRAPH
-        float3 worldPos;    // render space (camera-relative origin: UniformBufferObject::renderOrigin)
-        float3 normal;      // world
-        float4 vertexColor; // glTF COLOR_0 (white without)
+        float3 worldPos : TEXCOORD5;    // render space (camera-relative origin: UniformBufferObject::renderOrigin)
+        float3 normal : TEXCOORD6;      // world
+        float4 vertexColor : TEXCOORD7; // glTF COLOR_0 (white without)
 #endif
     };
 
@@ -44,18 +44,18 @@
         uniform PushConstantMeshlets pushConstant
     )
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
 
         // The payload carries the instance slot.
         InstanceData instance = instances[sharedPayload.drawID];
         float4x4 modelMatrix = instance.modelMatrix;
 
-        MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-        uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
-        uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
+        BufferRef<MeshletDraw> meshletDrawStream = BufferRef<MeshletDraw>(ubo.geometryMeshletDrawsReference);
+        BufferRef<uint32_t> meshletVertexStream = BufferRef<uint32_t>(ubo.geometryMeshletVerticesReference);
+        BufferRef<uint> meshletTriangleStream = BufferRef<uint>(ubo.geometryMeshletTrianglesReference);
 
-        uint8_t localMeshletOffset = sharedPayload.meshletIndices[groupId.x];
+        uint localMeshletOffset = payload_meshlet_index(sharedPayload, groupId.x);
         uint globalMeshletIdx = sharedPayload.groupMeshletOffset + localMeshletOffset;
 
         MeshletDraw meshlet = meshletDrawStream[globalMeshletIdx];
@@ -75,12 +75,12 @@
             // a frame where the cache is unavailable (for example immediately after shader hot reload).
             if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
             {
-                SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVertexReference;
+                BufferRef<SkinnedVertex> skinnedVertices = BufferRef<SkinnedVertex>(pushConstant.skinnedVertexReference);
                 localPos = skinnedVertices[instance.skinnedVertexOffset + localVertexIndex].position;
             }
             else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
             {
-                float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+                BufferRef<float4x4> boneMatrices = BufferRef<float4x4>(pushConstant.boneMatrixReference);
                 uint baseOffset = instance.boneMatrixOffset;
                 float4x4 skinTransform =
                     boneMatrices[baseOffset + vert.boneIDs.x] * vert.boneWeights.x +
@@ -102,7 +102,7 @@
             vertices[i].vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
 #endif
             // The material's depth bias (depth_bias_clip): decals and overlays over the surface they lie on.
-            float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias);
+            float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo.cameraWorldPos.xyz, instance.depthBias);
             vertices[i].pos = clipPos;
             vertices[i].uv0 = vert.uv0;
             vertices[i].uv1 = vert.uv1;
@@ -117,9 +117,9 @@
         for (uint i = gtid.x; i < meshlet.triangleCount; i += MESH_SHADER_DISPATCH_X)
         {
             uint triBase = meshlet.triangleOffset + (i * 3);
-            uint idx0 = meshletTriangleStream[triBase];
-            uint idx1 = meshletTriangleStream[triBase + 1];
-            uint idx2 = meshletTriangleStream[triBase + 2];
+            uint idx0 = LoadByte(meshletTriangleStream, triBase);
+            uint idx1 = LoadByte(meshletTriangleStream, triBase + 1);
+            uint idx2 = LoadByte(meshletTriangleStream, triBase + 2);
 
             triangles[i] = uint3(idx0, idx1, idx2);
             primitives[i].primitiveID = i;
@@ -147,13 +147,13 @@
     )
     {
         // Alpha mask discard: prevents transparent quad areas from writing depth & visibility
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[inVert.drawID];
 
 #ifdef NOX_MATERIAL_GRAPH
         bool graphMask;
-        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->proj, ubo->view), ubo,
+        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo.proj, ubo.view), ubo,
                                      instances.material(inVert.drawID), instance, graphMask))
             discard;
         if (!graphMask)
@@ -193,14 +193,14 @@
     [shader("fragment")]
     void depthMaskFragMain(VSOutput inVert, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[inVert.drawID];
 
 #ifdef NOX_MATERIAL_GRAPH
         // (the graph's view inputs -- Camera Vector, Screen Position -- are the shadow view's here, as in Unreal's shadow depths)
         bool graphMask;
-        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->proj, ubo->view), ubo,
+        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo.proj, ubo.view), ubo,
                                      instances.material(inVert.drawID), instance, graphMask))
             discard;
         if (!graphMask)

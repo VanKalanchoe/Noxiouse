@@ -39,6 +39,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload SSAOBlurPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -68,10 +69,10 @@ struct SSAOBlurOutput
 SSAOBlurOutput fragMain(MSOutput input, uniform PushConstantSSAOBlur pushConstant)
 {
     SSAOBlurOutput output;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     int2 pixelCoord = int2(input.pos.xy);
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float centerDepth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (centerDepth <= 0.0)
     {
@@ -79,7 +80,7 @@ SSAOBlurOutput fragMain(MSOutput input, uniform PushConstantSSAOBlur pushConstan
         return output;
     }
 
-    Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
+    Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
 
     const int radius = 2; // 5x5
     float total = 0.0;

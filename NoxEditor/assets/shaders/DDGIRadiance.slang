@@ -37,6 +37,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload DDGIRadiancePayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex
@@ -54,7 +55,7 @@ void meshMain(
 
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
     uint i0, i1, i2;
     if (lut.indexBufferAddress != 0)
     {
@@ -69,18 +70,18 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
         i2 = primIndex * 3 + 2;
     }
 
-    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+    BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
     float w0 = 1.0 - barycentrics.x - barycentrics.y;
     return ray_hit_uv(lut, w0 * vertices[i0].uv0 + barycentrics.x * vertices[i1].uv0 + barycentrics.y * vertices[i2].uv0);
 }
 
 // One shadow ray from a probe ray's hit towards a light (any hit ends it).
-bool ddgiShadowed(RaytracingAccelerationStructure accelerationStructure, UniformBufferObject* ubo, float3 origin, float3 direction, float maxDistance)
+bool ddgiShadowed(RaytracingAccelerationStructure accelerationStructure, UniformBufferObject ubo, float3 origin, float3 direction, float maxDistance)
 {
     RayDesc shadowRay;
     shadowRay.Origin = origin;
     shadowRay.Direction = direction;
-    shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
+    shadowRay.TMin = 0.005 * ubo.unitsPerMeter;
     shadowRay.TMax = maxDistance;
 
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
@@ -92,13 +93,12 @@ bool ddgiShadowed(RaytracingAccelerationStructure accelerationStructure, Uniform
 [shader("fragment")]
 float4 fragMain(
     MSOutput input,
-    float4 pixelCoord : SV_Position,
     uniform PushConstantDDGIRadiance pushConstant
 ) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint rayIndex = uint(pixelCoord.x);
-    uint probeIndex = uint(pixelCoord.y);
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    uint rayIndex = uint(input.pos.x);
+    uint probeIndex = uint(input.pos.y);
 
     if (rayIndex >= pushConstant.raysPerProbe || probeIndex >= pushConstant.probeCountTotal)
     {
@@ -128,22 +128,35 @@ float4 fragMain(
     RayDesc rayDesc;
     rayDesc.Origin = probePos;
     rayDesc.Direction = rayDir;
-    rayDesc.TMin = 0.01 * ubo->unitsPerMeter;
+    rayDesc.TMin = 0.01 * ubo.unitsPerMeter;
     // Far enough for the coarse cascades' cells too.
-    rayDesc.TMax = max(100.0 * ubo->unitsPerMeter, 4.0 * length(ddgi_cascade_spacing(ubo, ddgi_cascade_of(ubo, probeIndex))));
+    rayDesc.TMax = max(100.0 * ubo.unitsPerMeter, 4.0 * length(ddgi_cascade_spacing(ubo, ddgi_cascade_of(ubo, probeIndex))));
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    // When no TLAS exists yet (e.g. empty scene while meshes stream in), skip traversal and treat every ray as a sky miss.
+    if (ubo.tlasDeviceAddress == 0)
+    {
+        float3 skyColor = float3(0.0);
+        if (ubo.prefilteredMapIndex != 0xFFFFFFFF)
+        {
+            TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
+            SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
+            skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, rayDir, 0).rgb * ubo.scaleIBLAmbient;
+        }
+        return float4(skyColor, 1000.0);
+    }
+
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
     let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 
     rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, rayDesc);
 
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (rq.Proceed())
     {
-        uint instanceID = rq.CandidateRayInstanceCustomIndex();
+        uint instanceID = rq.CandidateInstanceID();
         uint primIndex = rq.CandidatePrimitiveIndex();
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
@@ -168,23 +181,23 @@ float4 fragMain(
     if (!hit)
     {
         float3 skyColor = float3(0.0);
-        if (ubo->prefilteredMapIndex != 0xFFFFFFFF)
+        if (ubo.prefilteredMapIndex != 0xFFFFFFFF)
         {
-            TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+            TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
             SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-            skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, rayDir, 0).rgb * ubo->scaleIBLAmbient;
+            skyColor = prefilteredTex.SampleLevel(samplerPrefiltered, rayDir, 0).rgb * ubo.scaleIBLAmbient;
         }
         return float4(skyColor, 1000.0);
     }
 
     // Ray Hit: evaluate surface illumination
-    uint committedInstanceID = rq.CommittedRayInstanceCustomIndex();
+    uint committedInstanceID = rq.CommittedInstanceID();
     uint committedPrimIndex = rq.CommittedPrimitiveIndex();
     float2 committedBary = rq.CommittedTriangleBarycentrics();
     float hitT = rq.CommittedRayT();
 
     GpuRayTracingInstance hitLut = instanceLUTBuffer[committedInstanceID];
-    uint32_t* indices = (uint32_t*)hitLut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(hitLut.indexBufferAddress);
 
     uint i0, i1, i2;
     if (hitLut.indexBufferAddress != 0)
@@ -242,12 +255,12 @@ float4 fragMain(
     // Direct light: the strongest lights at the hit exactly, one more for all the others (LightSelection.slang), each behind its
     // shadow ray; point and spot lights at most what they give 10 cm away.
     uint pickState = (probeIndex * 9781u + rayIndex * 6271u + pushConstant.frameIndex * 26699u) | 1u;
-    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.1 * ubo->unitsPerMeter, pickState);
+    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.1 * ubo.unitsPerMeter, pickState);
     float3 directIrradiance = float3(0.0);
     for (uint i = 0; i < selectedLights.count; ++i)
     {
-        if (!ddgiShadowed(accelerationStructure, ubo, hitPos + hitNormal * (0.02 * ubo->unitsPerMeter), selectedLights.direction[i],
-                          max(selectedLights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0)))
+        if (!ddgiShadowed(accelerationStructure, ubo, hitPos + hitNormal * (0.02 * ubo.unitsPerMeter), selectedLights.direction[i],
+                          max(selectedLights.distance[i] - 0.02 * ubo.unitsPerMeter, 0.0)))
             directIrradiance += selectedLights.irradiance[i];
     }
     const float3 directLight = albedo / 3.14159265 * directIrradiance;
@@ -264,8 +277,8 @@ float4 fragMain(
     float3 indirectLight = float3(0.0);
     if (pushConstant.prevIrradianceTextureIndex != 0xFFFFFFFF && pushConstant.prevDistanceTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D prevIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevIrradianceTextureIndex, 0));
-        Texture2D prevDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevDistanceTextureIndex, 0));
+        Texture2D prevIrrTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevIrradianceTextureIndex, 0));
+        Texture2D prevDistTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevDistanceTextureIndex, 0));
         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
         // The probes hold irradiance / pi (a cosine-weighted mean of radiance), as the lighting reads them: reflected = albedo * it.
@@ -273,12 +286,12 @@ float4 fragMain(
                                                                pushConstant.probeOffsetsTextureIndex);
         indirectLight = albedo * bouncedIrradiance;
     }
-    else if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    else if (ubo.irradianceMapIndex != 0xFFFFFFFF)
     {
         // Initial frame fallback to scene irradiance cubemap
-        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
         SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        indirectLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * albedo * ubo->scaleIBLAmbient;
+        indirectLight = irradianceTex.SampleLevel(samplerIrradiance, hitNormal, 0).rgb * albedo * ubo.scaleIBLAmbient;
     }
 
     float3 hitRadiance = directLight + emissiveLight + indirectLight;

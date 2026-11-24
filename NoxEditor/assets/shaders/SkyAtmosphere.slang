@@ -661,7 +661,7 @@ void aerialPerspectiveMain(uint3 id : SV_DispatchThreadID, uniform PushConstantA
     if (id.x >= AerialPerspectiveSize || id.y >= AerialPerspectiveSize)
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)ap.matrixReference;
+    UniformBufferObject ubo = loadUbo(ap.matrixReference);
 
     // The sky's functions take the sky's push constants: the same atmosphere.
     PushConstantSkyAtmosphere atmosphere = (PushConstantSkyAtmosphere)0;
@@ -675,11 +675,11 @@ void aerialPerspectiveMain(uint3 id : SV_DispatchThreadID, uniform PushConstantA
     // The froxel column's view direction, with the same screen convention as DeferredLighting.slang's reconstruction. A
     // point well in front of the camera, not at the near plane (precision, see Skybox.slang).
     const float2 uv = (float2(id.xy) + 0.5) / float(AerialPerspectiveSize);
-    const float4 farPoint = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.001, 1.0));
-    const float3 direction = normalize(farPoint.xyz / farPoint.w - ubo->cameraWorldPos.xyz);
+    const float4 farPoint = mul(ubo.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.001, 1.0));
+    const float3 direction = normalize(farPoint.xyz / farPoint.w - ubo.cameraWorldPos.xyz);
 
     // The camera in the atmosphere: the world origin AltitudeKm above the ground, +Y up, kept above the ground.
-    float3 cameraKm = ubo->cameraWorldPos.xyz * ap.kmPerWorldUnit;
+    float3 cameraKm = ubo.cameraWorldPos.xyz * ap.kmPerWorldUnit;
     cameraKm.y = max(cameraKm.y + BottomRadius + ap.altitudeKm, BottomRadius + PlanetRadiusOffset);
 
     const float3 sunDirection = normalize(ap.sunDirection);

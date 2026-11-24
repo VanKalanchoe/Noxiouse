@@ -30,9 +30,9 @@ struct MaterialGraphInputs
     float2 screenUVDy;
     float time;           // seconds (UniformBufferObject::timeSeconds)
     float3 cameraPosition;
-    GpuMaterial* material; // its graphParameters (the material's overrides, else the graph's defaults) and graphTextureIndex
+    GpuMaterial material; // its graphParameters (the material's overrides, else the graph's defaults) and graphTextureIndex
     bool mipFeedback;      // this pixel reports the mips its textures need (texture streaming: isMipFeedbackPixel)
-    UniformBufferObject* ubo;
+    UniformBufferObject ubo;
 };
 
 // What a graph writes: the Material Output pins it connects.
@@ -59,7 +59,7 @@ float4 material_graph_texture(MaterialGraphInputs i, uint slot, float2 uv, float
     if (i.mipFeedback)
         reportMipFeedback(i.ubo, texture, uv, uvDx, uvDy);
     SamplerState linearRepeat = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-    const float scale = exp2(i.ubo->textureLodBias);
+    const float scale = exp2(i.ubo.textureLodBias);
     float4 value = SampleMaterialTextureGrad(i.ubo, texture, linearRepeat, uv, uvDx * scale, uvDy * scale);
     if (normalMap)
     {
@@ -93,10 +93,10 @@ float3 material_graph_vertex_normal(InstanceData instance, Vertex vert, uint loc
 {
     float3 localNormal = vert.normal;
     if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
-        localNormal = ((SkinnedVertex*)pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex].normal.xyz;
+        localNormal = BufferRef<SkinnedVertex>(pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex].normal.xyz;
     else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
     {
-        float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+        BufferRef<float4x4> boneMatrices = BufferRef<float4x4>(pushConstant.boneMatrixReference);
         const uint baseOffset = instance.boneMatrixOffset;
         const float4x4 skinTransform = boneMatrices[baseOffset + vert.boneIDs.x] * vert.boneWeights.x + boneMatrices[baseOffset + vert.boneIDs.y] * vert.boneWeights.y +
                                        boneMatrices[baseOffset + vert.boneIDs.z] * vert.boneWeights.z + boneMatrices[baseOffset + vert.boneIDs.w] * vert.boneWeights.w;
@@ -114,7 +114,7 @@ float3 material_graph_vertex_normal(InstanceData instance, Vertex vert, uint loc
 // the editor's overlays -- so they all move the vertex the same way.
 
 // Whether the material's graph offsets its vertices.
-bool material_graph_has_offset(GpuMaterial* material)
+bool material_graph_has_offset(GpuMaterial material)
 {
     return material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u;
 }
@@ -123,22 +123,22 @@ bool material_graph_has_offset(GpuMaterial* material)
 // (world), its UVs and vertex colour. The graph's inputs have no screen derivatives here (a Texture Sample reads the finest mip; Unreal
 // samples level 0 in vertex shaders too); Camera Vector and Camera Position are the main camera's in every pass (the shadow views use
 // the same offset as the view). Clamped to the graph's Max World Position Offset Displacement when it has one (Unreal's).
-float3 material_graph_offset(GpuMaterial* material, float3 renderPos, float3 worldNormal, float2 uv0, float2 uv1, float4 vertexColor, float time,
-                             UniformBufferObject* ubo)
+float3 material_graph_offset(GpuMaterial material, float3 renderPos, float3 worldNormal, float2 uv0, float2 uv1, float4 vertexColor, float time,
+                             UniformBufferObject ubo)
 {
     if (!material_graph_has_offset(material))
         return float3(0.0);
     MaterialGraphInputs i = (MaterialGraphInputs)0;
     i.uv0 = uv0;
     i.uv1 = uv1;
-    i.position = renderPos + ubo->renderOrigin;
+    i.position = renderPos + ubo.renderOrigin;
     i.normal = dot(worldNormal, worldNormal) > 1e-12 ? normalize(worldNormal) : float3(0.0, 0.0, 1.0);
     i.vertexColor = vertexColor;
-    const float3 toCamera = ubo->cameraWorldPos.xyz - renderPos;
+    const float3 toCamera = ubo.cameraWorldPos.xyz - renderPos;
     i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
     i.screenUV = float2(0.5); // (not available per vertex: the graph compiler refuses Screen Position there)
     i.time = time;
-    i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+    i.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
     i.material = material;
     i.mipFeedback = false;
     i.ubo = ubo;
@@ -154,13 +154,13 @@ float3 material_graph_offset(GpuMaterial* material, float3 renderPos, float3 wor
 
 // The same for a vertex of a meshlet in a mesh stage: its normal (skinned as its position is) and colour are read only when the
 // material offsets vertices.
-float3 material_graph_vertex_offset(GpuMaterial* material, InstanceData instance, Vertex vert, uint localVertexIndex, uint globalVertexIndex,
-                                    float3 renderPos, UniformBufferObject* ubo, PushConstantMeshlets pushConstant)
+float3 material_graph_vertex_offset(GpuMaterial material, InstanceData instance, Vertex vert, uint localVertexIndex, uint globalVertexIndex,
+                                    float3 renderPos, UniformBufferObject ubo, PushConstantMeshlets pushConstant)
 {
     if (!material_graph_has_offset(material))
         return float3(0.0);
     return material_graph_offset(material, renderPos, material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant), vert.uv0, vert.uv1,
-                                 loadMeshVertexColor(ubo, globalVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo);
+                                 loadMeshVertexColor(ubo, globalVertexIndex, instance.vertexColors), ubo.timeSeconds, ubo);
 }
 
 // Whether a Masked material whose graph connects Opacity Mask has this pixel cut away (its mask below its Opacity Mask Clip Value);
@@ -168,7 +168,7 @@ float3 material_graph_vertex_offset(GpuMaterial* material, InstanceData instance
 // interpolated vertex values (render-space `worldPos`), their derivatives from this pixel's quad; `viewProj`: the pass's projection
 // (Screen Position). Called where every pixel of a quad runs (the derivatives), with a draw's material: the same for the whole quad.
 bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 normal, float4 vertexColor, bool isFrontFace, float4x4 viewProj,
-                              UniformBufferObject* ubo, GpuMaterial* material, InstanceData instance, out bool handled)
+                              UniformBufferObject ubo, GpuMaterial material, InstanceData instance, out bool handled)
 {
     handled = instance.alphaMode == 1 && material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputOpacityMask) != 0u;
     MaterialGraphInputs i;
@@ -178,19 +178,19 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
     i.uv1 = uv1;
     i.uv1Dx = ddx(uv1);
     i.uv1Dy = ddy(uv1);
-    i.position = worldPos + ubo->renderOrigin;
+    i.position = worldPos + ubo.renderOrigin;
     i.positionDx = ddx(worldPos);
     i.positionDy = ddy(worldPos);
     const float3 n = normalize(normal);
     i.normal = instance.doubleSided != 0 && !isFrontFace ? -n : n;
     i.vertexColor = vertexColor;
-    i.view = normalize(ubo->cameraWorldPos.xyz - worldPos);
+    i.view = normalize(ubo.cameraWorldPos.xyz - worldPos);
     const float4 clip = mul(viewProj, float4(worldPos, 1.0));
     i.screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
     i.screenUVDx = ddx(i.screenUV);
     i.screenUVDy = ddy(i.screenUV);
-    i.time = ubo->timeSeconds;
-    i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+    i.time = ubo.timeSeconds;
+    i.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
     i.material = material;
     i.mipFeedback = false; // (the G-buffer resolve reports the textures' mips)
     i.ubo = ubo;
@@ -208,7 +208,7 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
 // instance's transform. No screen derivatives (a Texture Sample reads the finest mip), Camera Vector towards the main camera, Screen
 // Position the view's centre.
 #if defined(NOX_MATERIAL_GRAPH_MASK) || defined(NOX_MATERIAL_GRAPH_SURFACE)
-MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject* ubo, GpuRayTracingInstance instance, GpuMaterial* material, uint primitive,
+MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject ubo, GpuRayTracingInstance instance, GpuMaterial material, uint primitive,
                                               float2 barycentrics)
 {
     const uint3 corners = RayTracingTriangle(instance, primitive);
@@ -217,20 +217,20 @@ MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject* ubo, GpuRayTr
     const Vertex v2 = LoadRayTracingVertex(instance, corners.z);
     const float3 w = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
     const float3 localPosition = v0.pos * w.x + v1.pos * w.y + v2.pos * w.z;
-    const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[instance.instanceSlot].world;
+    const float4x4 world = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[instance.instanceSlot].world;
     const float3 position = mul(world, float4(localPosition, 1.0)).xyz; // (render space)
     const float3 normal = mul((float3x3)instance.normalMatrix, v0.normal * w.x + v1.normal * w.y + v2.normal * w.z);
     MaterialGraphInputs i = (MaterialGraphInputs)0;
     i.uv0 = v0.uv0 * w.x + v1.uv0 * w.y + v2.uv0 * w.z;
     i.uv1 = v0.uv1 * w.x + v1.uv1 * w.y + v2.uv1 * w.z;
-    i.position = position + ubo->renderOrigin;
+    i.position = position + ubo.renderOrigin;
     i.normal = dot(normal, normal) > 1e-12 ? normalize(normal) : float3(0.0, 0.0, 1.0);
     i.vertexColor = RayTracingVertexColor(instance, corners, barycentrics);
-    const float3 toCamera = ubo->cameraWorldPos.xyz - position;
+    const float3 toCamera = ubo.cameraWorldPos.xyz - position;
     i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
     i.screenUV = float2(0.5);
-    i.time = ubo->timeSeconds;
-    i.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+    i.time = ubo.timeSeconds;
+    i.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
     i.material = material;
     i.mipFeedback = false;
     i.ubo = ubo;
@@ -239,12 +239,12 @@ MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject* ubo, GpuRayTr
 #endif
 
 #ifdef NOX_MATERIAL_GRAPH_MASK
-float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, out bool handled)
+float material_graph_ray_mask(UniformBufferObject ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, out bool handled)
 {
     handled = false;
     if (instance.alphaMode != 1)
         return 1.0;
-    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    const GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
     if (material.graphSlot == 0xFFFFFFFFu || (material.graphOutputs & MaterialGraphOutputOpacityMask) == 0u)
         return 1.0;
     handled = true;
@@ -258,9 +258,9 @@ float material_graph_ray_mask(UniformBufferObject* ubo, GpuRayTracingInstance in
 // metallic, roughness and occlusion saturated, emissive at least 0, the normal in tangent space (the caller puts it in its frame:
 // material_graph_world_normal). Returns which pins (MaterialGraphOutput* bits; 0: no graph, `o` as it was). Opacity is the forward
 // shader's (a translucent hit keeps its material's).
-uint material_graph_ray_surface(UniformBufferObject* ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, inout MaterialGraphOutputs o)
+uint material_graph_ray_surface(UniformBufferObject ubo, GpuRayTracingInstance instance, uint primitive, float2 barycentrics, inout MaterialGraphOutputs o)
 {
-    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    const GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
     if (material.graphSlot == 0xFFFFFFFFu)
         return 0u;
     const uint outputs = material.graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic | MaterialGraphOutputRoughness |

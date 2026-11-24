@@ -10,9 +10,9 @@
 #define RTXDI_GI_RESERVOIR_BUFFER g_HistoryReservoirBuffer
 #define RTXDI_GI_ALLOWED_BIAS_CORRECTION RTXDI_BIAS_CORRECTION_BASIC
 
-static RTXDI_PackedGIReservoir* g_HistoryReservoirBuffer;
+static BufferRef<RTXDI_PackedGIReservoir> g_HistoryReservoirBuffer;
 static PushConstantReSTIRGITemporal g_PushConstant;
-static UniformBufferObject* g_UBO;
+static UniformBufferObject g_UBO;
 
 struct RAB_Material
 {
@@ -107,7 +107,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         return s;
     }
 
-    if (g_UBO == nullptr)
+    if (g_PushConstant.matrixReference == 0)
     {
         return s;
     }
@@ -120,7 +120,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         return s;
     }
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO->imageHeapIndexOffset + depthTexIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + depthTexIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelPos, 0)).r;
 
     if (rawDepth <= 0.00001)
@@ -137,7 +137,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
     }
 
     // m_gbufferNormal stores raw world normals directly in [-1, 1]
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + normalTexIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + normalTexIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelPos, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6)
@@ -242,6 +242,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRGITemporalPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -292,8 +293,8 @@ PSOutput fragMain(
     }
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_HistoryReservoirBuffer = (RTXDI_PackedGIReservoir*)pushConstant.previousReservoirReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_HistoryReservoirBuffer = BufferRef<RTXDI_PackedGIReservoir>(pushConstant.previousReservoirReference);
 
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
@@ -302,23 +303,23 @@ PSOutput fragMain(
     resParams.pad2 = 0;
 
     uint pointer = RTXDI_ReservoirPositionToPointer(resParams, pixelCoord, 0);
-    RTXDI_PackedGIReservoir* currentReservoirBuffer = (RTXDI_PackedGIReservoir*)pushConstant.currentReservoirReference;
+    RWBufferRef<RTXDI_PackedGIReservoir> currentReservoirBuffer = RWBufferRef<RTXDI_PackedGIReservoir>(pushConstant.currentReservoirReference);
 
     // Current-frame surface for this pixel (isPreviousFrame = false)
     RAB_Surface surface = RAB_GetGBufferSurface(int2(pixelCoord), false);
     if (!surface.valid)
     {
-        currentReservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
+        currentReservoirBuffer.Store(pointer, (RTXDI_PackedGIReservoir)0);
         return outVal;
     }
 
     // Pass 1's initial candidate for this pixel
-    RTXDI_GIReservoir inputReservoir = RTXDI_UnpackGIReservoir(currentReservoirBuffer[pointer]);
+    RTXDI_GIReservoir inputReservoir = RTXDI_UnpackGIReservoir(currentReservoirBuffer.Load(pointer));
 
     float3 screenSpaceMotion = float3(0.0);
     if (pushConstant.gbufferVelocityIndex != 0xFFFFFFFF)
     {
-        Texture2D velocityTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
+        Texture2D velocityTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
         float2 velUV = velocityTex.Load(int3(pixelCoord, 0)).rg;
         screenSpaceMotion = float3(velUV * pushConstant.viewportSize, 0.0);
     }
@@ -356,7 +357,7 @@ PSOutput fragMain(
     // Overwrite Pass 1's initial candidate in place with the temporally-resampled result -- this is
     // what the Spatial pass reads next, for both its own-pixel input and (via every neighbor pixel's
     // own temporal pass output) its spatial neighbor reservoirs.
-    currentReservoirBuffer[pointer] = RTXDI_PackGIReservoir(temporalResult, 0);
+    currentReservoirBuffer.Store(pointer, RTXDI_PackGIReservoir(temporalResult, 0));
 
     outVal.debugOut = float4(temporalResult.radiance, 1.0);
     return outVal;

@@ -10,15 +10,15 @@
     struct VSOutput
     {
         float4 pos : SV_Position;
-        float2 uv0;
-        float2 uv1;
-        float vertexAlpha; // vertex color alpha: part of the mask's alpha (VisibilityBuffer.slang)
+        float2 uv0 : TEXCOORD0;
+        float2 uv1 : TEXCOORD1;
+        float vertexAlpha : TEXCOORD2; // vertex color alpha: part of the mask's alpha (VisibilityBuffer.slang)
 #ifdef NOX_MATERIAL_GRAPH
-    float3 worldPos;    // (a material graph's Opacity Mask: MaterialGraph.slang's material_graph_mask_cuts)
-    float3 normal;
-    float4 vertexColor;
+        float3 worldPos : TEXCOORD3;    // (a material graph's Opacity Mask: MaterialGraph.slang's material_graph_mask_cuts)
+        float3 normal : TEXCOORD4;
+        float4 vertexColor : TEXCOORD5;
 #endif
-        nointerpolation uint drawID;
+        nointerpolation uint drawID : TEXCOORD6;
     };
 
     [shader("mesh")]
@@ -34,17 +34,17 @@
         uniform PushConstantMeshlets pushConstant
     )
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
 
         InstanceData instance = instances[sharedPayload.drawID];
         float4x4 modelMatrix = instance.modelMatrix;
 
-        MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-        uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
-        uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
+        BufferRef<MeshletDraw> meshletDrawStream = BufferRef<MeshletDraw>(ubo.geometryMeshletDrawsReference);
+        BufferRef<uint32_t> meshletVertexStream = BufferRef<uint32_t>(ubo.geometryMeshletVerticesReference);
+        BufferRef<uint> meshletTriangleStream = BufferRef<uint>(ubo.geometryMeshletTrianglesReference);
 
-        uint8_t localMeshletOffset = sharedPayload.meshletIndices[groupId.x];
+        uint localMeshletOffset = payload_meshlet_index(sharedPayload, groupId.x);
         uint globalMeshletIdx = sharedPayload.groupMeshletOffset + localMeshletOffset;
 
         MeshletDraw meshlet = meshletDrawStream[globalMeshletIdx];
@@ -63,12 +63,12 @@
             // Skinned like the visibility pass (VisibilityBuffer.slang): the compute-skinned cache, else direct skinning.
             if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
             {
-                SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVertexReference;
+                BufferRef<SkinnedVertex> skinnedVertices = BufferRef<SkinnedVertex>(pushConstant.skinnedVertexReference);
                 localPos = skinnedVertices[instance.skinnedVertexOffset + localVertexIndex].position;
             }
             else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
             {
-                float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+                BufferRef<float4x4> boneMatrices = BufferRef<float4x4>(pushConstant.boneMatrixReference);
                 uint baseOffset = instance.boneMatrixOffset;
                 float4x4 skinTransform =
                     boneMatrices[baseOffset + vert.boneIDs.x] * vert.boneWeights.x +
@@ -101,7 +101,7 @@
         for (uint i = gtid.x; i < meshlet.triangleCount; i += MESH_SHADER_DISPATCH_X)
         {
             uint triBase = meshlet.triangleOffset + (i * 3);
-            triangles[i] = uint3(meshletTriangleStream[triBase], meshletTriangleStream[triBase + 1], meshletTriangleStream[triBase + 2]);
+            triangles[i] = uint3(LoadByte(meshletTriangleStream, triBase), LoadByte(meshletTriangleStream, triBase + 1), LoadByte(meshletTriangleStream, triBase + 2));
         }
     }
 
@@ -114,19 +114,14 @@
     MaskOutput fragMain(VSOutput inVert, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
     {
         // Alpha-masked surfaces (foliage cards) cut out like in the visibility pass, so the mask follows the leaves.
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
         InstanceData instance = instances[inVert.drawID];
 #ifdef NOX_MATERIAL_GRAPH
-
         bool graphMask;
-
-        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo->nonJitteredProj, ubo->view),
-
+        if (material_graph_mask_cuts(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace, mul(ubo.nonJitteredProj, ubo.view),
                                      ubo, instances.material(inVert.drawID), instance, graphMask))
-
             discard;
-
         if (!graphMask)
 #endif
 

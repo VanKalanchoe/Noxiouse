@@ -11,6 +11,7 @@
 #include "NoxCore/Core/Window.h"
 #include "Mesh.h"
 #include <mutex>
+#include <shared_mutex>
 #include <atomic>
 #include <future>
 #include <optional>
@@ -2154,6 +2155,17 @@ namespace Nox
         nri::DescriptorHeap m_samplerHeap{};
         nri::DescriptorHeap m_resourceHeap{};
 
+        // Unified cross-API shader buffer & TLAS references (device address on Vulkan, raw SRV/UAV/AS descriptor slot on D3D12).
+        uint64_t bufferReadRef(const nri::Buffer& buffer);
+        uint64_t bufferReadRef(NriBuffer buffer);
+        uint64_t bufferWriteRef(const nri::Buffer& buffer);
+        uint64_t bufferWriteRef(NriBuffer buffer);
+        void releaseBufferRefs(NriBuffer buffer);
+        uint64_t tlasRef() const;
+        mutable std::shared_mutex m_bufferRefMutex;
+        std::unordered_map<NriBuffer, uint32_t> m_bufferReadSlots;
+        std::unordered_map<NriBuffer, uint32_t> m_bufferWriteSlots;
+
         // Scene Data + Frustum Freeze
         std::vector<nri::Buffer> m_uniformBuffers;
         std::vector<void*> m_uniformBuffersMapped;
@@ -2412,6 +2424,8 @@ namespace Nox
         struct PendingRaycast { shaderio::EditorRay Ray; glm::dvec3 Origin{ 0.0 }; RaycastCallback Callback; };
         std::vector<PendingRaycast> m_raycastQueue;
         std::vector<std::vector<RaycastCallback>> m_raycastsInFlight;
+        std::vector<nri::Buffer> m_raycastUploadBuffers;
+        std::vector<nri::Buffer> m_raycastGpuBuffers;
         std::vector<nri::Buffer> m_raycastBuffers;
         nri::Pipeline m_editorRaycastPipeline;
         std::vector<int32_t> m_SelectedEntityIDs;

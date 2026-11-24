@@ -40,8 +40,8 @@ struct CustomLitSurface
     float unitsPerMeter; // world units in a meter (1 or 100)
     float4 parameters[4];       // the material's Parameter 1-4 (Material Editor > Custom Lit): colours or numbers, as the shader reads them
     uint textures[2];           // Custom Texture 1 (sRGB colour) and 2 (linear data); 0xFFFFFFFF: not set -- read with custom_lit_texture
-    UniformBufferObject* ubo;   // (the renderer's frame data: custom_lit_texture reads through it)
-    GpuMaterial* material;      // (the material's record: a material graph's lighting reads its parameters through it)
+    UniformBufferObject ubo;    // (the renderer's frame data: custom_lit_texture reads through it)
+    GpuMaterial material;       // (the material's record: a material graph's lighting reads its parameters through it)
 };
 
 // One light, as it reaches the surface.
@@ -120,7 +120,7 @@ float custom_lit_area_attenuation(LightData light, float3 position, out float3 t
 }
 
 // The surface from what both passes know, and the material's record (its parameters and textures).
-CustomLitSurface custom_lit_surface(UniformBufferObject* ubo, GpuMaterial* material, float3 position, float3 normal, float3 view, float3 baseColor,
+CustomLitSurface custom_lit_surface(UniformBufferObject ubo, GpuMaterial material, float3 position, float3 normal, float3 view, float3 baseColor,
                                     float metallic, float roughness, float occlusion, float3 emissive, float2 uv, float uvFootprint, float2 screenUV)
 {
     CustomLitSurface s;
@@ -135,8 +135,8 @@ CustomLitSurface custom_lit_surface(UniformBufferObject* ubo, GpuMaterial* mater
     s.uv = uv;
     s.uvFootprint = uvFootprint;
     s.screenUV = screenUV;
-    s.time = ubo->timeSeconds;
-    s.unitsPerMeter = ubo->unitsPerMeter;
+    s.time = ubo.timeSeconds;
+    s.unitsPerMeter = ubo.unitsPerMeter;
     for (uint i = 0; i < 4u; ++i)
         s.parameters[i] = material.customParameters[i];
     s.textures[0] = material.customTextureIndex[0];

@@ -35,7 +35,7 @@ float ssr_hiz_load(Texture2D<float> depthTex, Texture2D<float> hizTex, float2 po
 // pixels on long rays: the same spots were found and lost as the camera moved.) rayConfidence: the hit's (the ray within the
 // thickness behind the surface where it stopped, squared falloff) times the fade of rays towards the camera, which soon go behind
 // what the screen shows.
-bool ssr_march(UniformBufferObject* ubo, Texture2D<float> depthTex, Texture2D<float> hizTex, uint hizLevels, float3 start, float3 R,
+bool ssr_march(UniformBufferObject ubo, Texture2D<float> depthTex, Texture2D<float> hizTex, uint hizLevels, float3 start, float3 R,
                float maxDistance, float thickness, uint maxIterations, float2 viewportSize, out float2 hitUV, out float hitDepth,
                out float rayConfidence)
 {
@@ -43,14 +43,14 @@ bool ssr_march(UniformBufferObject* ubo, Texture2D<float> depthTex, Texture2D<fl
     hitDepth = 0.0;
     rayConfidence = 0.0;
     // Towards the camera the ray soon goes behind what the screen shows: faded out (the view's +z is forward).
-    const float3 viewR = mul(ubo->view, float4(R, 0.0)).xyz;
+    const float3 viewR = mul(ubo.view, float4(R, 0.0)).xyz;
     const float facingFade = saturate((viewR.z + 0.25) * 4.0);
     if (facingFade <= 0.0)
         return false;
 
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z; // depth x view distance (infinite reverse Z)
-    const float4x4 viewProj = mul(ubo->proj, ubo->view);
-    const float startZ = mul(ubo->view, float4(start, 1.0)).z;
+    const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z; // depth x view distance (infinite reverse Z)
+    const float4x4 viewProj = mul(ubo.proj, ubo.view);
+    const float startZ = mul(ubo.view, float4(start, 1.0)).z;
     float rayLength = maxDistance;
     if (viewR.z < 0.0) // ends in front of the near plane otherwise
         rayLength = min(rayLength, max(startZ - 2.0 * nearPlane, 0.0) / -viewR.z);

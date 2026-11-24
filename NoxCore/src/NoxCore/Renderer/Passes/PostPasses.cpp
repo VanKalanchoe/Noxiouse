@@ -126,7 +126,7 @@ namespace Nox
                 cmd.setColorWriteMask(0, nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A);
 
                 shaderio::PushConstantPostProcess postPush{};
-                postPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                postPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
 
                 uint32_t activeHdrSlot = 0;
                 if (post.HdrChanged)
@@ -269,7 +269,7 @@ namespace Nox
 
                 // One direct draw per instance: SV_DrawIndex is 0, so instanceBaseIndex picks the slot in the selection list.
                 shaderio::PushConstantMeshlets references = m_frame.meshletReferences;
-                references.drawInstancesReference = m_selectionInstanceBuffers[frameIndex].getDeviceAddress();
+                references.drawInstancesReference = bufferReadRef(m_selectionInstanceBuffers[frameIndex]);
                 references.meshletCulling = m_meshletCulling & ~shaderio::MESHLET_COUNT_TRIANGLES; // not counted in the stats
                 for (uint32_t index = 0; index < static_cast<uint32_t>(m_selectionTaskGroups.size()); ++index)
                 {
@@ -347,8 +347,8 @@ namespace Nox
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_outlinePipeline);
 
                 shaderio::PushConstantOutline references{};
-                references.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex].getDeviceAddress();
+                references.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                references.selectedEntityIDsReference = bufferReadRef(m_selectedEntityIDBuffers[frameIndex]);
                 references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
                 references.selectionMaskTextureIndex = context.SlotOr(mask, 0xFFFFFFFF);
                 references.entityTextureIndex = 0xFFFFFFFF;

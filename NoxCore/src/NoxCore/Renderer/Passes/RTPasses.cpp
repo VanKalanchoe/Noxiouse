@@ -45,7 +45,7 @@ namespace Nox
 
                 shaderio::PushConstantNRDGuides push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
@@ -96,7 +96,7 @@ namespace Nox
                 cmd.setColorWriteMask(0, nri::ColorComponent::R | nri::ColorComponent::G | nri::ColorComponent::B | nri::ColorComponent::A);
 
                 shaderio::PushConstantRTUpsample push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.sourceTextureIndex = context.Slot(source);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.normalTextureIndex = context.Slot(res->GBufferNormal);
@@ -159,7 +159,7 @@ namespace Nox
                 glm::mat4 viewProj = uniformData.proj * uniformData.view;
                 shaderio::PushConstantShadowMask shadowPush{};
                 shadowPush.invViewProj = uniformData.invViewProj;
-                shadowPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                shadowPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 shadowPush.depthTextureIndex = context.Slot(res->Depth);
                 shadowPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 shadowPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
@@ -273,7 +273,7 @@ namespace Nox
 
                     shaderio::PushConstantReflection reflPush{};
                     reflPush.invViewProj = uniformData.invViewProj;
-                    reflPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    reflPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     reflPush.depthTextureIndex = context.Slot(res->Depth);
                     reflPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                     reflPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
@@ -441,7 +441,7 @@ namespace Nox
                                          nri::ColorComponent::B | nri::ColorComponent::A);
 
                 shaderio::PushConstantDDGIRadiance radPush{};
-                radPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                radPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 radPush.raysPerProbe = m_ddgiRaysPerProbe;
                 radPush.probeCountTotal = totalDDGIProbes;
                 radPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
@@ -477,7 +477,7 @@ namespace Nox
                     cmd.setColorWriteMask(0, nri::ColorComponent::All);
 
                     shaderio::PushConstantDDGIBlend push{};
-                    push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     push.rayDataTextureIndex = context.Slot(res->DDGIRayData);
                     push.prevAtlasTextureIndex = context.Slot(res->DDGIProbeOffsets[readIndex]);
                     push.probesPerRow = DDGIProbesPerRow;
@@ -505,7 +505,7 @@ namespace Nox
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_ddgiBlendIrradiancePipeline);
 
                 shaderio::PushConstantDDGIBlend blendIrrPush{};
-                blendIrrPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                blendIrrPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 blendIrrPush.rayDataTextureIndex = context.Slot(res->DDGIRayData);
                 blendIrrPush.prevAtlasTextureIndex = context.Slot(res->DDGIIrradiance[readIndex]);
                 blendIrrPush.probesPerRow = DDGIProbesPerRow;
@@ -533,7 +533,7 @@ namespace Nox
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_ddgiBlendDistancePipeline);
 
                 shaderio::PushConstantDDGIBlend blendDistPush{};
-                blendDistPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                blendDistPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 blendDistPush.rayDataTextureIndex = context.Slot(res->DDGIRayData);
                 blendDistPush.prevAtlasTextureIndex = context.Slot(res->DDGIDistance[readIndex]);
                 blendDistPush.probesPerRow = DDGIProbesPerRow;
@@ -619,7 +619,7 @@ namespace Nox
         m_screenProbePrevView = uniformData.view;
         m_screenProbePrevJitterUv = common.currJitterUv;
         m_screenProbePrevMatricesValid = true;
-        common.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+        common.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
         common.inputTextureIndex = 0xFFFFFFFF;
         common.historyTextureIndex = 0xFFFFFFFF;
         common.materialTextureIndex = 0xFFFFFFFF;

@@ -26,15 +26,15 @@ bool avboit_virtual_occupied(uint words[AVBOIT_VIRTUAL_SLICES / 32], uint v, uin
 [numthreads(1, 1, 1)]
 void lutMain(uniform PushConstantAVBOIT pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint* occupancy = (uint*)ubo->avboitOccupancyReference;
-    AvboitDepthWarp* warp = (AvboitDepthWarp*)ubo->avboitLutReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<uint> occupancy = BufferRef<uint>(ubo.avboitOccupancyReference);
+    RWBufferRef<uint> warp = RWBufferRef<uint>(ubo.avboitLutReference);
 
     uint words[AVBOIT_VIRTUAL_SLICES / 32];
     for (uint w = 0; w < AVBOIT_VIRTUAL_SLICES / 32u; ++w)
         words[w] = occupancy[w];
 
-    const uint budget = max(ubo->avboitSlices, 1u);
+    const uint budget = max(ubo.avboitSlices, 1u);
     uint shift = 0;
     for (; shift < 10u; ++shift)
     {
@@ -52,15 +52,15 @@ void lutMain(uniform PushConstantAVBOIT pushConstant)
     {
         if (avboit_virtual_occupied(words, v, shift))
         {
-            warp->entries[v] = physical | 0x80000000u;
+            warp.Store(4u + v, physical | 0x80000000u);
             ++physical;
         }
         else
-            warp->entries[v] = physical;
+            warp.Store(4u + v, physical);
     }
-    warp->virtualShift = shift;
-    warp->virtualCount = virtualCount;
-    warp->usedSlices = physical;
+    warp.Store(0u, shift);
+    warp.Store(1u, virtualCount);
+    warp.Store(2u, physical);
 }
 
 // 4. integration: per column, the extinction summed front to back; layer p of the volume is the transmittance in front of slice p
@@ -69,19 +69,19 @@ void lutMain(uniform PushConstantAVBOIT pushConstant)
 [numthreads(8, 8, 1)]
 void integrateMain(uint3 id : SV_DispatchThreadID, uniform PushConstantAVBOIT pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    const uint width = ubo->avboitGridWidth;
-    const uint height = ubo->avboitGridHeight;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    const uint width = ubo.avboitGridWidth;
+    const uint height = ubo.avboitGridHeight;
     if (id.x >= width || id.y >= height)
         return;
-    AvboitDepthWarp* warp = (AvboitDepthWarp*)ubo->avboitLutReference;
-    uint* extinction = (uint*)ubo->avboitExtinctionReference;
-    uint* overflow = (uint*)ubo->avboitOverflowReference;
+    BufferRef<uint> warp = BufferRef<uint>(ubo.avboitLutReference);
+    BufferRef<uint> extinction = BufferRef<uint>(ubo.avboitExtinctionReference);
+    BufferRef<uint> overflow = BufferRef<uint>(ubo.avboitOverflowReference);
     RWTexture2DArray<float4> volume = RWTexture2DArray<float4>.Handle(uint2(pushConstant.transmittanceStorageIndex, 0));
 
     const uint columnIndex = (id.y * width + id.x) * 3u;
     const uint3 firstOverflow = uint3(overflow[columnIndex], overflow[columnIndex + 1u], overflow[columnIndex + 2u]);
-    const uint used = min(warp->usedSlices, ubo->avboitSlices);
+    const uint used = min(warp.Load(2u), ubo.avboitSlices);
     // 255 units of extinction = transmittance 1/255: optical depth ln(255).
     const float unit = log(255.0) / 255.0;
     float3 opticalDepth = float3(0.0);

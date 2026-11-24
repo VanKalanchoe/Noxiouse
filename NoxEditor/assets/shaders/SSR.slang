@@ -32,7 +32,7 @@ static const float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), floa
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
+void meshMain(in payload SSRPayload _payload, out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
 {
     SetMeshOutputCounts(3, 1);
     if (threadID < 3)
@@ -53,15 +53,15 @@ float4 fragMain(MSOutput input, uniform PushConstantSSR pushConstant) : SV_Targe
 
 float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
-    if (depth <= 0.0 || mul(ubo->proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5) // the sky, or an orthographic camera
+    if (depth <= 0.0 || mul(ubo.proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5) // the sky, or an orthographic camera
         return float4(0.0);
 
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
     const float materialRoughness = clamp(materialTex.Load(int3(pixelCoord, 0)).r, 0.0, 1.0);
     if (materialRoughness >= pushConstant.maxRoughness)
         return float4(0.0);
@@ -69,13 +69,13 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
     const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
     const float4 worldH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
     const float3 worldPos = worldH.xyz / worldH.w;
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     const float3 rawNormal = normalTex.Load(int3(pixelCoord, 0)).rgb;
     const float lenN = length(rawNormal);
     if (lenN < 1e-6)
         return float4(0.0);
     const float3 pixelNormal = rawNormal / lenN;
-    const float3 V = normalize(ubo->cameraWorldPos.xyz - worldPos);
+    const float3 V = normalize(ubo.cameraWorldPos.xyz - worldPos);
 
     // Toksvig normal filtering (Toksvig 2004; UE's / Frostbite's roughness from normal variance, Godot 4's roughness limiter): the
     // reflection of a bumpy surface (a normal map's waves, cloth folds) is its average normal's, blurred by how much its normals
@@ -83,7 +83,7 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
     // and its shortening (|mean| < 1) the variance added to the roughness: sigma^2 ~ 2 (1 - |mean|). The pixel's own mapped normal
     // made a mirror that swung with the slightest move of the camera on a wavy glossy awning; this one holds still and blurs as the
     // real reflection does. Flat glossy surfaces keep their mirror (their normals agree); curvature over 9 pixels adds little.
-    const float nearPlaneZ = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float nearPlaneZ = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlaneZ / depth;
     float3 normalSum = float3(0.0);
     float normalCount = 0.0;
@@ -121,8 +121,8 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
     const float3 R = reflect(-V, N);
 
     // The Hi-Z trace through this frame's depth (SSRCommon.slang).
-    const float3 start = worldPos + N * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
-    Texture2D<float> hizTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.hizTextureIndex, 0));
+    const float3 start = worldPos + N * raster_surface_bias(ubo, worldPos, 0.01 * ubo.unitsPerMeter);
+    Texture2D<float> hizTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.hizTextureIndex, 0));
     float2 hitUV;
     float hitDepth;
     float rayConfidence;
@@ -130,7 +130,7 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
                    pushConstant.maxSteps, viewportSize, hitUV, hitDepth, rayConfidence))
         return float4(0.0);
     const int2 hitPixel = int2(hitUV * viewportSize);
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float4 hitWorldH = mul(pushConstant.invViewProj, float4(hitUV.x * 2.0 - 1.0, 1.0 - hitUV.y * 2.0, hitDepth, 1.0));
     const float3 hitWorld = hitWorldH.xyz / hitWorldH.w;
     // The back of a surface (its front faces along the ray): not what the reflection sees.
@@ -148,13 +148,13 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
 
     // The roughness' cone at the hit, in pixels: its blur mip (ColorPyramid.slang's 2x2 averages).
     const float hitDistance = length(hitWorld - start);
-    const float hitZ = max(mul(ubo->view, float4(hitWorld, 1.0)).z, nearPlane);
-    const float focal = mul(ubo->proj, float4(0.0, 1.0, 0.0, 0.0)).y;
+    const float hitZ = max(mul(ubo.view, float4(hitWorld, 1.0)).z, nearPlane);
+    const float focal = mul(ubo.proj, float4(0.0, 1.0, 0.0, 0.0)).y;
     // The roughness' cone where the ray lands: the blur that stands for the glossy lobe (Godot's cone of mips).
     const float coneDiameter = 2.0 * hitDistance * roughness * roughness;
     const float conePixels = coneDiameter * focal * viewportSize.y / (2.0 * hitZ);
     const float mip = clamp(log2(max(conePixels, 1.0)), 0.0, float(max(pushConstant.historyMipCount, 1u) - 1u));
-    Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
+    Texture2D historyTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
     const float3 radiance = historyTex.SampleLevel(linearClamp, previousUV, mip).rgb;
 
@@ -172,20 +172,20 @@ float4 traceReflection(MSOutput input, PushConstantSSR pushConstant)
 [shader("fragment")]
 float4 filterMain(MSOutput input, uniform PushConstantSSRFilter pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
-    Texture2D rawTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawTextureIndex, 0));
+    Texture2D rawTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rawTextureIndex, 0));
     const float4 raw = rawTex.Load(int3(pixelCoord, 0));
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0)
         return float4(0.0);
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
     const float roughness = saturate(materialTex.Load(int3(pixelCoord, 0)).r);
     if (roughness < 0.05)
         return raw; // a mirror: as traced
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlane / depth;
 
     // 5 x 5 neighbours on this surface (view depth within 2 %), Gaussian, wider for a rougher surface (about a pixel at roughness

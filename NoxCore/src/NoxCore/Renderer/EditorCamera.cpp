@@ -10,7 +10,9 @@
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/WorldUnits.h"
 
+#ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include <glm/gtx/quaternion.hpp>
 
 namespace Nox 

@@ -27,16 +27,16 @@ float fog_phase_hg(float cosTheta, float g)
 }
 
 // The sun's visibility by a ray (RT shadows without the shadow maps): opaque hits only (fog shafts need no alpha detail).
-float fog_sun_ray(UniformBufferObject* ubo, float3 origin, float3 direction)
+float fog_sun_ray(UniformBufferObject ubo, float3 origin, float3 direction)
 {
-    if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+    if (ubo.enableRTShadows == 0 || ubo.tlasDeviceAddress == 0)
         return 1.0;
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
-    ray.TMin = 0.01 * ubo->unitsPerMeter;
-    ray.TMax = 100000.0 * ubo->unitsPerMeter;
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    ray.TMin = 0.01 * ubo.unitsPerMeter;
+    ray.TMax = 100000.0 * ubo.unitsPerMeter;
+    RaytracingAccelerationStructure tlas = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> query;
     query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
     query.Proceed();
@@ -50,10 +50,10 @@ float3 fog_view_direction(float4x4 invViewProj, float3 cameraPos, float2 uv)
 }
 
 // Last frame's froxel lighting at a position, through the previous camera (-1: not in last frame's volume).
-float4 fog_history(UniformBufferObject* ubo, PushConstantVolumetricFog pushConstant, float3 position, out bool valid)
+float4 fog_history(UniformBufferObject ubo, PushConstantVolumetricFog pushConstant, float3 position, out bool valid)
 {
     valid = false;
-    const float4 clip = mul(ubo->prevProj, mul(ubo->prevView, float4(position, 1.0)));
+    const float4 clip = mul(ubo.prevProj, mul(ubo.prevView, float4(position, 1.0)));
     if (clip.w <= 0.0)
         return float4(0.0);
     const float2 uv = float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
@@ -76,8 +76,8 @@ void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog
 {
     if (id.x >= pushConstant.gridWidth || id.y >= pushConstant.gridHeight || id.z >= pushConstant.slices)
         return;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    const float3 cameraPos = ubo->cameraWorldPos.xyz;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    const float3 cameraPos = ubo.cameraWorldPos.xyz;
     const float2 uv = (float2(id.xy) + 0.5) / float2(pushConstant.gridWidth, pushConstant.gridHeight);
     const float3 direction = fog_view_direction(pushConstant.invViewProj, cameraPos, uv);
     const float slices = float(pushConstant.slices);
@@ -87,15 +87,15 @@ void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog
     const float3 position = cameraPos + direction * lerp(nearEnd, farEnd, pushConstant.jitter);
 
     // The height fog's density there (per world unit).
-    const float falloff = max(ubo->heightFogFalloff, 0.0);
-    const float extinction = ubo->heightFogDensity * exp(-falloff * (position.y - ubo->heightFogBaseY)) * pushConstant.extinctionScale;
+    const float falloff = max(ubo.heightFogFalloff, 0.0);
+    const float extinction = ubo.heightFogDensity * exp(-falloff * (position.y - ubo.heightFogBaseY)) * pushConstant.extinctionScale;
     float3 scattered = float3(0.0);
     if (extinction > 0.0)
     {
         const float noise = frac(52.9829189 * frac(0.06711056 * float(id.x) + 0.00583715 * float(id.y) + 0.1 * float(id.z)) + pushConstant.jitter);
         float3 light = float3(0.0);
-        LightData* lights = (LightData*)ubo->lightDataReference;
-        for (uint i = 0; i < ubo->lightCount; ++i)
+        BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
+        for (uint i = 0; i < ubo.lightCount; ++i)
         {
             const LightData lightData = lights[i];
             const uint type = (uint)lightData.position.w;
@@ -106,10 +106,10 @@ void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog
             {
                 toLight = normalize(lightData.direction.xyz);
                 radiance *= cloud_shadow(ubo, position, i, toLight);
-                if (i == ubo->shadowMaskLightIndex)
+                if (i == ubo.shadowMaskLightIndex)
                 {
-                    if (ubo->sunShadowCascadesReference != 0)
-                        visibility = sun_shadow_map(ubo, (GpuShadowCascades*)ubo->sunShadowCascadesReference, position, toLight, noise);
+                    if (ubo.sunShadowCascadesReference != 0)
+                        visibility = sun_shadow_map(ubo, BufferRef<GpuShadowCascades>(ubo.sunShadowCascadesReference)[0], position, toLight, noise);
                     else
                         visibility = fog_sun_ray(ubo, position, toLight);
                 }
@@ -134,12 +134,12 @@ void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog
             light += radiance * visibility * fog_phase_hg(dot(direction, toLight), pushConstant.anisotropy);
         }
         // The sky around (isotropic: the phase function integrates to 1 over it), from above and along the view.
-        if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+        if (ubo.irradianceMapIndex != 0xFFFFFFFF)
         {
-            TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+            TextureCube irradiance = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
             SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
             light += 0.5 * (irradiance.SampleLevel(irradianceSampler, float3(0.0, 1.0, 0.0), 0.0).rgb +
-                            irradiance.SampleLevel(irradianceSampler, direction, 0.0).rgb) * ubo->scaleIBLAmbient;
+                            irradiance.SampleLevel(irradianceSampler, direction, 0.0).rgb) * ubo.scaleIBLAmbient;
         }
         scattered = light * extinction * pushConstant.albedo;
     }

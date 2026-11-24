@@ -89,9 +89,9 @@ namespace Nox
             {
                 m_shadowCascadeUniforms[frameIndex][cascade] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
                 m_shadowCascadeUniformsMapped[frameIndex][cascade] = m_shadowCascadeUniforms[frameIndex][cascade].map(0, sizeof(shaderio::UniformBufferObject));
-                m_shadowCascadeCullViews[frameIndex][cascade] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
+                m_shadowCascadeCullViews[frameIndex][cascade] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_UNIFORM });
             }
-            m_shadowCascadeBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuShadowCascades), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_shadowCascadeBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuShadowCascades), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_shadowCascadeBuffersMapped[frameIndex] = m_shadowCascadeBuffers[frameIndex].map(0, sizeof(shaderio::GpuShadowCascades));
         }
 
@@ -322,8 +322,8 @@ namespace Nox
 
                 shaderio::PushConstantShadowMapResolve push{};
                 push.invViewProj = uniformData.invViewProj;
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                push.cascadesReference = m_shadowCascadeBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.cascadesReference = bufferReadRef(m_shadowCascadeBuffers[frameIndex]);
                 push.depthTextureIndex = context.Slot(res->Depth);
                 push.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 push.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
@@ -379,7 +379,7 @@ namespace Nox
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 MeshletDrawCursor cursor = beginMeshletDraws(context, draws);
-                cursor.references.matrixReference = uniformBuffer->getDeviceAddress();
+                cursor.references.matrixReference = bufferReadRef(*uniformBuffer);
                 // ClusterStats count the camera's clusters only.
                 cursor.taskFlags &= ~shaderio::MESHLET_COUNT_TRIANGLES;
 
@@ -440,7 +440,7 @@ namespace Nox
                 return;
         }
         memcpy(m_shadowCascadeBuffersMapped[frameIndex], &m_shadowCascades, sizeof(shaderio::GpuShadowCascades));
-        uniformData.sunShadowCascadesReference = m_shadowCascadeBuffers[frameIndex].getDeviceAddress();
+        uniformData.sunShadowCascadesReference = bufferReadRef(m_shadowCascadeBuffers[frameIndex]);
     }
     namespace
     {
@@ -589,10 +589,10 @@ namespace Nox
         // Per frame slot: the GpuLocalShadows buffer, the per-light view table, the culling views (each view's uniforms on demand).
         if (!m_localShadowBuffers[frameIndex])
         {
-            m_localShadowBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuLocalShadows), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_localShadowBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuLocalShadows), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_localShadowBuffersMapped[frameIndex] = m_localShadowBuffers[frameIndex].map(0, sizeof(shaderio::GpuLocalShadows));
             for (uint32_t light = 0; light < MaxLocalShadowLights; ++light)
-                m_localShadowCullViews[frameIndex][light] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
+                m_localShadowCullViews[frameIndex][light] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_UNIFORM });
         }
         const uint32_t lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
         if (m_localShadowLightViewCapacity[frameIndex] < lightCount)
@@ -603,7 +603,7 @@ namespace Nox
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(m_localShadowLightViewBuffers[frameIndex]) });
             }
             const uint32_t capacity = std::max(lightCount * 2, 16u);
-            m_localShadowLightViewBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * capacity, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_localShadowLightViewBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * capacity, .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_localShadowLightViewBuffersMapped[frameIndex] = m_localShadowLightViewBuffers[frameIndex].map(0, sizeof(uint32_t) * capacity);
             m_localShadowLightViewCapacity[frameIndex] = capacity;
         }
@@ -792,7 +792,7 @@ namespace Nox
                         // The graph's flipped viewport (RGViewport::FlippedY) on the tile.
                         cmd.setViewportWithCount({ rect.x, rect.y + rect.w, rect.z, -rect.w }, 0.0f, 1.0f);
                         cmd.setScissorRect(static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y), static_cast<uint32_t>(rect.z), static_cast<uint32_t>(rect.w));
-                        cursor.references.matrixReference = m_localShadowViewUniforms[frameIndex][view].getDeviceAddress();
+                        cursor.references.matrixReference = bufferReadRef(m_localShadowViewUniforms[frameIndex][view]);
                         drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, m_shadowDepthPipeline, NRI_CULL_MODE_NONE, true, false);
                         drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, m_shadowDepthPipeline, NRI_CULL_MODE_NONE, true, false);
                         drawMeshletBucket(cmd, cursor, RenderBucket::Mask, *shadowDepthMaskPipeline(), NRI_CULL_MODE_NONE, true, false);
@@ -847,7 +847,7 @@ namespace Nox
             const LocalShadowLight& entry = m_localShadowLights[lightSlot];
             lightViews[entry.LightIndex] = entry.FirstView | (entry.ViewCount << 16);
         }
-        uniformData.localShadowsReference = m_localShadowBuffers[frameIndex].getDeviceAddress();
-        uniformData.localShadowLightViewsReference = m_localShadowLightViewBuffers[frameIndex].getDeviceAddress();
+        uniformData.localShadowsReference = bufferReadRef(m_localShadowBuffers[frameIndex]);
+        uniformData.localShadowLightViewsReference = bufferReadRef(m_localShadowLightViewBuffers[frameIndex]);
     }
 }

@@ -29,9 +29,9 @@
         float2(-1.0,  3.0)
     };
 
-    float3 unprojectPoint(UniformBufferObject* ubo, float2 ndc, float depth)
+    float3 unprojectPoint(UniformBufferObject ubo, float2 ndc, float depth)
     {
-        const float4 point = mul(ubo->invViewProj, float4(ndc, depth, 1.0));
+        const float4 point = mul(ubo.invViewProj, float4(ndc, depth, 1.0));
         return point.xyz / point.w;
     }
 
@@ -39,7 +39,7 @@
     // plane: minus the camera position, a near-plane point (0.01 units away) loses most of its float digits and the sky direction
     // wobbled by up to a pixel per frame. An orthographic view's rays are all parallel, so its whole sky would be one color: it
     // gets the sky a 60 degree perspective camera looking the same way would see.
-    float3 skyRay(UniformBufferObject* ubo, float2 ndc)
+    float3 skyRay(UniformBufferObject ubo, float2 ndc)
     {
         const float3 centreForward = normalize(unprojectPoint(ubo, float2(0.0), 0.001) - unprojectPoint(ubo, float2(0.0), 0.5));
         const float3 cornerForward = normalize(unprojectPoint(ubo, float2(1.0), 0.001) - unprojectPoint(ubo, float2(1.0), 0.5));
@@ -51,20 +51,21 @@
             const float tanHalfFov = 0.57735; // tan(30 degrees)
             return centreForward + (right * ndc.x + up * ndc.y) * (tanHalfFov / max(length(up), 1e-6));
         }
-        return unprojectPoint(ubo, ndc, 0.001) - ubo->cameraWorldPos.xyz;
+        return unprojectPoint(ubo, ndc, 0.001) - ubo.cameraWorldPos.xyz;
     }
 
     [shader("mesh")]
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload SkyboxPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,
         uniform PushConstantSkybox pushConstant
     )
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
         SetMeshOutputCounts(3, 1);
 
@@ -228,8 +229,8 @@
         // ubo->imageHeapIndexOffset before constructing a Handle - this one never did, so it was
         // reading whatever happens to sit at the raw, un-offset slot in the descriptor heap
         // instead of the actual environment cubemap.
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-        TextureCube texHandle = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.cubemapIndex, 0));
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+        TextureCube texHandle = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.cubemapIndex, 0));
         SamplerState sampHandle = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
         // The environment cubemap is a 4k BC6H DDS with NO mip chain: sampled once at level 0 it is minified 3-4x on screen
@@ -257,7 +258,7 @@
                     const float bandWeight = saturate((1.0 - bandUv.y) * 6.0) * step(0.0, bandUv.y);
                     if (bandWeight > 0.0)
                     {
-                        Texture2D band = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.horizonBandIndex, 0));
+                        Texture2D band = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.horizonBandIndex, 0));
                         // Repeat across the azimuth's seam, clamped in elevation (the half texel at the bottom edge).
                         const float2 uv = float2(bandUv.x, clamp(bandUv.y, 0.5 / float(SkyHorizonBandHeight), 1.0 - 0.5 / float(SkyHorizonBandHeight)));
                         const float4 bandSample = band.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), uv, 0.0);
@@ -273,7 +274,7 @@
         const float pixelAngle = max(length(rayDx), length(rayDy)) / max(length(ray), 1e-6);
         const float3 lights = discSum / 16.0 + starField(pushConstant, normalize(ray), pixelAngle);
         // Radiance Scale (scaleIBLAmbient) scales the environment, not the sun: that is the directional light's intensity.
-        float3 envColor = (envSum.rgb / 16.0) * ubo->scaleIBLAmbient + lights * cloudTransmittance;
+        float3 envColor = (envSum.rgb / 16.0) * ubo.scaleIBLAmbient + lights * cloudTransmittance;
         // Height fog over the sky (and the sun): seen to "infinity", thick at the horizon, thin overhead.
         envColor = applyHeightFog(ubo, envColor, normalize(ray), 1e30);
 

@@ -13,14 +13,14 @@
 // buffer is handled manually below via direct pointer indexing + RTXDI_PackDIReservoir/UnpackDIReservoir,
 // bypassing RTXDI_StoreDIReservoir/RTXDI_LoadDIReservoir entirely for it. Exactly mirrors how
 // ReSTIRGITemporal.slang binds RTXDI_GI_RESERVOIR_BUFFER to the history buffer for the same reason.
-#define RTXDI_ENABLE_STORE_RESERVOIR 1
+#define RTXDI_ENABLE_STORE_RESERVOIR 0
 #define RTXDI_LIGHT_RESERVOIR_BUFFER g_HistoryBuffer
 #define RTXDI_ALLOWED_BIAS_CORRECTION RTXDI_BIAS_CORRECTION_BASIC
 
-static RTXDI_PackedDIReservoir* g_HistoryBuffer; // buffer C: history, read only via the macro above
+static BufferRef<RTXDI_PackedDIReservoir> g_HistoryBuffer; // buffer C: history, read only via the macro above
 static PushConstantReSTIRDITemporal g_PushConstant;
-static UniformBufferObject* g_UBO;
-static LightData* g_LightData;
+static UniformBufferObject g_UBO;
+static BufferRef<LightData> g_LightData;
 
 typealias RAB_LightInfo = LightData;
 
@@ -180,14 +180,14 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         return s;
     }
 
-    if (g_UBO == nullptr) return s;
+    if (g_PushConstant.matrixReference == 0) return s;
 
     uint depthTexIndex = (isPreviousFrame && g_PushConstant.prevDepthTextureIndex != 0xFFFFFFFF)
         ? g_PushConstant.prevDepthTextureIndex
         : g_PushConstant.depthTextureIndex;
     if (depthTexIndex == 0xFFFFFFFF) return s;
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO->imageHeapIndexOffset + depthTexIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + depthTexIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelPos, 0)).r;
     if (rawDepth <= 0.00001) return s;
 
@@ -196,7 +196,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         : g_PushConstant.gbufferNormalIndex;
     if (normalTexIndex == 0xFFFFFFFF) return s;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + normalTexIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + normalTexIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelPos, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6) return s;
@@ -297,6 +297,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRDITemporalPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -348,10 +349,10 @@ PSOutput fragMain(
     }
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_HistoryBuffer = (RTXDI_PackedDIReservoir*)pushConstant.previousReservoirReference;
-    RTXDI_PackedDIReservoir* currentReservoirBuffer = (RTXDI_PackedDIReservoir*)pushConstant.currentReservoirReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    g_HistoryBuffer = BufferRef<RTXDI_PackedDIReservoir>(pushConstant.previousReservoirReference);
+    RWBufferRef<RTXDI_PackedDIReservoir> currentReservoirBuffer = RWBufferRef<RTXDI_PackedDIReservoir>(pushConstant.currentReservoirReference);
 
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
@@ -364,16 +365,16 @@ PSOutput fragMain(
     RAB_Surface surface = RAB_GetGBufferSurface(int2(pixelCoord), false);
     if (!surface.valid)
     {
-        currentReservoirBuffer[pointer] = RTXDI_PackDIReservoir(RTXDI_EmptyDIReservoir());
+        currentReservoirBuffer.Store(pointer, RTXDI_PackDIReservoir(RTXDI_EmptyDIReservoir()));
         return outVal;
     }
 
-    RTXDI_DIReservoir curSample = RTXDI_UnpackDIReservoir(currentReservoirBuffer[pointer]);
+    RTXDI_DIReservoir curSample = RTXDI_UnpackDIReservoir(currentReservoirBuffer.Load(pointer));
 
     float3 screenSpaceMotion = float3(0.0);
     if (pushConstant.gbufferVelocityIndex != 0xFFFFFFFF)
     {
-        Texture2D velocityTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
+        Texture2D velocityTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
         float2 velUV = velocityTex.Load(int3(pixelCoord, 0)).rg;
         screenSpaceMotion = float3(velUV * pushConstant.viewportSize, 0.0);
     }
@@ -416,7 +417,7 @@ PSOutput fragMain(
 
     // Store to the CURRENT buffer manually -- RTXDI_StoreDIReservoir would write through the macro,
     // i.e. into the history buffer, which must stay untouched (it's still that buffer's role next frame).
-    currentReservoirBuffer[pointer] = RTXDI_PackDIReservoir(temporalResult);
+    currentReservoirBuffer.Store(pointer, RTXDI_PackDIReservoir(temporalResult));
 
     if (RTXDI_IsValidDIReservoir(temporalResult))
     {

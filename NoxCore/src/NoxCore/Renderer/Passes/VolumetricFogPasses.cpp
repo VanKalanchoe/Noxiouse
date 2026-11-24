@@ -81,7 +81,7 @@ namespace Nox
         const uint32_t writeIndex = 1 - m_fogHistoryIndex;
         shaderio::PushConstantVolumetricFog push{};
         push.invViewProj = uniformData.invViewProj;
-        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+        push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
         push.lightingStorageIndex = m_fogLightingStorage[writeIndex];
         push.historyTextureIndex = m_fogHistoryValid ? uniformData.imageHeapIndexOffset + m_fogLighting[m_fogHistoryIndex]->GetDescriptorIndexSlot() : 0xFFFFFFFF;
         push.integratedStorageIndex = m_fogIntegratedStorage;

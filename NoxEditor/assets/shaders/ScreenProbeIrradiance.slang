@@ -13,13 +13,13 @@ float4 screen_probe_irradiance_texel(uint2 texel, PushConstantScreenProbe pushCo
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
         return float4(0.0);
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    Texture2D positionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    Texture2D positionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
     if (positionTex.Load(int3(probe, 0)).w <= 0.0)
         return float4(0.0);
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
     const float3 probeNormal = normalTex.Load(int3(probe, 0)).xyz;
-    Texture2D rays = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.inputTextureIndex, 0));
+    Texture2D rays = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.inputTextureIndex, 0));
 
     const uint2 rayOrigin = probe * ScreenProbeRayRes;
     const float3 direction = screen_probe_interior_direction(screen_probe_border_source(local));
@@ -35,7 +35,7 @@ float4 screen_probe_irradiance_texel(uint2 texel, PushConstantScreenProbe pushCo
     // The emissive meshes' samples (ScreenProbeTrace), with this direction's cosine.
     if (pushConstant.emissiveTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D emissive = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.emissiveTextureIndex, 0));
+        Texture2D emissive = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.emissiveTextureIndex, 0));
         for (uint y = 0; y < ScreenProbeRayRes; ++y)
         {
             for (uint x = 0; x < ScreenProbeRayRes; ++x)

@@ -30,7 +30,7 @@ void compMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConstant
     float pdf = 0.0;
     if (linearIndex < pushConstant.numLocalLights)
     {
-        LightData* lightData = (LightData*)pushConstant.lightDataReference;
+        BufferRef<LightData> lightData = BufferRef<LightData>(pushConstant.lightDataReference);
         pdf = LightImportance(lightData[pushConstant.firstLocalLightIndex + linearIndex]);
     }
 

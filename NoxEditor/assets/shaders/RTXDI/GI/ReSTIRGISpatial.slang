@@ -20,12 +20,12 @@
 // race against neighboring pixels' invocations still reading it (RTXDI's own reference keeps
 // spatial input/output as separate buffers for exactly this reason -- see
 // ReSTIRGIContext::UpdateBufferIndices, spatialResamplingInputBufferIndex vs …OutputBufferIndex).
-static RTXDI_PackedGIReservoir* g_CurrentReservoirBuffer;
+static BufferRef<RTXDI_PackedGIReservoir> g_CurrentReservoirBuffer;
 // Separate physical buffer the final per-pixel result is written to; becomes next frame's history.
-static RTXDI_PackedGIReservoir* g_OutputReservoirBuffer;
-static float2* g_NeighborOffsetsBuffer;
+static RWBufferRef<RTXDI_PackedGIReservoir> g_OutputReservoirBuffer;
+static BufferRef<float2> g_NeighborOffsetsBuffer;
 static PushConstantReSTIRGISpatial g_PushConstant;
-static UniformBufferObject* g_UBO;
+static UniformBufferObject g_UBO;
 
 struct RAB_Material
 {
@@ -124,7 +124,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         return s;
     }
 
-    if (g_UBO == nullptr)
+    if (g_PushConstant.matrixReference == 0)
     {
         return s;
     }
@@ -134,7 +134,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         return s;
     }
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelPos, 0)).r;
 
     if (rawDepth <= 0.00001)
@@ -148,7 +148,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
     }
 
     // m_gbufferNormal stores raw world normals directly in [-1, 1]
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelPos, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6)
@@ -238,6 +238,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRGISpatialPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -306,10 +307,10 @@ PSOutput fragMain(
     }
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_CurrentReservoirBuffer = (RTXDI_PackedGIReservoir*)pushConstant.inputReservoirReference;
-    g_OutputReservoirBuffer = (RTXDI_PackedGIReservoir*)pushConstant.outputReservoirReference;
-    g_NeighborOffsetsBuffer = (float2*)pushConstant.neighborOffsetsReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_CurrentReservoirBuffer = BufferRef<RTXDI_PackedGIReservoir>(pushConstant.inputReservoirReference);
+    g_OutputReservoirBuffer = RWBufferRef<RTXDI_PackedGIReservoir>(pushConstant.outputReservoirReference);
+    g_NeighborOffsetsBuffer = BufferRef<float2>(pushConstant.neighborOffsetsReference);
 
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
@@ -322,12 +323,12 @@ PSOutput fragMain(
     RAB_Surface surface = RAB_GetGBufferSurface(int2(pixelCoord), false);
     if (!surface.valid)
     {
-        g_OutputReservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
+        g_OutputReservoirBuffer.Store(pointer, (RTXDI_PackedGIReservoir)0);
         return outVal;
     }
 
     // This frame's temporally-resampled reservoir for this pixel (written by ReSTIRGITemporal.slang)
-    RTXDI_GIReservoir inputReservoir = RTXDI_UnpackGIReservoir(g_CurrentReservoirBuffer[pointer]);
+    RTXDI_GIReservoir inputReservoir = RTXDI_UnpackGIReservoir(g_CurrentReservoirBuffer.Load(pointer));
 
     RTXDI_GISpatialResamplingParameters sparams;
     sparams.depthThreshold = pushConstant.depthThreshold;
@@ -366,7 +367,7 @@ PSOutput fragMain(
     // Final result is written to the SEPARATE output buffer, which becomes next frame's history --
     // never write back into g_CurrentReservoirBuffer here, it is still being read as neighbor input
     // by other in-flight pixel invocations of this same pass.
-    g_OutputReservoirBuffer[pointer] = RTXDI_PackGIReservoir(resampledReservoir, 0);
+    g_OutputReservoirBuffer.Store(pointer, RTXDI_PackGIReservoir(resampledReservoir, 0));
 
     // Output finalized diffuse irradiance matching NVIDIA RTXDI FinalShading.hlsl
     float3 diffuse = float3(0.0);
@@ -389,14 +390,14 @@ PSOutput fragMain(
         // already had many frames to naturally re-validate; it's specifically the freshly-reused
         // samples during motion that need this gate.
         bool visible = true;
-        if (g_UBO->tlasDeviceAddress != 0)
+        if (g_UBO.tlasDeviceAddress != 0)
         {
-            RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(g_UBO->tlasDeviceAddress);
+            RaytracingAccelerationStructure accelerationStructure = LoadTlas(g_UBO.tlasDeviceAddress);
             RayDesc visRay;
-            visRay.Origin = surface.worldPos + surface.normal * (0.02 * g_UBO->unitsPerMeter);
+            visRay.Origin = surface.worldPos + surface.normal * (0.02 * g_UBO.unitsPerMeter);
             visRay.Direction = L;
-            visRay.TMin = 0.005 * g_UBO->unitsPerMeter;
-            visRay.TMax = max(0.01 * g_UBO->unitsPerMeter, hitDist - 0.02 * g_UBO->unitsPerMeter);
+            visRay.TMin = 0.005 * g_UBO.unitsPerMeter;
+            visRay.TMax = max(0.01 * g_UBO.unitsPerMeter, hitDist - 0.02 * g_UBO.unitsPerMeter);
             RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> visQuery;
             visQuery.TraceRayInline(accelerationStructure,
                 RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE,
@@ -417,8 +418,8 @@ PSOutput fragMain(
     }
 
     // NRD expects normalized hit distance (and REBLUR-specific YCoCg), not raw world distance.
-    float viewZ = abs(mul(g_UBO->view, float4(surface.worldPos, 1.0)).z);
+    float viewZ = abs(mul(g_UBO.view, float4(surface.worldPos, 1.0)).z);
     outVal.diffuseIrradiance = NRD_PackSignal(
-        pushConstant.denoiserMode, diffuse, hitDist, viewZ, 1.0, g_UBO->unitsPerMeter);
+        pushConstant.denoiserMode, diffuse, hitDist, viewZ, 1.0, g_UBO.unitsPerMeter);
     return outVal;
 }

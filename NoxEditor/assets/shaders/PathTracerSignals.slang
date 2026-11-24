@@ -24,21 +24,21 @@ void PT_AddRadiance(uint lobe, float3 contribution, inout float3 emission, inout
 // The de-modulation factors of the G-buffer surface at a pixel, shaded as DeferredLighting.slang shades it (dielectric F0
 // 0.04, roughness clamped to 0.04): the path tracer divides by them, the composite multiplies by them, ReSTIR DI's signals
 // already carry them. Background pixels: 1 (nothing to de-modulate). outRoughness: the specular signal's roughness.
-void PT_SurfaceFactors(UniformBufferObject* ubo, int2 pixel, uint depthIndex, uint albedoIndex, uint normalIndex, uint materialIndex,
+void PT_SurfaceFactors(UniformBufferObject ubo, int2 pixel, uint depthIndex, uint albedoIndex, uint normalIndex, uint materialIndex,
                        out float3 diffFactor, out float3 specFactor, out float outRoughness)
 {
     diffFactor = float3(1.0);
     specFactor = float3(1.0);
     outRoughness = 1.0;
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + depthIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + depthIndex, 0));
     float depth = depthTex.Load(int3(pixel, 0));
     if (depth <= 0.0)
         return;
 
-    Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + albedoIndex, 0));
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + normalIndex, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + materialIndex, 0));
+    Texture2D albedoTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + albedoIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + normalIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + materialIndex, 0));
     float3 baseColor = albedoTex.Load(int3(pixel, 0)).rgb;
     float3 normalSample = normalTex.Load(int3(pixel, 0)).rgb;
     float4 material = materialTex.Load(int3(pixel, 0));
@@ -49,7 +49,7 @@ void PT_SurfaceFactors(UniformBufferObject* ubo, int2 pixel, uint depthIndex, ui
     uint width, height;
     depthTex.GetDimensions(width, height);
     float2 uv = (float2(pixel) + 0.5) / float2(width, height);
-    float4 worldPosH = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
+    float4 worldPosH = mul(ubo.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
     float3 worldPos = worldPosH.xyz / worldPosH.w;
 
     float metallic = saturate(material.g);
@@ -59,6 +59,6 @@ void PT_SurfaceFactors(UniformBufferObject* ubo, int2 pixel, uint depthIndex, ui
     if (lobes.anisotropy > 0.0 && lobes.coat <= 0.0)
         outRoughness = clamp(anisotropic_guide_roughness(outRoughness, lobes.anisotropy), 0.04, 1.0);
     float3 f0 = float3(0.04);
-    NRD_MaterialFactors(normalSample * rsqrt(lenSqN), normalize(ubo->cameraWorldPos.xyz - worldPos),
+    NRD_MaterialFactors(normalSample * rsqrt(lenSqN), normalize(ubo.cameraWorldPos.xyz - worldPos),
                         baseColor * (float3(1.0) - f0) * (1.0 - metallic), lerp(f0, baseColor, metallic), outRoughness, diffFactor, specFactor);
 }

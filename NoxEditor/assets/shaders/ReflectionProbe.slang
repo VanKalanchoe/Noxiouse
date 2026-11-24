@@ -30,11 +30,17 @@ void assembleMain(uint3 id : SV_DispatchThreadID, uniform PushConstantProbeAssem
     const float3 direction = probe_cube_direction(id.z, st);
     const float3 a = abs(direction);
     const uint view = a.x >= a.y && a.x >= a.z ? (direction.x >= 0.0 ? 0u : 1u) : (a.y >= a.z ? (direction.y >= 0.0 ? 2u : 3u) : (direction.z >= 0.0 ? 4u : 5u));
-    float4x4* viewProjs = (float4x4*)pushConstant.facesReference;
-    const float3 center = ((float4*)(pushConstant.facesReference + 6u * 64u))[0].xyz;
+    BufferRef<float4x4> viewProjs = BufferRef<float4x4>(pushConstant.facesReference);
+    const float3 center = LoadRaw<float4>(pushConstant.facesReference, 6u * 64u).xyz;
     const float4 clip = mul(viewProjs[view], float4(center + direction, 1.0));
     const float2 uv = saturate(float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5));
-    Texture2D face = Texture2D.Handle(uint2(pushConstant.faceTextureIndex[view], 0));
+    const uint faceTexIdx = view == 0u ? pushConstant.faceTextureIndex0
+                          : (view == 1u ? pushConstant.faceTextureIndex1
+                          : (view == 2u ? pushConstant.faceTextureIndex2
+                          : (view == 3u ? pushConstant.faceTextureIndex3
+                          : (view == 4u ? pushConstant.faceTextureIndex4
+                                        : pushConstant.faceTextureIndex5))));
+    Texture2D face = Texture2D.Handle(uint2(faceTexIdx, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
     RWTexture2DArray<float4> output = RWTexture2DArray<float4>.Handle(uint2(pushConstant.outputStorageIndex, 0));
     output[uint3(id.xy, id.z)] = float4(max(face.SampleLevel(linearClamp, uv, 0.0).rgb, float3(0.0)), 1.0);

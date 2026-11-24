@@ -35,6 +35,7 @@
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload VisDebugPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,
@@ -75,9 +76,9 @@
         uniform PushConstantVisibilityDebug pushConstant
     ) : SV_Target0
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
-        Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
+        Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
         int2 pixelCoord = int2(input.pos.xy);
         uint4 rawData = visTex.Load(int3(pixelCoord, 0));
         uint2 visData = rawData.xy;
@@ -94,10 +95,10 @@
         }
 
         // Load G-Buffer targets from heap
-        Texture2D albedoTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
-        Texture2D normalTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
-        Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
-        Texture2D emissionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferEmissionIndex, 0));
+        Texture2D albedoTex   = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
+        Texture2D normalTex   = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+        Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+        Texture2D emissionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferEmissionIndex, 0));
 
         float4 albedoSample   = albedoTex.Load(int3(pixelCoord, 0));
         float4 normalSample   = normalTex.Load(int3(pixelCoord, 0));

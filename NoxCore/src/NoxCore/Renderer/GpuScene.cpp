@@ -247,6 +247,7 @@ namespace Nox
 
     void GpuScene::Initialize(nri::Device& device, uint32_t framesInFlight)
     {
+        m_BufferRefOffsetShift = (device.getAPI() == NRI_GRAPHICS_API_D3D12) ? 32u : 0u;
         m_Instances.Initialize(device, framesInFlight);
         m_Transforms.Initialize(device, framesInFlight);
         m_Materials.Initialize(device, framesInFlight);
@@ -962,14 +963,14 @@ namespace Nox
         const shaderio::GpuMesh& mesh = m_Meshes.Get(instance.meshIndex);
 
         shaderio::GpuRayTracingInstance& record = m_RayTracingInstances.Edit(instanceSlot);
-        record.vertexBufferAddress = m_GeometryVertexBase + uint64_t(mesh.verticesOffset) * sizeof(shaderio::PackedVertex);
+        record.vertexBufferAddress = offsetBufferRef(m_GeometryVertexBase, uint64_t(mesh.verticesOffset) * sizeof(shaderio::PackedVertex));
         // Hit shading treats 0 as "no index buffer" (it then reads the vertices in triangle order).
         record.indexBufferAddress = mesh.indicesOffset == shaderio::NoGeometryRange
                                         ? 0
-                                        : m_GeometryIndexBase + uint64_t(mesh.indicesOffset) * sizeof(uint32_t);
+                                        : offsetBufferRef(m_GeometryIndexBase, uint64_t(mesh.indicesOffset) * sizeof(uint32_t));
         record.skinnedVertexBufferAddress = m_InstanceStates[instanceSlot].SkinnedVertexAddress;
         record.colorBufferAddress = (mesh.flags & shaderio::GpuMeshVertexColors) != 0
-                                        ? m_GeometryColorBase + uint64_t(mesh.verticesOffset) * sizeof(uint32_t)
+                                        ? offsetBufferRef(m_GeometryColorBase, uint64_t(mesh.verticesOffset) * sizeof(uint32_t))
                                         : 0;
         record.normalMatrix = m_Transforms.Get(instanceSlot).normal;
         record.baseColorFactor = material.baseColorFactor;

@@ -6,12 +6,23 @@
 #define RTXDI_RESERVOIR_BLOCK_SIZE 16
 #endif
 
-static RTXDI_PackedPTReservoir* g_ReservoirBuffer;
+struct ReadOnlyPTReservoirBuffer
+{
+    BufferRef<RTXDI_PackedPTReservoir> buf;
+    __init(uint64_t h) { buf = BufferRef<RTXDI_PackedPTReservoir>(h); }
+    __subscript(uint index) -> RTXDI_PackedPTReservoir
+    {
+        get { return buf.Load(index); }
+        set { } // read-only; RTXDI_StorePTReservoir is never called in this pass
+    }
+};
+
+static ReadOnlyPTReservoirBuffer g_ReservoirBuffer;
 #define RTXDI_PT_RESERVOIR_BUFFER g_ReservoirBuffer
-static RTXDI_PackedPTReservoir* g_PreservedReservoirBuffer;
+static BufferRef<RTXDI_PackedPTReservoir> g_PreservedReservoirBuffer;
 
 static PushConstantReSTIRPTFinalShading g_PushConstant;
-static UniformBufferObject* g_UBO;
+static UniformBufferObject g_UBO;
 
 // NRD REBLUR YCoCg conversion (matching NRD.hlsli:398, same fix already applied to ReSTIR GI/DI/plain
 // path tracer) -- REBLUR's internal filtering assumes IN_DIFF_RADIANCE_HITDIST is already YCoCg-encoded.
@@ -88,6 +99,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRPTFinalShadingPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -136,9 +148,9 @@ PSOutput fragMain(
         return outVal;
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_ReservoirBuffer = (RTXDI_PackedPTReservoir*)pushConstant.reservoirReference;
-    g_PreservedReservoirBuffer = (RTXDI_PackedPTReservoir*)pushConstant.preservedReservoirReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_ReservoirBuffer = ReadOnlyPTReservoirBuffer(pushConstant.reservoirReference);
+    g_PreservedReservoirBuffer = BufferRef<RTXDI_PackedPTReservoir>(pushConstant.preservedReservoirReference);
 
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
@@ -167,7 +179,7 @@ PSOutput fragMain(
     // Add back the primary-surface (bounce-1) direct lighting written by the Initial Sampling pass.
     if (pushConstant.primaryDirectTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D primaryDirectTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + pushConstant.primaryDirectTextureIndex, 0));
+        Texture2D primaryDirectTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.primaryDirectTextureIndex, 0));
         result += primaryDirectTex.Load(int3(pixelCoord, 0)).rgb;
     }
 

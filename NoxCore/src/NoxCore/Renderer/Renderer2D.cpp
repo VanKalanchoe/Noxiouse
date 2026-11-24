@@ -132,10 +132,11 @@ namespace Nox
         {
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_QuadMeshPipeline);
             
-            shaderio::PushConstantQuad quadReferences;
-            quadReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            quadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex].getDeviceAddress();
-            quadReferences.numOfElements = std::min(m_data.quadDatas.size(), kMaxQuads);
+            shaderio::PushConstantQuad quadReferences{};
+            quadReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
+            quadReferences.quadDataReference = m_context.bufferReadRef(m_data.quadStorageBuffers[frameIndex]);
+            quadReferences.numOfElements = static_cast<uint32_t>(std::min(m_data.quadDatas.size(), kMaxQuads));
+            quadReferences.firstElement = 0;
             commandBuffer.pushData(&quadReferences, sizeof(shaderio::PushConstantQuad));
             
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -146,10 +147,10 @@ namespace Nox
         {
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_CircleMeshPipeline);
             
-            shaderio::PushConstantCircle circleReferences;
-            circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.circleDataReference = m_data.circleStorageBuffers[frameIndex].getDeviceAddress();
-            circleReferences.numOfElements = std::min(m_data.circleDatas.size(), kMaxCircles);
+            shaderio::PushConstantCircle circleReferences{};
+            circleReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
+            circleReferences.circleDataReference = m_context.bufferReadRef(m_data.circleStorageBuffers[frameIndex]);
+            circleReferences.numOfElements = static_cast<uint32_t>(std::min(m_data.circleDatas.size(), kMaxCircles));
             commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantCircle));
 
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -160,11 +161,12 @@ namespace Nox
         {
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_TextMeshPipeline);
             
-            shaderio::PushConstantText circleReferences;
-            circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.textDataReference = m_data.textStorageBuffers[frameIndex].getDeviceAddress();
-            circleReferences.numOfElements = std::min(m_data.textDatas.size(), kMaxGlyphs);
-            commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantText));
+            shaderio::PushConstantText textReferences{};
+            textReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
+            textReferences.textDataReference = m_context.bufferReadRef(m_data.textStorageBuffers[frameIndex]);
+            textReferences.numOfElements = static_cast<uint32_t>(std::min(m_data.textDatas.size(), kMaxGlyphs));
+            textReferences.firstElement = 0;
+            commandBuffer.pushData(&textReferences, sizeof(shaderio::PushConstantText));
 
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
@@ -176,7 +178,7 @@ namespace Nox
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_GridMeshPipeline);
 
             shaderio::PushConstantGrid gridReferences = *grid;
-            gridReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
+            gridReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
             commandBuffer.pushData(&gridReferences, sizeof(shaderio::PushConstantGrid));
 
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -188,16 +190,17 @@ namespace Nox
             commandBuffer.setLineWidth(5.0f);
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_LineMeshPipeline);
 
-            shaderio::PushConstantLine circleReferences;
-            circleReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-            circleReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex].getDeviceAddress();
-            circleReferences.numOfElements = std::min(m_data.lineDatas.size(), kMaxLines);
-            commandBuffer.pushData(&circleReferences, sizeof(shaderio::PushConstantLine));
+            shaderio::PushConstantLine lineReferences{};
+            lineReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
+            lineReferences.lineDataReference = m_context.bufferReadRef(m_data.lineStorageBuffers[frameIndex]);
+            lineReferences.numOfElements = static_cast<uint32_t>(std::min(m_data.lineDatas.size(), kMaxLines));
+            lineReferences.firstElement = 0;
+            commandBuffer.pushData(&lineReferences, sizeof(shaderio::PushConstantLine));
             
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
         }
 
-        // Thin lines: the same pipeline drawn one pixel wide, from the same buffer behind the thick lines (an address offset).
+        // Thin lines: the same pipeline drawn one pixel wide, from the same buffer behind the thick lines.
         size_t thinCount = 0;
         {
             const size_t thickCount = std::min(m_data.lineDatas.size(), kMaxLines);
@@ -207,10 +210,11 @@ namespace Nox
                 commandBuffer.setLineWidth(1.0f);
                 commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_LineMeshPipeline);
 
-                shaderio::PushConstantLine thinReferences;
-                thinReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-                thinReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex].getDeviceAddress() + thickCount * sizeof(shaderio::LineData);
-                thinReferences.numOfElements = thinCount;
+                shaderio::PushConstantLine thinReferences{};
+                thinReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
+                thinReferences.lineDataReference = m_context.bufferReadRef(m_data.lineStorageBuffers[frameIndex]);
+                thinReferences.numOfElements = static_cast<uint32_t>(thinCount);
+                thinReferences.firstElement = static_cast<uint32_t>(thickCount);
                 commandBuffer.pushData(&thinReferences, sizeof(shaderio::PushConstantLine));
 
                 nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -228,10 +232,11 @@ namespace Nox
                 commandBuffer.setDepthTestEnable(false);
                 commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_LineMeshPipeline);
 
-                shaderio::PushConstantLine xrayReferences;
-                xrayReferences.matrixReference = currentUniformBuffer.getDeviceAddress();
-                xrayReferences.lineDataReference = m_data.lineStorageBuffers[frameIndex].getDeviceAddress() + (thickCount + thinCount) * sizeof(shaderio::LineData);
-                xrayReferences.numOfElements = xrayCount;
+                shaderio::PushConstantLine xrayReferences{};
+                xrayReferences.matrixReference = m_context.bufferReadRef(currentUniformBuffer);
+                xrayReferences.lineDataReference = m_context.bufferReadRef(m_data.lineStorageBuffers[frameIndex]);
+                xrayReferences.numOfElements = static_cast<uint32_t>(xrayCount);
+                xrayReferences.firstElement = static_cast<uint32_t>(thickCount + thinCount);
                 commandBuffer.pushData(&xrayReferences, sizeof(shaderio::PushConstantLine));
 
                 nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -260,10 +265,11 @@ namespace Nox
         {
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_QuadMeshPipeline);
 
-            shaderio::PushConstantQuad screenQuadReferences;
-            screenQuadReferences.matrixReference = screenUniforms.getDeviceAddress();
-            screenQuadReferences.quadDataReference = m_data.quadStorageBuffers[frameIndex].getDeviceAddress() + worldQuadCount * sizeof(shaderio::QuadData);
-            screenQuadReferences.numOfElements = screenQuadCount;
+            shaderio::PushConstantQuad screenQuadReferences{};
+            screenQuadReferences.matrixReference = m_context.bufferReadRef(screenUniforms);
+            screenQuadReferences.quadDataReference = m_context.bufferReadRef(m_data.quadStorageBuffers[frameIndex]);
+            screenQuadReferences.numOfElements = static_cast<uint32_t>(screenQuadCount);
+            screenQuadReferences.firstElement = static_cast<uint32_t>(worldQuadCount);
             commandBuffer.pushData(&screenQuadReferences, sizeof(shaderio::PushConstantQuad));
 
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -273,10 +279,11 @@ namespace Nox
         {
             commandBuffer.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_TextMeshPipeline);
 
-            shaderio::PushConstantText screenTextReferences;
-            screenTextReferences.matrixReference = screenUniforms.getDeviceAddress();
-            screenTextReferences.textDataReference = m_data.textStorageBuffers[frameIndex].getDeviceAddress() + worldGlyphCount * sizeof(shaderio::TextData);
-            screenTextReferences.numOfElements = screenGlyphCount;
+            shaderio::PushConstantText screenTextReferences{};
+            screenTextReferences.matrixReference = m_context.bufferReadRef(screenUniforms);
+            screenTextReferences.textDataReference = m_context.bufferReadRef(m_data.textStorageBuffers[frameIndex]);
+            screenTextReferences.numOfElements = static_cast<uint32_t>(screenGlyphCount);
+            screenTextReferences.firstElement = static_cast<uint32_t>(worldGlyphCount);
             commandBuffer.pushData(&screenTextReferences, sizeof(shaderio::PushConstantText));
 
             nri::drawMeshTasks(commandBuffer, 1, 1, 1);
@@ -385,7 +392,7 @@ namespace Nox
             nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
             void* mappedMemory = uboBuffer.map(0, bufferSize);
@@ -469,7 +476,7 @@ namespace Nox
             nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
             void* mappedMemory = uboBuffer.map(0, bufferSize);
@@ -530,7 +537,7 @@ namespace Nox
             nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
             void* mappedMemory = uboBuffer.map(0, bufferSize);
@@ -708,7 +715,7 @@ namespace Nox
             nri::Buffer uboBuffer = m_context.device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
             void* mappedMemory = uboBuffer.map(0, bufferSize);

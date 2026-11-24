@@ -80,8 +80,8 @@ namespace Nox
 
                 shaderio::PushConstantReSTIRGIInitial initPush{};
                 initPush.invViewProj = uniformData.invViewProj;
-                initPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                initPush.reservoirBufferReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRGIReservoirs[kScratchBuffer]));
+                initPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                initPush.reservoirBufferReference = context.BufferWriteRef(res->ReSTIRGIReservoirs[kScratchBuffer]);
                 initPush.depthTextureIndex = context.Slot(res->Depth);
                 initPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 initPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
@@ -144,9 +144,9 @@ namespace Nox
                 // matrix, never this frame's.
                 tPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
                 tPush.cameraWorldPos = uniformData.cameraWorldPos;
-                tPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                tPush.currentReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRGIReservoirs[kScratchBuffer]));
-                tPush.previousReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRGIReservoirs[kPersistentBuffer]));
+                tPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                tPush.currentReservoirReference = context.BufferWriteRef(res->ReSTIRGIReservoirs[kScratchBuffer]);
+                tPush.previousReservoirReference = context.BufferReadRef(res->ReSTIRGIReservoirs[kPersistentBuffer]);
                 tPush.depthTextureIndex = context.Slot(res->Depth);
                 tPush.prevDepthTextureIndex = context.Slot(res->PrevDepth);
                 tPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
@@ -198,10 +198,10 @@ namespace Nox
                 shaderio::PushConstantReSTIRGISpatial sPush{};
                 sPush.invViewProj = uniformData.invViewProj;
                 sPush.cameraWorldPos = uniformData.cameraWorldPos;
-                sPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                sPush.inputReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRGIReservoirs[kScratchBuffer]));
-                sPush.outputReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRGIReservoirs[kPersistentBuffer]));
-                sPush.neighborOffsetsReference = nriGetBufferDeviceAddress(context.Buffer(res->NeighborOffsets));
+                sPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                sPush.inputReservoirReference = context.BufferReadRef(res->ReSTIRGIReservoirs[kScratchBuffer]);
+                sPush.outputReservoirReference = context.BufferWriteRef(res->ReSTIRGIReservoirs[kPersistentBuffer]);
+                sPush.neighborOffsetsReference = bufferReadRef(context.Buffer(res->NeighborOffsets));
                 sPush.depthTextureIndex = context.Slot(res->Depth);
                 sPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 sPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
@@ -383,7 +383,7 @@ namespace Nox
 
                 shaderio::PushConstantReSTIRDIPresample risPush{};
                 risPush.lightDataReference = uniformData.lightDataReference;
-                risPush.risBufferReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIRIS));
+                risPush.risBufferReference = context.BufferWriteRef(res->ReSTIRDIRIS);
                 risPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
                 risPush.numLocalLights = m_restirDINumLocalLights;
                 risPush.risTileSize = m_restirDIRISTileSize;
@@ -413,7 +413,7 @@ namespace Nox
 
                     shaderio::PushConstantReSTIRDIPresampleReGIR regirPush{};
                     regirPush.lightDataReference = uniformData.lightDataReference;
-                    regirPush.risBufferReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIRIS));
+                    regirPush.risBufferReference = context.BufferWriteRef(res->ReSTIRDIRIS);
                     regirPush.gridCenterAndCellSize = glm::vec4(ToRenderSpace(glm::dvec3(m_regirGridCenter)), m_regirCellSize) /* (a world-space setting) */;
                     regirPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
                     regirPush.numLocalLights = m_restirDINumLocalLights;
@@ -444,7 +444,7 @@ namespace Nox
     {
         shaderio::RTXDILightSamplingParams params{};
         params.lightDataReference = uniformData.lightDataReference;
-        params.risBufferReference = nriGetBufferDeviceAddress(context.Buffer(risBuffer));
+        params.risBufferReference = context.BufferReadRef(risBuffer);
         params.gridCenterAndCellSize = glm::vec4(ToRenderSpace(glm::dvec3(m_regirGridCenter)), m_regirCellSize) /* (a world-space setting) */;
         params.firstLocalLightIndex = m_restirDIFirstLocalLight;
         params.numLocalLights = m_restirDINumLocalLights;
@@ -540,8 +540,8 @@ namespace Nox
                 shaderio::PushConstantReSTIRDIInitial diInitPush{};
                 diInitPush.invViewProj = uniformData.invViewProj;
                 diInitPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diInitPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                diInitPush.reservoirBufferReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIReservoirs[bufferA]));
+                diInitPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                diInitPush.reservoirBufferReference = context.BufferWriteRef(res->ReSTIRDIReservoirs[bufferA]);
                 diInitPush.depthTextureIndex = context.Slot(res->Depth);
                 diInitPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 diInitPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
@@ -594,10 +594,10 @@ namespace Nox
                 diTPush.invViewProj = uniformData.invViewProj;
                 diTPush.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
                 diTPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diTPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                diTPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 diTPush.lightDataReference = uniformData.lightDataReference;
-                diTPush.currentReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIReservoirs[bufferA]));
-                diTPush.previousReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIReservoirs[bufferC]));
+                diTPush.currentReservoirReference = context.BufferWriteRef(res->ReSTIRDIReservoirs[bufferA]);
+                diTPush.previousReservoirReference = context.BufferReadRef(res->ReSTIRDIReservoirs[bufferC]);
                 diTPush.depthTextureIndex = context.Slot(res->Depth);
                 diTPush.prevDepthTextureIndex = context.Slot(res->PrevDepth);
                 diTPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
@@ -647,11 +647,11 @@ namespace Nox
                 shaderio::PushConstantReSTIRDISpatial diSPush{};
                 diSPush.invViewProj = uniformData.invViewProj;
                 diSPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diSPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                diSPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 diSPush.lightDataReference = uniformData.lightDataReference;
-                diSPush.inputReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIReservoirs[bufferA]));
-                diSPush.outputReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIReservoirs[bufferB]));
-                diSPush.neighborOffsetsReference = nriGetBufferDeviceAddress(context.Buffer(res->NeighborOffsets));
+                diSPush.inputReservoirReference = context.BufferReadRef(res->ReSTIRDIReservoirs[bufferA]);
+                diSPush.outputReservoirReference = context.BufferWriteRef(res->ReSTIRDIReservoirs[bufferB]);
+                diSPush.neighborOffsetsReference = bufferReadRef(context.Buffer(res->NeighborOffsets));
                 diSPush.depthTextureIndex = context.Slot(res->Depth);
                 diSPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 diSPush.gbufferMaterialIndex = context.Slot(res->GBufferMaterial);
@@ -711,9 +711,9 @@ namespace Nox
                 shaderio::PushConstantReSTIRDIFinalShading diFPush{};
                 diFPush.invViewProj = uniformData.invViewProj;
                 diFPush.cameraWorldPos = uniformData.cameraWorldPos;
-                diFPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                diFPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 diFPush.lightDataReference = uniformData.lightDataReference;
-                diFPush.reservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRDIReservoirs[bufferB]));
+                diFPush.reservoirReference = context.BufferReadRef(res->ReSTIRDIReservoirs[bufferB]);
                 diFPush.depthTextureIndex = context.Slot(res->Depth);
                 diFPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 diFPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
@@ -842,10 +842,10 @@ namespace Nox
                 shaderio::PushConstantReSTIRPTInitial ptiPush{};
                 ptiPush.invViewProj = uniformData.invViewProj;
                 ptiPush.cameraWorldPos = uniformData.cameraWorldPos;
-                ptiPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                ptiPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 ptiPush.lightDataReference = uniformData.lightDataReference;
-                ptiPush.reservoirBufferReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRPTReservoirs[m_frame.ptInitialOutputBuffer]));
-                ptiPush.preservedReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRPTReservoirs[m_frame.ptInitialPreservedBuffer]));
+                ptiPush.reservoirBufferReference = context.BufferWriteRef(res->ReSTIRPTReservoirs[m_frame.ptInitialOutputBuffer]);
+                ptiPush.preservedReservoirReference = context.BufferWriteRef(res->ReSTIRPTReservoirs[m_frame.ptInitialPreservedBuffer]);
                 ptiPush.depthTextureIndex = context.Slot(res->Depth);
                 ptiPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 ptiPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
@@ -912,10 +912,10 @@ namespace Nox
                     pttPush.cameraWorldPos = uniformData.cameraWorldPos;
                     pttPush.prevCameraWorldPos = glm::vec4(m_prevCameraWorldPos, 0.0f);
                     pttPush.prevPrevCameraWorldPos = glm::vec4(m_prevPrevCameraWorldPos, 0.0f);
-                    pttPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    pttPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     pttPush.lightDataReference = uniformData.lightDataReference;
-                    pttPush.currentReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRPTReservoirs[m_frame.ptInitialOutputBuffer]));
-                    pttPush.historyReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRPTReservoirs[m_frame.ptTemporalInputBuffer]));
+                    pttPush.currentReservoirReference = context.BufferWriteRef(res->ReSTIRPTReservoirs[m_frame.ptInitialOutputBuffer]);
+                    pttPush.historyReservoirReference = context.BufferReadRef(res->ReSTIRPTReservoirs[m_frame.ptTemporalInputBuffer]);
                     pttPush.viewportSize = glm::vec2(rw, rh);
                     pttPush.depthTextureIndex = context.Slot(res->Depth);
                     pttPush.prevDepthTextureIndex = context.Slot(res->PrevDepth);
@@ -976,10 +976,10 @@ namespace Nox
                 shaderio::PushConstantReSTIRPTFinalShading ptfPush{};
                 ptfPush.invViewProj = uniformData.invViewProj;
                 ptfPush.cameraWorldPos = uniformData.cameraWorldPos;
-                ptfPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                ptfPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 ptfPush.lightDataReference = uniformData.lightDataReference;
-                ptfPush.reservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRPTReservoirs[m_frame.ptFinalShadingInputBuffer]));
-                ptfPush.preservedReservoirReference = nriGetBufferDeviceAddress(context.Buffer(res->ReSTIRPTReservoirs[m_frame.ptInitialPreservedBuffer]));
+                ptfPush.reservoirReference = context.BufferReadRef(res->ReSTIRPTReservoirs[m_frame.ptFinalShadingInputBuffer]);
+                ptfPush.preservedReservoirReference = context.BufferReadRef(res->ReSTIRPTReservoirs[m_frame.ptInitialPreservedBuffer]);
                 ptfPush.depthTextureIndex = context.Slot(res->Depth);
                 ptfPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);
                 ptfPush.primaryDirectTextureIndex = context.Slot(res->ReSTIRPTPrimaryDirect);

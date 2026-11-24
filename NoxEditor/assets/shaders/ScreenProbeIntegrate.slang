@@ -15,21 +15,21 @@ struct ScreenProbeIntegrateOutput
     float distance;
 };
 
-float3 screen_probe_fallback(UniformBufferObject* ubo, float3 position, float3 normal, float3 geometricNormal)
+float3 screen_probe_fallback(UniformBufferObject ubo, float3 position, float3 normal, float3 geometricNormal)
 {
-    if (ubo->enableDDGI != 0 && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+    if (ubo.enableDDGI != 0 && ubo.ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo.ddgiDistanceTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D irradianceAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-        Texture2D distanceAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+        Texture2D irradianceAtlas = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiIrradianceTextureIndex, 0));
+        Texture2D distanceAtlas = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiDistanceTextureIndex, 0));
         SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-        const float3 toCamera = normalize(ubo->cameraWorldPos.xyz - position);
+        const float3 toCamera = normalize(ubo.cameraWorldPos.xyz - position);
         return sample_ddgi_diffuse_surface(ubo, position, normal, geometricNormal, toCamera, irradianceAtlas, distanceAtlas, linearClamp);
     }
-    if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    if (ubo.irradianceMapIndex != 0xFFFFFFFF)
     {
-        TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        TextureCube irradiance = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
         SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        return irradiance.SampleLevel(irradianceSampler, normal, 0).rgb * ubo->scaleIBLAmbient;
+        return irradiance.SampleLevel(irradianceSampler, normal, 0).rgb * ubo.scaleIBLAmbient;
     }
     return float3(0.0);
 }
@@ -40,32 +40,32 @@ ScreenProbeIntegrateOutput screen_probe_integrate(int2 pixel, PushConstantScreen
     output.irradiance = float4(0.0);
     output.distance = 0.0;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixel, 0));
     if (depth <= 0.0)
         return output;
 
     const float2 pixelCenter = float2(pixel) + 0.5;
     const float3 position = screen_probe_world_position(pushConstant.invViewProj, pixelCenter, pushConstant.viewportSize, depth);
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     const float3 rawNormal = normalTex.Load(int3(pixel, 0)).xyz;
     const float normalLengthSq = dot(rawNormal, rawNormal);
     const float3 normal = normalLengthSq > 1e-8 ? rawNormal * rsqrt(normalLengthSq) : float3(0.0, 1.0, 0.0);
     const float3 geometricNormal = ddgi_geometric_normal(depthTex, pixel, pushConstant.viewportSize, pushConstant.invViewProj, position, normal);
-    const float viewDistance = length(position - ubo->cameraWorldPos.xyz);
+    const float viewDistance = length(position - ubo.cameraWorldPos.xyz);
     // Foliage and cloth (double-sided): leaf cards a few pixels wide, whose normal from the depth around (geometricNormal) is
     // whichever leaf or gap the neighbours are -- a different one every frame with the jitter.
     bool doubleSided = false;
     if (pushConstant.materialTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
+        Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.materialTextureIndex, 0));
         doubleSided = gbuffer_double_sided(materialTex.Load(int3(pixel, 0)).a);
     }
 
-    Texture2D positionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
-    Texture2D probeNormalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
-    Texture2D atlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.inputTextureIndex, 0));
+    Texture2D positionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
+    Texture2D probeNormalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
+    Texture2D atlas = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.inputTextureIndex, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
     const float2 atlasSize = float2(pushConstant.probeCountX, pushConstant.probeCountY) * float(ScreenProbeIrradianceRes);
     const int2 probeMax = int2(pushConstant.probeCountX, pushConstant.probeCountY) - 1;
@@ -132,23 +132,23 @@ ScreenProbeIntegrateOutput screen_probe_integrate(int2 pixel, PushConstantScreen
         float2 previousUV;
         if (pushConstant.velocityTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D velocityTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.velocityTextureIndex, 0));
+            Texture2D velocityTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.velocityTextureIndex, 0));
             // This (jittered) pixel's unjittered position, moved by the jitter-free motion, then to last frame's jittered pixels.
             previousUV = pixelCenter / pushConstant.viewportSize - pushConstant.currJitterUv + velocityTex.Load(int3(pixel, 0)).xy +
                          pushConstant.prevJitterUv;
         }
         else
         {
-            const float4 previousClip = mul(ubo->prevProj, mul(ubo->prevView, float4(position, 1.0)));
+            const float4 previousClip = mul(ubo.prevProj, mul(ubo.prevView, float4(position, 1.0)));
             previousUV = previousClip.w > 0.0 ? (previousClip.xy / previousClip.w) * float2(0.5, -0.5) + 0.5 + pushConstant.prevJitterUv
                                               : float2(-1.0);
         }
 
         if (all(previousUV > 0.0) && all(previousUV < 1.0))
         {
-            Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
-            Texture2D<float> previousDepthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevDepthTextureIndex, 0));
-            Texture2D previousNormalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevNormalTextureIndex, 0));
+            Texture2D historyTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
+            Texture2D<float> previousDepthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevDepthTextureIndex, 0));
+            Texture2D previousNormalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevNormalTextureIndex, 0));
             const float2 previousPixel = previousUV * pushConstant.viewportSize - 0.5;
             const int2 previousBase = int2(floor(previousPixel));
             const float2 previousF = previousPixel - float2(previousBase);

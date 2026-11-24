@@ -32,10 +32,10 @@ static const float2 uv[4] =
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float4 color;
-    float2 texCooord;
-    uint32_t materialIndex;
-    int entityID;
+    float4 color : TEXCOORD0;
+    float2 texCooord : TEXCOORD1;
+    nointerpolation uint32_t materialIndex : TEXCOORD2;
+    nointerpolation int entityID : TEXCOORD3;
 };
 
 [shader("mesh")]
@@ -43,14 +43,15 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
+    in payload QuadPayLoad _payload,
     out indices uint3 triangles[2], out vertices VSOutput vertices[4],
     uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantQuad pushConstant
 )
 {
-    uint quadID = DispatchThreadID.x;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    QuadData* quadData = (QuadData*)pushConstant.quadDataReference;
+    uint quadID = pushConstant.firstElement + DispatchThreadID.x;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<QuadData> quadData = BufferRef<QuadData>(pushConstant.quadDataReference);
     QuadData quad = quadData[quadID];
 
 	SetMeshOutputCounts(4, 2); // 4 vertices, 2 triangles
@@ -79,9 +80,9 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant)
 {
     FSOutput output;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
-    Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + vertIn.materialIndex, 0));
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + vertIn.materialIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
     float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);
 

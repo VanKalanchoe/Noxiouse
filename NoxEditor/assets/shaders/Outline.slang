@@ -37,6 +37,7 @@ struct MSOutput
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload OutlinePayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,
@@ -59,7 +60,7 @@ struct MSOutput
 
 bool IsSelected(
     int entityID,
-    int* selectedIDs,
+    BufferRef<int> selectedIDs,
     uint selectedCount)
 {
     for (uint i = 0; i < selectedCount; ++i)
@@ -77,8 +78,7 @@ float4 fragMain(
     uniform PushConstantOutline pushConstant
 ) : SV_Target
 {
-    UniformBufferObject* ubo =
-        (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
     if (pushConstant.selectedEntityCount == 0)
         discard;
@@ -89,7 +89,7 @@ float4 fragMain(
     // An outline pixel is outside the selection with a selected pixel within `radius`.
     if (pushConstant.selectionMaskTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D<float> maskTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.selectionMaskTextureIndex, 0));
+        Texture2D<float> maskTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.selectionMaskTextureIndex, 0));
         uint maskWidth, maskHeight;
         maskTex.GetDimensions(maskWidth, maskHeight);
 
@@ -114,14 +114,14 @@ float4 fragMain(
     Texture2D<int4> entityTex =
         Texture2D<int4>.Handle(
             uint2(
-                ubo->imageHeapIndexOffset +
-                (pushConstant.entityTextureIndex != 0xFFFFFFFF ? pushConstant.entityTextureIndex : ubo->entityTextureIndex),
+                ubo.imageHeapIndexOffset +
+                (pushConstant.entityTextureIndex != 0xFFFFFFFF ? pushConstant.entityTextureIndex : ubo.entityTextureIndex),
                 0
             )
         );
 
-    int* selectedIDs =
-        (int*)pushConstant.selectedEntityIDsReference;
+    BufferRef<int> selectedIDs =
+        BufferRef<int>(pushConstant.selectedEntityIDsReference);
 
     int2 pixelPos = int2(input.pos.xy);
 

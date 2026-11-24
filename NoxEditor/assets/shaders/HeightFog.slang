@@ -12,14 +12,14 @@
 // behind (fogged = color * a + rgb).
 // Volumetric fog (VolumetricFog.slang; UniformBufferObject::volumetricFogTextureIndex): the light its froxels scatter towards the camera
 // and their transmittance up to `distance` along the ray of screen position uv (rgb, a; nothing scattered, all transmitted without it).
-float4 volumetricFogTerms(UniformBufferObject* ubo, float2 uv, float distance)
+float4 volumetricFogTerms(UniformBufferObject ubo, float2 uv, float distance)
 {
-    if (ubo->volumetricFogTextureIndex == 0xFFFFFFFF || ubo->volumetricFogSlices == 0 || ubo->volumetricFogDistance <= 0.0)
+    if (ubo.volumetricFogTextureIndex == 0xFFFFFFFF || ubo.volumetricFogSlices == 0 || ubo.volumetricFogDistance <= 0.0)
         return float4(0.0, 0.0, 0.0, 1.0);
-    Texture2DArray volume = Texture2DArray.Handle(uint2(ubo->imageHeapIndexOffset + ubo->volumetricFogTextureIndex, 0));
+    Texture2DArray volume = Texture2DArray.Handle(uint2(ubo.imageHeapIndexOffset + ubo.volumetricFogTextureIndex, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
-    const float slices = float(ubo->volumetricFogSlices);
-    const float slice = sqrt(saturate(distance / ubo->volumetricFogDistance)) * slices - 1.0;
+    const float slices = float(ubo.volumetricFogSlices);
+    const float slice = sqrt(saturate(distance / ubo.volumetricFogDistance)) * slices - 1.0;
     if (slice < 0.0) // before the first slice ends: from nothing at the camera
         return lerp(float4(0.0, 0.0, 0.0, 1.0), volume.SampleLevel(linearClamp, float3(uv, 0.0), 0.0), slice + 1.0);
     const float lower = floor(slice);
@@ -27,50 +27,50 @@ float4 volumetricFogTerms(UniformBufferObject* ubo, float2 uv, float distance)
     return lerp(volume.SampleLevel(linearClamp, float3(uv, lower), 0.0), volume.SampleLevel(linearClamp, float3(uv, upper), 0.0), slice - lower);
 }
 
-float4 heightFogTerms(UniformBufferObject* ubo, float3 direction, float distance)
+float4 heightFogTerms(UniformBufferObject ubo, float3 direction, float distance)
 {
     // With the volumetric fog the height fog only starts where its volume ends (UE's volumetric fog distance).
-    const float startDistance = ubo->volumetricFogTextureIndex != 0xFFFFFFFF ? max(ubo->heightFogStartDistance, ubo->volumetricFogDistance)
-                                                                            : ubo->heightFogStartDistance;
-    if (ubo->heightFogDensity <= 0.0 || distance <= startDistance)
+    const float startDistance = ubo.volumetricFogTextureIndex != 0xFFFFFFFF ? max(ubo.heightFogStartDistance, ubo.volumetricFogDistance)
+                                                                            : ubo.heightFogStartDistance;
+    if (ubo.heightFogDensity <= 0.0 || distance <= startDistance)
         return float4(0.0, 0.0, 0.0, 1.0);
 
     // From where the fog starts, along the ray: the integral of density * exp(-falloff * direction.y * t) over the rest.
-    const float3 origin = ubo->cameraWorldPos.xyz + direction * startDistance;
+    const float3 origin = ubo.cameraWorldPos.xyz + direction * startDistance;
     const float travel = min(distance - startDistance, 1e30);
-    const float falloff = max(ubo->heightFogFalloff, 1e-9);
-    const float densityAtOrigin = ubo->heightFogDensity * exp(-falloff * (origin.y - ubo->heightFogBaseY));
+    const float falloff = max(ubo.heightFogFalloff, 1e-9);
+    const float densityAtOrigin = ubo.heightFogDensity * exp(-falloff * (origin.y - ubo.heightFogBaseY));
     const float k = falloff * direction.y;
     // k * travel near 0 (a level ray, or no falloff): the integral is just the distance.
     const float opticalDepth = densityAtOrigin * (abs(k * travel) > 1e-4 ? (1.0 - exp(-k * travel)) / k : travel);
-    const float fog = min(1.0 - exp(-max(opticalDepth, 0.0)), ubo->heightFogMaxOpacity);
+    const float fog = min(1.0 - exp(-max(opticalDepth, 0.0)), ubo.heightFogMaxOpacity);
     if (!(fog > 0.0))
         return float4(0.0, 0.0, 0.0, 1.0);
 
-    float3 inscattered = ubo->heightFogColor;
-    if (ubo->heightFogFromEnvironment != 0 && ubo->irradianceMapIndex != 0xFFFFFFFF)
+    float3 inscattered = ubo.heightFogColor;
+    if (ubo.heightFogFromEnvironment != 0 && ubo.irradianceMapIndex != 0xFFFFFFFF)
     {
         // The environment's light around the view direction, from above the horizon (the sky lights the fog).
-        TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        TextureCube irradiance = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
         SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
         const float3 skyward = normalize(float3(direction.x, max(direction.y, 0.0) + 0.2, direction.z));
-        inscattered *= irradiance.SampleLevel(irradianceSampler, skyward, 0.0).rgb * ubo->scaleIBLAmbient;
+        inscattered *= irradiance.SampleLevel(irradianceSampler, skyward, 0.0).rgb * ubo.scaleIBLAmbient;
     }
-    inscattered += ubo->heightFogSunColor * pow(saturate(dot(direction, ubo->heightFogSunDirection)), ubo->heightFogSunExponent);
+    inscattered += ubo.heightFogSunColor * pow(saturate(dot(direction, ubo.heightFogSunDirection)), ubo.heightFogSunExponent);
     return float4(inscattered * fog, 1.0 - fog);
 }
 
 // The volumetric fog's terms along a view direction (its screen position from the camera's projection).
-float4 volumetricFogTermsAlong(UniformBufferObject* ubo, float3 direction, float distance)
+float4 volumetricFogTermsAlong(UniformBufferObject ubo, float3 direction, float distance)
 {
-    if (ubo->volumetricFogTextureIndex == 0xFFFFFFFF)
+    if (ubo.volumetricFogTextureIndex == 0xFFFFFFFF)
         return float4(0.0, 0.0, 0.0, 1.0);
-    const float4 clip = mul(ubo->proj, mul(ubo->view, float4(ubo->cameraWorldPos.xyz + direction, 1.0)));
+    const float4 clip = mul(ubo.proj, mul(ubo.view, float4(ubo.cameraWorldPos.xyz + direction, 1.0)));
     const float2 uv = clip.w > 0.0 ? saturate(clip.xy / clip.w * float2(0.5, -0.5) + 0.5) : float2(0.5);
     return volumetricFogTerms(ubo, uv, distance);
 }
 
-float3 applyHeightFog(UniformBufferObject* ubo, float3 color, float3 direction, float distance)
+float3 applyHeightFog(UniformBufferObject ubo, float3 color, float3 direction, float distance)
 {
     // The height fog beyond the volumetric fog's range, then the volumetric fog in front of it.
     const float4 fog = heightFogTerms(ubo, direction, distance);
@@ -105,19 +105,19 @@ float4 aerialPerspectiveTerms(uint textureIndex, float kmPerUnit, float2 uv, flo
 // fog, as deferred lighting applies them to the opaque scene. rgb: the light they scatter towards the camera, a: the
 // transmittance of the point's own light. A blended surface adds the scattered light in proportion to how much it covers what is
 // behind it (that is already fogged): fogged = color * a + rgb * cover.
-float4 sceneFogTerms(UniformBufferObject* ubo, float3 worldPos)
+float4 sceneFogTerms(UniformBufferObject ubo, float3 worldPos)
 {
-    const float3 toPoint = worldPos - ubo->cameraWorldPos.xyz;
+    const float3 toPoint = worldPos - ubo.cameraWorldPos.xyz;
     const float distance = length(toPoint);
     if (distance <= 1e-6)
         return float4(0.0, 0.0, 0.0, 1.0);
 
     float4 aerial = float4(0.0, 0.0, 0.0, 1.0);
-    if (ubo->aerialPerspectiveTextureIndex != 0xFFFFFFFF)
+    if (ubo.aerialPerspectiveTextureIndex != 0xFFFFFFFF)
     {
-        const float4 clip = mul(ubo->proj, mul(ubo->view, float4(worldPos, 1.0)));
+        const float4 clip = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
         const float2 uv = clip.w > 0.0 ? saturate(clip.xy / clip.w * float2(0.5, -0.5) + 0.5) : float2(0.5);
-        aerial = aerialPerspectiveTerms(ubo->imageHeapIndexOffset + ubo->aerialPerspectiveTextureIndex, ubo->aerialPerspectiveKmPerUnit, uv, distance);
+        aerial = aerialPerspectiveTerms(ubo.imageHeapIndexOffset + ubo.aerialPerspectiveTextureIndex, ubo.aerialPerspectiveKmPerUnit, uv, distance);
     }
     const float4 fog = heightFogTerms(ubo, toPoint / distance, distance);
     const float4 volumetric = volumetricFogTermsAlong(ubo, toPoint / distance, distance);

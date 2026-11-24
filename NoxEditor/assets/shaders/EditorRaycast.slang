@@ -8,12 +8,13 @@ void computeMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEditorRayc
 {
     if (tid.x >= pc.rayCount)
         return;
-    UniformBufferObject* ubo = (UniformBufferObject*)pc.matrixReference;
-    EditorRay* rays = (EditorRay*)pc.raysReference;
-    EditorRay ray = rays[tid.x];
-    if (ubo->tlasDeviceAddress == 0)
+    UniformBufferObject ubo = loadUbo(pc.matrixReference);
+    RWBufferRef<EditorRay> rays = RWBufferRef<EditorRay>(pc.raysReference);
+    EditorRay ray = rays.Load(tid.x);
+    if (ubo.tlasDeviceAddress == 0)
     {
-        rays[tid.x].hitDistance = -1.0;
+        ray.hitDistance = -1.0;
+        rays.Store(tid.x, ray);
         return;
     }
 
@@ -22,15 +23,16 @@ void computeMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEditorRayc
     desc.Direction = normalize(ray.direction);
     desc.TMin = 0.0;
     desc.TMax = ray.maxDistance;
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure tlas = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     query.TraceRayInline(tlas, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, desc);
-    GpuRayTracingInstance* instances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> instances = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     while (query.Proceed())
     {
-        const GpuRayTracingInstance candidate = instances[query.CandidateRayInstanceCustomIndex()];
+        const GpuRayTracingInstance candidate = instances[query.CandidateInstanceID()];
         if (candidate.alphaMode != 2 && !ray_see_through(candidate.transmissionFactor, candidate.alphaMode))
             query.CommitNonOpaqueTriangleHit();
     }
-    rays[tid.x].hitDistance = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? query.CommittedRayT() : -1.0;
+    ray.hitDistance = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? query.CommittedRayT() : -1.0;
+    rays.Store(tid.x, ray);
 }

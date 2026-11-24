@@ -7,47 +7,31 @@ struct InstanceBuffer
 
 struct PushConstant 
 {
-    UniformBufferObject* uboBuffer;
-    Vertex* vertexBuffer;
-    InstanceBuffer* instanceBuffer;
+    uint64_t uboBuffer;
+    uint64_t vertexBuffer;
+    uint64_t instanceBuffer;
 };
-[[vk::push_constant]]
-ConstantBuffer<PushConstant> pushConst;
 
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float3 color;
-    float2 fragTexCoord;
+    float3 color : TEXCOORD0;
+    float2 fragTexCoord : TEXCOORD1;
 };
 
 [shader("vertex")]
 VSOutput vertMain(uint vertexID : SV_VertexID) 
 {
-    static const float2 positions[3] =
-    {
-        float2(-1.0, -1.0),
-        float2( 3.0, -1.0),
-        float2(-1.0,  3.0)
-    };
-
-    static const float2 uvs[3] =
-    {
-        float2(0.0, 0.0),
-        float2(2.0, 0.0),
-        float2(0.0, 2.0)
-    };
-
     VSOutput output;
-    output.pos = float4(positions[vertexID], 0.0, 1.0);
-    output.fragTexCoord = uvs[vertexID];
+    output.pos = noxFullscreenTriangle(vertexID, output.fragTexCoord);
+    output.color = float3(1.0, 1.0, 1.0);
     return output;
 }
 
 [shader("fragment")]
-float4 fragMain(VSOutput vertIn) : SV_TARGET 
+float4 fragMain(VSOutput vertIn, uniform PushConstant pushConst) : SV_TARGET 
 {
-    UniformBufferObject ubo = *pushConst.uboBuffer;
+    UniformBufferObject ubo = loadUbo(pushConst.uboBuffer);
    
     Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.finalImageIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));

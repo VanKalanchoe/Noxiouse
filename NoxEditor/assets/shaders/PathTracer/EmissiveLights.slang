@@ -19,21 +19,21 @@ namespace EmissiveLights
 {
     // How often a light sample goes to the emissive meshes rather than the analytic lights and the environment: half the time when
     // both exist (their own selection inside each), all of it when nothing else lights the scene.
-    float branchProbability(UniformBufferObject* ubo, bool hasEnvironment)
+    float branchProbability(UniformBufferObject ubo, bool hasEnvironment)
     {
-        if (ubo->emissiveLightCount == 0 || ubo->emissiveLightTotalWeight <= 0.0)
+        if (ubo.emissiveLightCount == 0 || ubo.emissiveLightTotalWeight <= 0.0)
             return 0.0;
-        return (ubo->lightCount + (hasEnvironment ? 1u : 0u)) == 0 ? 1.0 : 0.5;
+        return (ubo.lightCount + (hasEnvironment ? 1u : 0u)) == 0 ? 1.0 : 0.5;
     }
 
     // The list entry of an instance (the list is sorted by slot); ~0 when it is not an emissive light.
-    uint find(UniformBufferObject* ubo, uint instanceSlot)
+    uint find(UniformBufferObject ubo, uint instanceSlot)
     {
-        if (ubo->emissiveLightCount == 0)
+        if (ubo.emissiveLightCount == 0)
             return 0xFFFFFFFF;
-        EmissiveLightInstance* lights = (EmissiveLightInstance*)ubo->emissiveLightsReference;
+        BufferRef<EmissiveLightInstance> lights = BufferRef<EmissiveLightInstance>(ubo.emissiveLightsReference);
         uint low = 0;
-        uint high = ubo->emissiveLightCount;
+        uint high = ubo.emissiveLightCount;
         while (low < high)
         {
             const uint middle = (low + high) / 2;
@@ -42,7 +42,7 @@ namespace EmissiveLights
             else
                 high = middle;
         }
-        return low < ubo->emissiveLightCount && lights[low].instanceSlot == instanceSlot ? low : 0xFFFFFFFF;
+        return low < ubo.emissiveLightCount && lights[low].instanceSlot == instanceSlot ? low : 0xFFFFFFFF;
     }
 
     struct Sample
@@ -57,13 +57,13 @@ namespace EmissiveLights
 
     // A point of an emissive instance's triangle seen from `position`: direction, distance, emission (texture at `textureLod`) and the
     // solid angle pdf for an area pdf of `areaProbability` / its area. `barycentricU`: two uniform numbers.
-    Sample sampleTrianglePoint(UniformBufferObject* ubo, float3 position, uint instanceSlot, uint triangle, float2 barycentricU,
+    Sample sampleTrianglePoint(UniformBufferObject ubo, float3 position, uint instanceSlot, uint triangle, float2 barycentricU,
                                float areaProbability, float textureLod)
     {
         Sample result = (Sample)0;
-        GpuRayTracingInstance instance = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[instanceSlot];
-        const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
-        uint3 index = instance.indexBufferAddress != 0 ? ((uint3*)instance.indexBufferAddress)[triangle]
+        GpuRayTracingInstance instance = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[instanceSlot];
+        const float4x4 world = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[instanceSlot].world;
+        uint3 index = instance.indexBufferAddress != 0 ? BufferRef<uint3>(instance.indexBufferAddress)[triangle]
                                                        : uint3(triangle * 3 + 0, triangle * 3 + 1, triangle * 3 + 2);
         const Vertex v0 = LoadRayTracingVertex(instance, index.x);
         const Vertex v1 = LoadRayTracingVertex(instance, index.y);
@@ -96,7 +96,7 @@ namespace EmissiveLights
         result.radiance = instance.emissiveFactor.rgb * instance.emissiveFactor.a;
         if (instance.emissiveTextureIndex != 0xFFFFFFFF)
         {
-            GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+            GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
             const float2 uv = material_texture_uv(material, material.emissiveTextureSet, v0.uv0 * barycentrics.x + v1.uv0 * barycentrics.y + v2.uv0 * barycentrics.z,
                                                   v0.uv1 * barycentrics.x + v1.uv1 * barycentrics.y + v2.uv1 * barycentrics.z);
             result.radiance *= SampleMaterialTextureLevel(ubo, instance.emissiveTextureIndex, SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0)), uv, textureLod).rgb;
@@ -111,13 +111,13 @@ namespace EmissiveLights
     // ---- The screen-probe GI's sampling: an instance by weight (its emission's luminance times its approximate area:
     // GpuScene::CollectEmissiveLights), one of its triangles uniformly.
 
-    Sample sample(UniformBufferObject* ubo, float3 position, float4 u)
+    Sample sample(UniformBufferObject ubo, float3 position, float4 u)
     {
-        EmissiveLightInstance* lights = (EmissiveLightInstance*)ubo->emissiveLightsReference;
+        BufferRef<EmissiveLightInstance> lights = BufferRef<EmissiveLightInstance>(ubo.emissiveLightsReference);
         // The instance: the first whose running weight passes u.x of the total.
-        const float target = u.x * ubo->emissiveLightTotalWeight;
+        const float target = u.x * ubo.emissiveLightTotalWeight;
         uint low = 0;
-        uint high = ubo->emissiveLightCount - 1;
+        uint high = ubo.emissiveLightCount - 1;
         while (low < high)
         {
             const uint middle = (low + high) / 2;
@@ -128,18 +128,18 @@ namespace EmissiveLights
         }
         const EmissiveLightInstance light = lights[low];
         const uint triangle = min(uint(u.y * float(light.triangleCount)), light.triangleCount - 1);
-        const float probability = (light.weight / ubo->emissiveLightTotalWeight) / float(light.triangleCount);
+        const float probability = (light.weight / ubo.emissiveLightTotalWeight) / float(light.triangleCount);
         return sampleTrianglePoint(ubo, position, light.instanceSlot, triangle, u.zw, probability, 2.0);
     }
 
     // Its solid angle pdf for a point of an instance's triangle of `triangleArea`, `distance` away at `cosLight` to its face.
-    float pdf(UniformBufferObject* ubo, uint instanceSlot, float triangleArea, float distance, float cosLight)
+    float pdf(UniformBufferObject ubo, uint instanceSlot, float triangleArea, float distance, float cosLight)
     {
         const uint entry = find(ubo, instanceSlot);
         if (entry == 0xFFFFFFFF || triangleArea <= 0.0 || cosLight <= 1e-6)
             return 0.0;
-        const EmissiveLightInstance light = ((EmissiveLightInstance*)ubo->emissiveLightsReference)[entry];
-        const float areaPdf = (light.weight / ubo->emissiveLightTotalWeight) / (float(light.triangleCount) * triangleArea);
+        const EmissiveLightInstance light = BufferRef<EmissiveLightInstance>(ubo.emissiveLightsReference)[entry];
+        const float areaPdf = (light.weight / ubo.emissiveLightTotalWeight) / (float(light.triangleCount) * triangleArea);
         return areaPdf * distance * distance / cosLight;
     }
 
@@ -147,43 +147,43 @@ namespace EmissiveLights
 
     static const float LocalShare = 0.75;
 
-    bool hasTriangleLights(UniformBufferObject* ubo)
+    bool hasTriangleLights(UniformBufferObject ubo)
     {
-        return ubo->emissiveTrianglesReference != 0 && ubo->emissiveTriangleCount > 0;
+        return ubo.emissiveTrianglesReference != 0 && ubo.emissiveTriangleCount > 0;
     }
 
-    float triangleTotalPower(UniformBufferObject* ubo)
+    float triangleTotalPower(UniformBufferObject ubo)
     {
-        return ((float*)ubo->emissiveTriangleCdfReference)[ubo->emissiveTriangleCount - 1];
+        return BufferRef<float>(ubo.emissiveTriangleCdfReference)[ubo.emissiveTriangleCount - 1];
     }
 
     // The light grid's cell of a point (its first entry's index), ~0 outside the grid or where no triangle was picked.
-    uint gridCell(UniformBufferObject* ubo, float3 position)
+    uint gridCell(UniformBufferObject ubo, float3 position)
     {
-        if (ubo->emissiveGridReference == 0 || ubo->emissiveGridCellSize <= 0.0)
+        if (ubo.emissiveGridReference == 0 || ubo.emissiveGridCellSize <= 0.0)
             return 0xFFFFFFFF;
-        const float3 local = (position - ubo->emissiveGridOrigin) / ubo->emissiveGridCellSize;
+        const float3 local = (position - ubo.emissiveGridOrigin) / ubo.emissiveGridCellSize;
         if (any(local < 0.0) || local.x >= float(EmissiveGridSizeX) || local.y >= float(EmissiveGridSizeY) || local.z >= float(EmissiveGridSizeZ))
             return 0xFFFFFFFF;
         const uint3 coord = uint3(local);
         const uint first = ((coord.z * EmissiveGridSizeY + coord.y) * EmissiveGridSizeX + coord.x) * EmissiveGridEntries;
-        return ((uint*)ubo->emissiveGridReference)[first] != 0xFFFFFFFF ? first : 0xFFFFFFFF;
+        return BufferRef<uint>(ubo.emissiveGridReference)[first] != 0xFFFFFFFF ? first : 0xFFFFFFFF;
     }
 
     // The probability that the sampling picks emissive triangle `triangle` at a point in cell `first` (gridCell).
-    float triangleProbability(UniformBufferObject* ubo, uint triangle, uint first)
+    float triangleProbability(UniformBufferObject ubo, uint triangle, uint first)
     {
-        const float global = ((EmissiveTriangle*)ubo->emissiveTrianglesReference)[triangle].power / triangleTotalPower(ubo);
+        const float global = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference)[triangle].power / triangleTotalPower(ubo);
         if (first == 0xFFFFFFFF)
             return global;
-        uint* entries = (uint*)ubo->emissiveGridReference;
+        BufferRef<uint> entries = BufferRef<uint>(ubo.emissiveGridReference);
         uint count = 0;
         for (uint k = 0; k < EmissiveGridEntries; ++k)
             count += entries[first + k] == triangle ? 1u : 0u;
         return LocalShare * float(count) / float(EmissiveGridEntries) + (1.0 - LocalShare) * global;
     }
 
-    Sample sampleTriangles(UniformBufferObject* ubo, float3 position, float4 u)
+    Sample sampleTriangles(UniformBufferObject ubo, float3 position, float4 u)
     {
         const float total = triangleTotalPower(ubo);
         if (!(total > 0.0))
@@ -192,15 +192,15 @@ namespace EmissiveLights
         uint triangle = 0;
         if (first != 0xFFFFFFFF && u.x < LocalShare)
         {
-            triangle = ((uint*)ubo->emissiveGridReference)[first + min(uint(u.x / LocalShare * float(EmissiveGridEntries)), EmissiveGridEntries - 1)];
+            triangle = BufferRef<uint>(ubo.emissiveGridReference)[first + min(uint(u.x / LocalShare * float(EmissiveGridEntries)), EmissiveGridEntries - 1)];
         }
         else
         {
             const float globalU = first != 0xFFFFFFFF ? (u.x - LocalShare) / (1.0 - LocalShare) : u.x;
             const float target = globalU * total;
-            float* cdf = (float*)ubo->emissiveTriangleCdfReference;
+            BufferRef<float> cdf = BufferRef<float>(ubo.emissiveTriangleCdfReference);
             uint low = 0;
-            uint high = ubo->emissiveTriangleCount - 1;
+            uint high = ubo.emissiveTriangleCount - 1;
             while (low < high)
             {
                 const uint middle = (low + high) / 2;
@@ -211,7 +211,7 @@ namespace EmissiveLights
             }
             triangle = low;
         }
-        const EmissiveTriangle record = ((EmissiveTriangle*)ubo->emissiveTrianglesReference)[triangle];
+        const EmissiveTriangle record = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference)[triangle];
         if (!(record.power > 0.0))
             return (Sample)0;
         return sampleTrianglePoint(ubo, position, record.instanceSlot, record.primitive, u.yz, triangleProbability(ubo, triangle, first), 0.0);
@@ -219,16 +219,16 @@ namespace EmissiveLights
 
     // The solid angle pdf of the path tracer's emissive sampling from `origin` (without the branch probability) for a point of
     // instance `instanceSlot`'s triangle `primitive`, `distance` away at `cosLight` to its face. 0 when it is not sampled.
-    float trianglePdf(UniformBufferObject* ubo, float3 origin, uint instanceSlot, uint primitive, float distance, float cosLight)
+    float trianglePdf(UniformBufferObject ubo, float3 origin, uint instanceSlot, uint primitive, float distance, float cosLight)
     {
         const uint entry = find(ubo, instanceSlot);
         if (entry == 0xFFFFFFFF || cosLight <= 1e-6)
             return 0.0;
-        const EmissiveLightInstance light = ((EmissiveLightInstance*)ubo->emissiveLightsReference)[entry];
+        const EmissiveLightInstance light = BufferRef<EmissiveLightInstance>(ubo.emissiveLightsReference)[entry];
         if (primitive >= light.triangleCount)
             return 0.0;
         const uint triangle = light.triangleOffset + primitive;
-        const EmissiveTriangle record = ((EmissiveTriangle*)ubo->emissiveTrianglesReference)[triangle];
+        const EmissiveTriangle record = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference)[triangle];
         if (!(record.power > 0.0) || !(record.area > 0.0))
             return 0.0;
         return triangleProbability(ubo, triangle, gridCell(ubo, origin)) / record.area * distance * distance / cosLight;
@@ -236,13 +236,13 @@ namespace EmissiveLights
 
     // trianglePdf for a ray from `origin` along `direction` that hit instance `instanceSlot`'s triangle `primitive` `distance` away,
     // the cosine from the triangle's own face (for passes that do not have it: the hybrid reflections).
-    float trianglePdfAlong(UniformBufferObject* ubo, float3 origin, float3 direction, uint instanceSlot, uint primitive, float distance)
+    float trianglePdfAlong(UniformBufferObject ubo, float3 origin, float3 direction, uint instanceSlot, uint primitive, float distance)
     {
         if (!hasTriangleLights(ubo) || find(ubo, instanceSlot) == 0xFFFFFFFF)
             return 0.0;
-        GpuRayTracingInstance instance = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[instanceSlot];
-        const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
-        uint3 index = instance.indexBufferAddress != 0 ? ((uint3*)instance.indexBufferAddress)[primitive]
+        GpuRayTracingInstance instance = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[instanceSlot];
+        const float4x4 world = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[instanceSlot].world;
+        uint3 index = instance.indexBufferAddress != 0 ? BufferRef<uint3>(instance.indexBufferAddress)[primitive]
                                                        : uint3(primitive * 3 + 0, primitive * 3 + 1, primitive * 3 + 2);
         const float3 p0 = mul(world, float4(LoadRayTracingVertex(instance, index.x).pos, 1.0)).xyz;
         const float3 p1 = mul(world, float4(LoadRayTracingVertex(instance, index.y).pos, 1.0)).xyz;

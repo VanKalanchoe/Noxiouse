@@ -153,15 +153,15 @@ float iblSpecularOcclusion(float NdotV, float ao, float roughness)
 // The specular environment at worldPos along `direction` (RS4b): the reflection probes whose boxes hold the point -- box-projected (the
 // ray met with the box, looked up from where the probe was captured), the smaller boxes first, each fading in over its blend
 // distance -- over `skyRadiance`, the sky's prefiltered map, where they leave room.
-float3 reflection_probe_radiance(UniformBufferObject* ubo, float3 worldPos, float3 direction, float perceptualRoughness, float3 skyRadiance)
+float3 reflection_probe_radiance(UniformBufferObject ubo, float3 worldPos, float3 direction, float perceptualRoughness, float3 skyRadiance)
 {
-    if (ubo->reflectionProbesReference == 0 || ubo->reflectionProbeCount == 0)
+    if (ubo.reflectionProbesReference == 0 || ubo.reflectionProbeCount == 0)
         return skyRadiance;
-    GpuReflectionProbe* probes = (GpuReflectionProbe*)ubo->reflectionProbesReference;
+    BufferRef<GpuReflectionProbe> probes = BufferRef<GpuReflectionProbe>(ubo.reflectionProbesReference);
     SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
     float3 radiance = float3(0.0);
     float coverage = 0.0;
-    const uint count = min(ubo->reflectionProbeCount, MaxReflectionProbes);
+    const uint count = min(ubo.reflectionProbeCount, MaxReflectionProbes);
     for (uint i = 0; i < count && coverage < 0.999; ++i)
     {
         const GpuReflectionProbe probe = probes[i];
@@ -177,7 +177,7 @@ float3 reflection_probe_radiance(UniformBufferObject* ubo, float3 worldPos, floa
         const float3 tFar = max((probe.extents.xyz - local) / localDirection, (-probe.extents.xyz - local) / localDirection);
         const float t = min(min(tFar.x, tFar.y), tFar.z);
         const float3 boxHit = mul(probe.localToWorld, float4(local + localDirection * t, 1.0)).xyz;
-        TextureCube cube = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + probe.cubeTextureIndex, 0));
+        TextureCube cube = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + probe.cubeTextureIndex, 0));
         const float3 probeRadiance = cube.SampleLevel(samplerPrefiltered, boxHit - probe.center.xyz, perceptualRoughness * max(probe.blend.w - 1.0, 0.0)).rgb *
                                      probe.extents.w;
         radiance += probeRadiance * weight * (1.0 - coverage);
@@ -191,25 +191,25 @@ float3 reflection_probe_radiance(UniformBufferObject* ubo, float3 worldPos, floa
 // with to know how much of the sky a point sees, so its reflection of the sky is held back as much (indoors, under awnings). It used
 // to be compared with the Radiance Scale slider's value (1), which a lit surface's GI exceeds at once: no occlusion, everything
 // reflected the whole sky and looked wet.
-float skyIrradianceLuma(UniformBufferObject* ubo, float3 n)
+float skyIrradianceLuma(UniformBufferObject ubo, float3 n)
 {
-    if (ubo->irradianceMapIndex == 0xFFFFFFFF)
-        return max(ubo->scaleIBLAmbient, 0.01);
-    TextureCube irradiance = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+    if (ubo.irradianceMapIndex == 0xFFFFFFFF)
+        return max(ubo.scaleIBLAmbient, 0.01);
+    TextureCube irradiance = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
     SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-    return max(dot(irradiance.SampleLevel(irradianceSampler, n, 0).rgb * ubo->scaleIBLAmbient, float3(0.2126, 0.7152, 0.0722)), 1e-4);
+    return max(dot(irradiance.SampleLevel(irradianceSampler, n, 0).rgb * ubo.scaleIBLAmbient, float3(0.2126, 0.7152, 0.0722)), 1e-4);
 }
 
-IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos);
-IBLResult getIBLContributionOccluded(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos,
+IBLResult getIBLContributionAt(UniformBufferObject ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos);
+IBLResult getIBLContributionOccluded(UniformBufferObject ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos,
                                      float skyVisibility, float3 occludedRadiance);
 
-IBLResult getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao)
+IBLResult getIBLContribution(UniformBufferObject ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao)
 {
     return getIBLContributionAt(ubo, pbrInputs, n, reflection, ao, float3(1e30));
 }
 
-IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos)
+IBLResult getIBLContributionAt(UniformBufferObject ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos)
 {
     return getIBLContributionOccluded(ubo, pbrInputs, n, reflection, ao, worldPos, 1.0, float3(0.0));
 }
@@ -217,38 +217,38 @@ IBLResult getIBLContributionAt(UniformBufferObject* ubo, PBRInfo pbrInputs, floa
 // The same with the sky's reflection seen only as far as `skyVisibility` says (0..1, the irradiance volume's sky occlusion,
 // irradiance_volume_reflection) and `occludedRadiance` -- the surroundings' light -- where it is hidden: Unreal's skylight occlusion.
 // The reflection probes, local captures that hold the room themselves, blend over that as over the sky.
-IBLResult getIBLContributionOccluded(UniformBufferObject* ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos,
+IBLResult getIBLContributionOccluded(UniformBufferObject ubo, PBRInfo pbrInputs, float3 n, float3 reflection, float ao, float3 worldPos,
                                      float skyVisibility, float3 occludedRadiance)
 {
-    if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
+    if (ubo.irradianceMapIndex == 0xFFFFFFFF || ubo.prefilteredMapIndex == 0xFFFFFFFF || ubo.brdfLutIndex == 0xFFFFFFFF)
     {
         IBLResult empty;
         empty.diffuse = float3(0.0);
         empty.specular = float3(0.0);
         return empty;
     }
-    float lod = (pbrInputs.perceptualRoughness * ubo->prefilteredCubeMipLevels);
+    float lod = (pbrInputs.perceptualRoughness * ubo.prefilteredCubeMipLevels);
 
     SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
     SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
     SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
 
-    Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
     float3 brdf = brdfTex.Sample(samplerBrdf, float2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness)).rgb;
 
-    TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+    TextureCube irradianceTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
     float4 irradianceSample = irradianceTex.Sample(samplerIrradiance, n);
     float3 diffuseLight = irradianceSample.rgb;
 
-    TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+    TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
     float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
-    float3 specularLight = prefilteredSample.rgb * ubo->scaleIBLAmbient;
+    float3 specularLight = prefilteredSample.rgb * ubo.scaleIBLAmbient;
     specularLight = lerp(occludedRadiance, specularLight, saturate(skyVisibility));
     if (worldPos.x < 1e29)
         specularLight = reflection_probe_radiance(ubo, worldPos, reflection, pbrInputs.perceptualRoughness, specularLight);
 
     IBLResult result;
-    result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo->scaleIBLAmbient;
+    result.diffuse = diffuseLight * pbrInputs.diffuseColor * ubo.scaleIBLAmbient;
     // The split sum with the material's F90 (F0 x scale + F90 x bias), as the direct light's Fresnel has it: a reflection weaker than
     // full (KHR_materials_specular) has no grazing rim either.
     result.specular = specularLight * (pbrInputs.specularColor * brdf.x + pbrInputs.reflectance90 * brdf.y) *
@@ -301,16 +301,16 @@ float3 lobe_anisotropy_direction(float3 storedNormal, float angle, float3 n)
 }
 
 // The sheen BRDF's directional albedo E (its integral over the hemisphere for one view angle): the BRDF LUT's blue (BRDFIntegration.slang).
-float sheen_albedo(UniformBufferObject* ubo, float cosTheta, float sheenRoughness)
+float sheen_albedo(UniformBufferObject ubo, float cosTheta, float sheenRoughness)
 {
 #ifdef NOX_SHADER_CPU_TEST
     // The CPU test of this math (slangc -target cpp) has no textures: it integrates the albedo directly.
     return sheen_albedo_direct(cosTheta, sheenRoughness);
 #else
-    if (ubo->brdfLutIndex == 0xFFFFFFFF)
+    if (ubo.brdfLutIndex == 0xFFFFFFFF)
         return 0.0;
     SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
-    Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
     return brdfTex.SampleLevel(samplerBrdf, float2(saturate(cosTheta), 1.0 - sheenRoughness), 0).b;
 #endif
 }
@@ -338,7 +338,7 @@ struct LobeShading
 };
 
 // `anisotropicT`: the direction highlights stretch along (with anisotropy; lobe_anisotropy_direction from the G-buffer's angle).
-LobeShading lobe_prepare(UniformBufferObject* ubo, GBufferLobes lobes, float3 anisotropicT, float3 n, float3 v, float NdotV,
+LobeShading lobe_prepare(UniformBufferObject ubo, GBufferLobes lobes, float3 anisotropicT, float3 n, float3 v, float NdotV,
                          float3 baseColor, float metallic, float alphaRoughness)
 {
     LobeShading shading;
@@ -372,7 +372,7 @@ LobeShading lobe_prepare(UniformBufferObject* ubo, GBufferLobes lobes, float3 an
 
 // One analytic light on a surface with lobes: evaluateDirectLight's base with the film's Fresnel and the anisotropic GGX, under the
 // sheen (albedo scaling) and the coat (fresnel_coat). `pbrInputs` as for evaluateDirectLight; `l` the direction to the light.
-float3 evaluateDirectLightLobes(UniformBufferObject* ubo, PBRInfo pbrInputs, LobeShading shading, float3 n, float3 v, float3 l, float3 lightRadiance)
+float3 evaluateDirectLightLobes(UniformBufferObject ubo, PBRInfo pbrInputs, LobeShading shading, float3 n, float3 v, float3 l, float3 lightRadiance)
 {
     const GBufferLobes lobes = shading.lobes;
     float3 F = specularReflection(pbrInputs);
@@ -473,29 +473,29 @@ float3 lobe_reflection(LobeShading shading, float3 n, float3 v, float perceptual
 }
 
 // The prefiltered environment's radiance along a direction at a roughness (getIBLContribution's specular lookup, before its BRDF).
-float3 prefilteredRadiance(UniformBufferObject* ubo, float3 direction, float perceptualRoughness)
+float3 prefilteredRadiance(UniformBufferObject ubo, float3 direction, float perceptualRoughness)
 {
-    if (ubo->prefilteredMapIndex == 0xFFFFFFFF)
+    if (ubo.prefilteredMapIndex == 0xFFFFFFFF)
         return float3(0.0);
     SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-    TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
-    return prefilteredTex.SampleLevel(samplerPrefiltered, direction, perceptualRoughness * ubo->prefilteredCubeMipLevels).rgb * ubo->scaleIBLAmbient;
+    TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
+    return prefilteredTex.SampleLevel(samplerPrefiltered, direction, perceptualRoughness * ubo.prefilteredCubeMipLevels).rgb * ubo.scaleIBLAmbient;
 }
 
 // The split-sum's scale and bias (the BRDF LUT's red and green) at a view angle and roughness.
-float2 brdfScaleBias(UniformBufferObject* ubo, float NdotV, float perceptualRoughness)
+float2 brdfScaleBias(UniformBufferObject ubo, float NdotV, float perceptualRoughness)
 {
-    if (ubo->brdfLutIndex == 0xFFFFFFFF)
+    if (ubo.brdfLutIndex == 0xFFFFFFFF)
         return float2(1.0, 0.0);
     SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
-    Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
     return brdfTex.SampleLevel(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
 }
 
 // The ambient light of the lobes on top of the base, given the base's ambient diffuse + specular (environment, GI, reflections:
 // whatever the caller has) and the environment radiance each lobe sees (`coatRadiance` along the coat's reflection at its
 // roughness, `sheenRadiance` at the sheen's): the sheen's albedo-scaled layer, then the coat over everything (fresnel_coat).
-float3 lobe_ambient(UniformBufferObject* ubo, LobeShading shading, float3 baseAmbient, float3 coatRadiance, float3 sheenRadiance, float NdotV)
+float3 lobe_ambient(UniformBufferObject ubo, LobeShading shading, float3 baseAmbient, float3 coatRadiance, float3 sheenRadiance, float NdotV)
 {
     const GBufferLobes lobes = shading.lobes;
     float3 color = baseAmbient;

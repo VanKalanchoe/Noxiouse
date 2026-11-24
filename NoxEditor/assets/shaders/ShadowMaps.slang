@@ -34,24 +34,24 @@ float shadow_map_bilinear(Texture2D<float> map, SamplerState pointClamp, float2 
 
 // The sun's visibility at worldPos (render space) on a surface with normal n facing it (n . L > 0): 1 lit, 0 in shadow, 1 past the
 // last cascade. noise in [0, 1), per pixel and frame: turns the kernel and dithers the transitions between cascades.
-float sun_shadow_map(UniformBufferObject* ubo, GpuShadowCascades* cascades, float3 worldPos, float3 n, float noise)
+float sun_shadow_map(UniformBufferObject ubo, GpuShadowCascades cascades, float3 worldPos, float3 n, float noise)
 {
-    const uint count = min(cascades->count, MaxShadowCascades);
+    const uint count = min(cascades.count, MaxShadowCascades);
     if (count == 0)
         return 1.0;
 
     // The cascade by the depth along the camera's view axis (the CPU split the view the same way).
-    const float viewDepth = abs(mul(ubo->view, float4(worldPos, 1.0)).z);
+    const float viewDepth = abs(mul(ubo.view, float4(worldPos, 1.0)).z);
     uint cascade = 0;
-    while (cascade < count && viewDepth > cascades->splitFar[cascade])
+    while (cascade < count && viewDepth > cascades.splitFar[cascade])
         cascade++;
     if (cascade >= count)
         return 1.0;
 
     // The last blendFraction of each cascade dithers into the next one; the last fades into the unshadowed distance.
-    const float cascadeNear = cascade > 0 ? cascades->splitFar[cascade - 1] : 0.0;
-    const float cascadeFar = cascades->splitFar[cascade];
-    const float band = max(cascades->blendFraction * (cascadeFar - cascadeNear), 1e-4);
+    const float cascadeNear = cascade > 0 ? cascades.splitFar[cascade - 1] : 0.0;
+    const float cascadeFar = cascades.splitFar[cascade];
+    const float band = max(cascades.blendFraction * (cascadeFar - cascadeNear), 1e-4);
     const float transition = saturate((viewDepth - (cascadeFar - band)) / band);
     float fade = 1.0;
     if (cascade + 1 < count)
@@ -64,7 +64,7 @@ float sun_shadow_map(UniformBufferObject* ubo, GpuShadowCascades* cascades, floa
         fade = 1.0 - transition;
     }
 
-    const float3 L = cascades->lightDirection.xyz;
+    const float3 L = cascades.lightDirection.xyz;
     const float NoL = saturate(dot(n, L));
     const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
 
@@ -76,11 +76,11 @@ float sun_shadow_map(UniformBufferObject* ubo, GpuShadowCascades* cascades, floa
     float receiverDepth;
     for (;;)
     {
-        texelWorld = cascades->texelWorldSize[cascade];
-        depthRange = max(cascades->depthRangeWorld[cascade], 1e-6);
+        texelWorld = cascades.texelWorldSize[cascade];
+        depthRange = max(cascades.depthRangeWorld[cascade], 1e-6);
         // Normal offset (more at grazing angles, where a texel covers more of the surface's depth), then a constant step towards the sun.
-        const float3 receiverPos = worldPos + n * (cascades->normalBias * texelWorld * sinTheta) + L * (cascades->depthBias * texelWorld);
-        const float4 clip = mul(cascades->viewProj[cascade], float4(receiverPos, 1.0));
+        const float3 receiverPos = worldPos + n * (cascades.normalBias * texelWorld * sinTheta) + L * (cascades.depthBias * texelWorld);
+        const float4 clip = mul(cascades.viewProj[cascade], float4(receiverPos, 1.0));
         uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
         receiverDepth = clip.z;
         if (all(uv > 0.0) && all(uv < 1.0) && receiverDepth > 0.0 && receiverDepth <= 1.0)
@@ -89,20 +89,20 @@ float sun_shadow_map(UniformBufferObject* ubo, GpuShadowCascades* cascades, floa
             return 1.0;
     }
 
-    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + cascades->textureIndex[cascade], 0));
+    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + cascades.textureIndex[cascade], 0));
     SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));
-    const float resolution = float(cascades->resolution);
+    const float resolution = float(cascades.resolution);
     // Receiver plane bias: away from the lookup the surface rises towards the sun by up to tan(theta) per unit; the kernel's taps
     // compare against that height (in depth units per texel of offset), or a sloped surface would shadow itself.
     const float slopeDepthPerTexel = min(sinTheta / max(NoL, 0.05), 4.0) * texelWorld / depthRange;
     const float rotation = noise * 6.283185307;
 
-    float radiusTexels = max(cascades->filterTexels, 0.0);
-    const float tanSun = cascades->lightDirection.w;
-    if (cascades->filter == SHADOW_FILTER_PCSS && tanSun > 0.0)
+    float radiusTexels = max(cascades.filterTexels, 0.0);
+    const float tanSun = cascades.lightDirection.w;
+    if (cascades.filter == SHADOW_FILTER_PCSS && tanSun > 0.0)
     {
         // The casters within the widest penumbra: their average depth.
-        const float searchTexels = max(cascades->maxFilterTexels, radiusTexels);
+        const float searchTexels = max(cascades.maxFilterTexels, radiusTexels);
         float blockerDepthSum = 0.0;
         float blockerCount = 0.0;
         for (uint i = 0; i < SHADOW_MAP_TAPS; ++i)
@@ -141,15 +141,23 @@ float shadow_atlas_bilinear(Texture2D<float> atlas, SamplerState pointClamp, flo
 // Whether the local light has a shadow map this frame, and its visibility at worldPos on a surface with normal n facing it (L: unit
 // vector towards the light). false: none -- the caller keeps the light's RT shadow ray. Perspective views (shaderIO.h): the depth is
 // nearPlane / view depth, so depth differences are turned into distances along the view through it.
-bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData light, float3 worldPos, float3 n, float3 L, float noise, out float visibility)
+bool local_light_shadow_map(UniformBufferObject ubo, uint lightIndex, LightData light, float3 worldPos, float3 n, float3 L, float noise, out float visibility)
 {
     visibility = 1.0;
-    if (ubo->localShadowsReference == 0 || ubo->localShadowLightViewsReference == 0)
+    if (ubo.localShadowsReference == 0 || ubo.localShadowLightViewsReference == 0)
         return false;
-    const uint entry = ((uint*)ubo->localShadowLightViewsReference)[lightIndex];
+    const uint entry = BufferRef<uint>(ubo.localShadowLightViewsReference)[lightIndex];
     if (entry == LOCAL_SHADOW_NONE)
         return false;
-    GpuLocalShadows* shadows = (GpuLocalShadows*)ubo->localShadowsReference;
+    const uint4 shadowHeader = LoadRaw<uint4>(ubo.localShadowsReference, 0u);
+    const float4 shadowParams = LoadRaw<float4>(ubo.localShadowsReference, 16u);
+    const uint atlasTextureIndex = shadowHeader.x;
+    const uint atlasSizeU = shadowHeader.y;
+    const uint filterMode = shadowHeader.w;
+    const float normalBias = shadowParams.x;
+    const float depthBias = shadowParams.y;
+    const float filterTexels = shadowParams.z;
+    const float maxFilterTexels = shadowParams.w;
 
     // A cube's face by the direction from the light (+X, -X, +Y, -Y, +Z, -Z).
     uint viewIndex = entry & 0xFFFFu;
@@ -159,7 +167,7 @@ bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData
         const float3 a = abs(d);
         viewIndex += a.x >= a.y && a.x >= a.z ? (d.x >= 0.0 ? 0u : 1u) : (a.y >= a.z ? (d.y >= 0.0 ? 2u : 3u) : (d.z >= 0.0 ? 4u : 5u));
     }
-    const GpuShadowView view = shadows->views[min(viewIndex, MaxLocalShadowViews - 1u)];
+    const GpuShadowView view = LoadRaw<GpuShadowView>(ubo.localShadowsReference, 32u + min(viewIndex, MaxLocalShadowViews - 1u) * 96u);
     if (view.atlasRect.z <= 0.0) // a face behind a rect / disc light
         return true;
 
@@ -169,7 +177,7 @@ bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData
     const float texelWorld = view.texelPerDepth * viewDepth;
     const float NoL = saturate(dot(n, L));
     const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
-    const float3 receiverPos = worldPos + n * (shadows->normalBias * texelWorld * sinTheta) + L * (shadows->depthBias * texelWorld);
+    const float3 receiverPos = worldPos + n * (normalBias * texelWorld * sinTheta) + L * (depthBias * texelWorld);
     const float4 clip = mul(view.viewProj, float4(receiverPos, 1.0));
     if (clip.w <= view.nearPlane)
         return true;
@@ -180,22 +188,22 @@ bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData
     const float receiverDepth = ndc.z;
     const float receiverZ = clip.w;
 
-    Texture2D<float> atlas = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + shadows->atlasTextureIndex, 0));
+    Texture2D<float> atlas = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + atlasTextureIndex, 0));
     SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));
-    const float atlasSize = float(shadows->atlasSize);
+    const float atlasSize = float(atlasSizeU);
     const float2 uv = view.atlasRect.xy + tileUV * view.atlasRect.zw;
     const float2 lo = view.atlasRect.xy + 1.0 / atlasSize;
     const float2 hi = view.atlasRect.xy + view.atlasRect.zw - 1.0 / atlasSize;
     // The receiver plane's rise per texel of offset, in depth (d depth = nearPlane d z / z^2).
     const float slopeDepthPerTexel = view.nearPlane * min(sinTheta / max(NoL, 0.05), 4.0) * texelWorld / (receiverZ * receiverZ);
     const float rotation = noise * 6.283185307;
-    const float maxRadius = max(min(shadows->maxFilterTexels, float(view.borderTexels) - 1.0), 0.0);
-    float radiusTexels = min(max(shadows->filterTexels, 0.0), maxRadius);
+    const float maxRadius = max(min(maxFilterTexels, float(view.borderTexels) - 1.0), 0.0);
+    float radiusTexels = min(max(filterTexels, 0.0), maxRadius);
 
     // PCSS: the light's size (a sphere's radius; a rect / disc's mean half extent) over the distance to the casters.
     const uint lightType = (uint)light.position.w;
     const float sourceRadius = is_area_light(lightType) ? 0.5 * (length(light.spotParams.xyz) + light.spotParams.w) : light.spotParams.z;
-    if (shadows->filter == SHADOW_FILTER_PCSS && sourceRadius > 0.0)
+    if (filterMode == SHADOW_FILTER_PCSS && sourceRadius > 0.0)
     {
         float blockerDepthSum = 0.0;
         float blockerCount = 0.0;
@@ -230,17 +238,17 @@ bool local_light_shadow_map(UniformBufferObject* ubo, uint lightIndex, LightData
 // on screen covers it within a thickness, else 1. The detail a shadow map's texels miss (a hand on a table, grass blades, creases);
 // what is off screen or behind the visible surface casts nothing here. Perspective views only (the depth's view distance:
 // near / depth for the cameras' infinite reverse-Z projection). noise in [0, 1): the steps' offset, averaged by the temporal upscale.
-float contact_shadow(UniformBufferObject* ubo, Texture2D<float> depthTex, float2 viewportSize, float3 worldPos, float3 n, float3 L, float maxLength, float noise)
+float contact_shadow(UniformBufferObject ubo, Texture2D<float> depthTex, float2 viewportSize, float3 worldPos, float3 n, float3 L, float maxLength, float noise)
 {
-    const float rayLength = min(ubo->contactShadowLength, maxLength);
-    if (rayLength <= 0.0 || mul(ubo->proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5) // off, or an orthographic camera (w = 1)
+    const float rayLength = min(ubo.contactShadowLength, maxLength);
+    if (rayLength <= 0.0 || mul(ubo.proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5) // off, or an orthographic camera (w = 1)
         return 1.0;
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z; // depth x view distance (reverse-Z infinite projection)
-    const float4x4 viewProj = mul(ubo->proj, ubo->view); // jittered, as the depth buffer
-    const uint steps = clamp(ubo->contactShadowSamples, 1u, 64u);
+    const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z; // depth x view distance (reverse-Z infinite projection)
+    const float4x4 viewProj = mul(ubo.proj, ubo.view); // jittered, as the depth buffer
+    const uint steps = clamp(ubo.contactShadowSamples, 1u, 64u);
     // A covering surface counts within this distance behind it (thinner than the ray: no shadow from a far wall behind an edge).
-    const float thickness = max(0.5 * rayLength, 0.02 * ubo->unitsPerMeter);
-    const float3 start = worldPos + n * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
+    const float thickness = max(0.5 * rayLength, 0.02 * ubo.unitsPerMeter);
+    const float3 start = worldPos + n * raster_surface_bias(ubo, worldPos, 0.01 * ubo.unitsPerMeter);
     for (uint i = 0; i < steps; ++i)
     {
         const float t = (float(i) + noise) / float(steps);

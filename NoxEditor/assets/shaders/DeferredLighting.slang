@@ -55,6 +55,7 @@
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload DeferredLightingPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,
@@ -92,12 +93,12 @@
 
     float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
     {
-        uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+        BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
         uint i0 = indices[primIndex * 3 + 0];
         uint i1 = indices[primIndex * 3 + 1];
         uint i2 = indices[primIndex * 3 + 2];
 
-        PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+        BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
         float2 uv0 = vertices[i0].uv0;
         float2 uv1 = vertices[i1].uv0;
         float2 uv2 = vertices[i2].uv0;
@@ -109,13 +110,13 @@
         return ray_hit_uv(lut, w0 * uv0 + w1 * uv1 + w2 * uv2); // through the material's UV channel 0
     }
 
-    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist);
+    bool trace_shadow_ray(UniformBufferObject ubo, float3 rayOrigin, float3 rayDir, float maxDist);
 
     // How much of a rect light a point sees: shadow rays to 4 points of the rectangle (2 x 2 cells, jittered per pixel and frame;
     // DLSS / the temporal upscale smooths the soft shadow's grain). 1 without RT shadows.
-    float rect_light_visibility(UniformBufferObject* ubo, LightData light, float3 position, float3 shadowOrigin, uint2 pixel, uint frameIndex)
+    float rect_light_visibility(UniformBufferObject ubo, LightData light, float3 position, float3 shadowOrigin, uint2 pixel, uint frameIndex)
     {
-        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+        if (ubo.enableRTShadows == 0 || ubo.tlasDeviceAddress == 0)
             return 1.0;
         const float2 jitter = frac(float2(52.9829189 * frac(0.06711056 * float(pixel.x) + 0.00583715 * float(pixel.y)),
                                           0.7548776662 * float(frameIndex % 64u) + 0.5698402910 * float(pixel.x + pixel.y)));
@@ -126,7 +127,7 @@
             const LightPointSample sample = sample_light_point(light, position, u);
             const float3 toSample = sample.position - shadowOrigin;
             const float distance = length(toSample);
-            if (distance > 1e-5 && !trace_shadow_ray(ubo, shadowOrigin, toSample / distance, max(distance - 0.01 * ubo->unitsPerMeter, 0.0)))
+            if (distance > 1e-5 && !trace_shadow_ray(ubo, shadowOrigin, toSample / distance, max(distance - 0.01 * ubo.unitsPerMeter, 0.0)))
                 visible += 1.0;
         }
         return visible * 0.25;
@@ -134,16 +135,16 @@
 
     // The shadow-ray budget (UniformBufferObject::shadowRayLightLimit): the priority (light_shadow_priority) a light needs at this
     // point to trace its shadow rays, the N-th strongest of the lights that would trace (the shadow mask's light aside). 0: all trace.
-    float shadow_ray_threshold(UniformBufferObject* ubo, LightData* lights, float3 position)
+    float shadow_ray_threshold(UniformBufferObject ubo, BufferRef<LightData> lights, float3 position)
     {
-        const uint limit = min(ubo->shadowRayLightLimit, 8u);
+        const uint limit = min(ubo.shadowRayLightLimit, 8u);
         if (limit == 0)
             return 0.0;
         float strongest[8] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }; // descending
         uint candidates = 0;
-        for (uint i = 0; i < ubo->lightCount; i++)
+        for (uint i = 0; i < ubo.lightCount; i++)
         {
-            if (i == ubo->shadowMaskLightIndex)
+            if (i == ubo.shadowMaskLightIndex)
                 continue;
             float priority = light_shadow_priority(lights[i], position);
             if (priority <= 0.0)
@@ -162,18 +163,18 @@
         return candidates > limit ? strongest[limit - 1] : 0.0;
     }
 
-    bool trace_shadow_ray(UniformBufferObject* ubo, float3 rayOrigin, float3 rayDir, float maxDist)
+    bool trace_shadow_ray(UniformBufferObject ubo, float3 rayOrigin, float3 rayDir, float maxDist)
     {
-        if (ubo->enableRTShadows == 0 || ubo->tlasDeviceAddress == 0)
+        if (ubo.enableRTShadows == 0 || ubo.tlasDeviceAddress == 0)
             return false;
 
         RayDesc shadowRayDesc;
         shadowRayDesc.Origin = rayOrigin;
         shadowRayDesc.Direction = rayDir;
-        shadowRayDesc.TMin = 0.005 * ubo->unitsPerMeter;
+        shadowRayDesc.TMin = 0.005 * ubo.unitsPerMeter;
         shadowRayDesc.TMax = maxDist;
 
-        RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+        RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
 
         RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
                  RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> sq;
@@ -182,12 +183,12 @@
 
         sq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, shadowRayDesc);
 
-        GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+        BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
         SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
         while (sq.Proceed())
         {
-            uint instanceID = sq.CandidateRayInstanceCustomIndex();
+            uint instanceID = sq.CandidateInstanceID();
             uint primIndex = sq.CandidatePrimitiveIndex();
 
             GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
@@ -225,7 +226,7 @@
         uniform PushConstantDeferredLighting pushConstant
     ) : SV_Target0
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         int2 pixelCoord = int2(input.pos.xy);
 
 
@@ -234,7 +235,7 @@
             // =========================================================================
             if (pushConstant.debugMode == 12)
             {
-                Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.
+                Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.
   depthTextureIndex, 0));
                 float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
 
@@ -251,7 +252,7 @@
                 float4 worldPosH = mul(pushConstant.invViewProj, ndc);
                 float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-                float linearDist = length(worldPos - ubo->cameraWorldPos.xyz);
+                float linearDist = length(worldPos - ubo.cameraWorldPos.xyz);
 
                 // Near = Black/Dark Gray, Far = White (1.0), seamlessly merging into white background
                 float visualDepth = saturate(linearDist / 25.0);
@@ -261,7 +262,7 @@
             // Mode 15: Motion Vectors (Velocity Buffer)
                 if (pushConstant.debugMode == 15)
                 {
-                    Texture2D velocityTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
+                    Texture2D velocityTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferVelocityIndex, 0));
                     float2 vel = velocityTex.Load(int3(pixelCoord, 0)).rg;
                     // Amplify 100x so motion is vividly visible in the viewport
                     // Red = horizontal motion, Green = vertical motion
@@ -274,47 +275,47 @@
                 {
                     if (pushConstant.diffuseGIMode == 3 && pushConstant.screenProbeGITextureIndex != 0xFFFFFFFF)
                     {
-                        Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
+                        Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
                         return float4(screenProbeTex.Load(int3(pixelCoord, 0)).rgb, 1.0);
                     }
                     else if (pushConstant.diffuseGIMode == 2 && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
                     {
-                        Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
+                        Texture2D restirTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
                         float3 restirDiffuse = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirTex.Load(int3(pixelCoord, 0)));
                         return float4(restirDiffuse, 1.0);
                     }
-                    else if (ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+                    else if (ubo.ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo.ddgiDistanceTextureIndex != 0xFFFFFFFF)
                     {
-                        Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+                        Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
                         float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
                         float lenSqN = dot(normalSample.rgb, normalSample.rgb);
                         float3 n = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
 
-                        Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-                        Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+                        Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiIrradianceTextureIndex, 0));
+                        Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiDistanceTextureIndex, 0));
                         SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
                         float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
                         float2 ndc_xy = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-                        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+                        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
                         float depthVal = depthTex.Load(int3(pixelCoord, 0)).r;
                         float4 ndc = float4(ndc_xy, depthVal, 1.0);
-                        float4 worldPosH = mul(ubo->invViewProj, ndc);
+                        float4 worldPosH = mul(ubo.invViewProj, ndc);
                         float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-                        const float3 geometricNormal = ddgi_geometric_normal(depthTex, int2(pixelCoord), pushConstant.viewportSize, ubo->invViewProj, worldPos, n);
-                        const float3 toViewer = normalize(ubo->cameraWorldPos.xyz - worldPos);
+                        const float3 geometricNormal = ddgi_geometric_normal(depthTex, int2(pixelCoord), pushConstant.viewportSize, ubo.invViewProj, worldPos, n);
+                        const float3 toViewer = normalize(ubo.cameraWorldPos.xyz - worldPos);
                         float3 ddgiIrradiance = sample_ddgi_diffuse_surface(ubo, worldPos, n, geometricNormal, toViewer, ddgiIrrTex, ddgiDistTex, ddgiSampler);
                         return float4(ddgiIrradiance, 1.0);
                     }
                 }
 
             // 1. Check Visibility Buffer and Depth to distinguish background from geometry
-                Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
+                Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
                 uint4 rawVis = visTex.Load(int3(pixelCoord, 0));
                 uint2 visData = rawVis.xy;
 
-                Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+                Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
                 float depth = depthTex.Load(int3(pixelCoord, 0)).r;
 
                 // In Reverse-Z: 0.0 is background/skybox -> discard so skybox pass can render!
@@ -324,10 +325,10 @@
                 }
 
         // 2. Fetch G-Buffer Render Targets
-        Texture2D albedoTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
-        Texture2D normalTex   = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
-        Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
-        Texture2D emissionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferEmissionIndex, 0));
+        Texture2D albedoTex   = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
+        Texture2D normalTex   = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+        Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+        Texture2D emissionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferEmissionIndex, 0));
 
         float4 albedoSample   = albedoTex.Load(int3(pixelCoord, 0));
         float4 normalSample   = normalTex.Load(int3(pixelCoord, 0));
@@ -346,12 +347,12 @@
 
         // The sun's shadow mask: ray traced (ShadowMask.slang, denoised by NRD SIGMA when it runs) or its cascaded shadow maps
         // resolved into the same format (ShadowMapResolve.slang).
-        const bool sunShadowMaps = ubo->sunShadowCascadesReference != 0;
+        const bool sunShadowMaps = ubo.sunShadowCascadesReference != 0;
         const bool shadowMaskValid = pushConstant.shadowMaskTextureIndex != 0 && pushConstant.shadowMaskTextureIndex != 0xFFFFFFFF;
         float shadowFactor = 1.0;
-        if ((ubo->enableRTShadows != 0 || sunShadowMaps) && shadowMaskValid)
+        if ((ubo.enableRTShadows != 0 || sunShadowMaps) && shadowMaskValid)
         {
-            Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
+            Texture2D shadowMaskTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.shadowMaskTextureIndex, 0));
             float2 shadowData = shadowMaskTex.Load(int3(pixelCoord, 0)).rg;
             if ((pushConstant.nrdShadowsEnabled & 1) != 0)
             {
@@ -382,7 +383,7 @@
         float rawAmbientOcclusion = 1.0; // SSAO/RTAO alone (debug mode 22), not combined with a material's own baked AO
         if (pushConstant.ssaoTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
+            Texture2D<float> ssaoTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.ssaoTextureIndex, 0));
             rawAmbientOcclusion = ssaoTex.Load(int3(pixelCoord, 0)).r;
             occlusion *= rawAmbientOcclusion;
         }
@@ -403,8 +404,8 @@
         if (gbuffer_unlit(materialSample.b))
         {
             TonemapParameters tonemapParams;
-            tonemapParams.exposure = ubo->exposure;
-            tonemapParams.gamma = ubo->gamma;
+            tonemapParams.exposure = ubo.exposure;
+            tonemapParams.gamma = ubo.gamma;
             tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
             return float4(toneMap(baseColor, tonemapParams), 1.0);
         }
@@ -414,11 +415,11 @@
         const GBufferLobes lobes = gbuffer_load_lobes(ubo, int2(pixelCoord), materialSample.b);
         const bool hasLobes = lobes.flags != 0u;
         // The Toon shading model (ToonShading.slang): its settings in the lobe target (a toon pixel has no lobes).
-        const bool toon = gbuffer_toon(materialSample.b) && ubo->gbufferLobesTextureIndex != 0xFFFFFFFF;
+        const bool toon = gbuffer_toon(materialSample.b) && ubo.gbufferLobesTextureIndex != 0xFFFFFFFF;
         ToonSettings toonSettings;
         if (toon)
         {
-            Texture2D<uint4> toonTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->gbufferLobesTextureIndex, 0));
+            Texture2D<uint4> toonTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.gbufferLobesTextureIndex, 0));
             toonSettings = gbuffer_decode_toon(toonTex.Load(int3(int2(pixelCoord), 0)));
         }
 
@@ -455,13 +456,13 @@
 #ifdef NOX_CUSTOM_LIT
         // The Material Shader's surface (CustomLit.slang): its slot, material, UV and footprint from the lobe target (GBufferMaterial).
         uint4 customPacked = uint4(0xFFFFFFFFu, 0u, 0u, 0u);
-        if (ubo->gbufferLobesTextureIndex != 0xFFFFFFFF)
+        if (ubo.gbufferLobesTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D<uint4> customTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->gbufferLobesTextureIndex, 0));
+            Texture2D<uint4> customTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.gbufferLobesTextureIndex, 0));
             customPacked = customTex.Load(int3(int2(pixelCoord), 0));
         }
         const CustomLitPixel customPixel = custom_lit_decode_pixel(customPacked);
-        const CustomLitSurface customSurface = custom_lit_surface(ubo, &SceneInstances(ubo).materials[customPixel.materialIndex], worldPos, n, v,
+        const CustomLitSurface customSurface = custom_lit_surface(ubo, SceneInstances(ubo).materials[customPixel.materialIndex], worldPos, n, v,
                                                                   baseColor, metallic, perceptualRoughness, occlusion, emissionSample.rgb,
                                                                   customPixel.uv, customPixel.uvFootprint, uv);
 #endif
@@ -481,8 +482,8 @@
         if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF && !toon && !CustomLitPass)
         {
             // De-modulated diffuse and specular (ReSTIRDIFinalShading.slang): modulated back with the same factors.
-            Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
-            Texture2D specularDITex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirDISpecularTextureIndex, 0));
+            Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
+            Texture2D specularDITex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.restirDISpecularTextureIndex, 0));
             float3 diffFactor, specFactor;
             NRD_MaterialFactors(n, v, diffuseColor, specularColor, perceptualRoughness, diffFactor, specFactor);
             directLighting = NRD_UnpackSignal(pushConstant.restirDIDenoiserMode, diffuseDITex.Load(int3(pixelCoord, 0))) * diffFactor +
@@ -490,14 +491,14 @@
         }
         else
         {
-            LightData* lights = (LightData*)ubo->lightDataReference;
-            const bool rtShadows = ubo->enableRTShadows != 0 && ubo->tlasDeviceAddress != 0;
+            BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
+            const bool rtShadows = ubo.enableRTShadows != 0 && ubo.tlasDeviceAddress != 0;
             // Local lights' shadow map kernels turn per pixel and frame (interleaved gradient noise), averaged by the temporal upscale.
             const float2 noisePixel = float2(pixelCoord) + float(pushConstant.frameIndex % 64u) * float2(5.588238, 3.45367);
             const float shadowMapNoise = frac(52.9829189 * frac(0.06711056 * noisePixel.x + 0.00583715 * noisePixel.y));
             const float shadowThreshold = rtShadows ? shadow_ray_threshold(ubo, lights, worldPos) : 0.0;
 
-            for (uint i = 0; i < ubo->lightCount; i++)
+            for (uint i = 0; i < ubo.lightCount; i++)
             {
                 LightData light = lights[i];
                 uint lightType = (uint)light.position.w;
@@ -518,14 +519,14 @@
                     else if (any(rectLight > 0.0) && light_shadow_priority(light, worldPos) < shadowThreshold)
                         directLighting += rectLight; // over the shadow-ray budget: unshadowed
                     else if (any(rectLight > 0.0))
-                        directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter),
+                        directLighting += rectLight * rect_light_visibility(ubo, light, worldPos, worldPos + n * raster_surface_bias(ubo, worldPos, 0.02 * ubo.unitsPerMeter),
                                                                             uint2(pixelCoord), pushConstant.frameIndex);
                     continue;
                 }
 
                 float3 l;
                 float attenuation = 1.0;
-                float maxDist = 100000.0 * ubo->unitsPerMeter; // a directional light: as far as a shadow ray needs to go
+                float maxDist = 100000.0 * ubo.unitsPerMeter; // a directional light: as far as a shadow ray needs to go
 
                 if (lightType == 0) // Directional Light
                 {
@@ -581,7 +582,7 @@
 
                 float lightShadow = 1.0;
                 bool shadowMapped = false; // by a shadow map: contact shadows add the detail its texels miss
-                if (i == ubo->shadowMaskLightIndex && shadowMaskValid && (rtShadows || sunShadowMaps))
+                if (i == ubo.shadowMaskLightIndex && shadowMaskValid && (rtShadows || sunShadowMaps))
                 {
                     shadowMapped = sunShadowMaps;
                     // The sun (the first directional light) uses the shadow mask -- behind a leaf too: the mask looks a double-sided
@@ -595,10 +596,10 @@
                 }
                 else if (rtShadows)
                 {
-                    if (backLit && i == ubo->shadowMaskLightIndex)
+                    if (backLit && i == ubo.shadowMaskLightIndex)
                     {
                         // The sun behind a leaf without the mask: its own ray from the back side, whatever the shadow-ray budget.
-                        if (trace_shadow_ray(ubo, worldPos - n * (0.02 * ubo->unitsPerMeter), l, maxDist))
+                        if (trace_shadow_ray(ubo, worldPos - n * (0.02 * ubo.unitsPerMeter), l, maxDist))
                             lightShadow = 0.0;
                     }
                     else if ((lightType == 0 || (attenuation * light.color.w > 0.001)) &&
@@ -606,7 +607,7 @@
                     {
                         // Any additional directional lights (moon, secondary suns) or any punctual light within range
                         float3 shadowNormal = (dot(n, l) < 0.0) ? -n : n;
-                        float3 shadowOrigin = worldPos + shadowNormal * raster_surface_bias(ubo, worldPos, 0.02 * ubo->unitsPerMeter);
+                        float3 shadowOrigin = worldPos + shadowNormal * raster_surface_bias(ubo, worldPos, 0.02 * ubo.unitsPerMeter);
                         if (trace_shadow_ray(ubo, shadowOrigin, l, maxDist))
                         {
                             lightShadow = 0.0;
@@ -615,7 +616,7 @@
                 }
 
                 // Contact shadows (Settings > Contact Shadows) on what a shadow map lit.
-                if (shadowMapped && lightShadow > 0.0 && ubo->contactShadowLength > 0.0)
+                if (shadowMapped && lightShadow > 0.0 && ubo.contactShadowLength > 0.0)
                     lightShadow *= contact_shadow(ubo, depthTex, pushConstant.viewportSize, worldPos, (dot(n, l) < 0.0) ? -n : n, l, maxDist,
                                                   frac(shadowMapNoise + 0.5));
 
@@ -712,7 +713,7 @@
         // Diffuse Global Illumination: screen probes (ScreenProbeIntegrate.slang), ReSTIR GI (Screen-Space Resampling) or DDGI Probes
         if (pushConstant.diffuseGIMode == 3 && pushConstant.screenProbeGITextureIndex != 0xFFFFFFFF)
         {
-            Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
+            Texture2D screenProbeTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.screenProbeGITextureIndex, 0));
             screenProbeIrradiance = screenProbeTex.Load(int3(pixelCoord, 0)).rgb;
             hasScreenProbeIrradiance = true;
             ambientDiffuse = screenProbeIrradiance * diffuseColor;
@@ -724,10 +725,10 @@
 
             // A rough reflection's wide lobe sees about the light around the surface, not the sky: the GI in place of the
             // environment's reflection, more so the rougher (RT reflections, where they run, replace both for the smoother below).
-            if (ubo->brdfLutIndex != 0xFFFFFFFF)
+            if (ubo.brdfLutIndex != 0xFFFFFFFF)
             {
                 SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
-                Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
                 const float2 brdf = brdfTex.SampleLevel(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness), 0).rg;
                 const float3 giSpecular = screenProbeIrradiance * (specularColor * brdf.x + specularEnvironmentR90 * brdf.y);
                 ambientSpecular = lerp(ambientSpecular, giSpecular, smoothstep(0.35, 0.8, perceptualRoughness));
@@ -735,7 +736,7 @@
         }
         else if ((pushConstant.diffuseGIMode == 2 || pushConstant.debugMode == 16) && pushConstant.restirGIDiffuseTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D restirTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
+            Texture2D restirTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.restirGIDiffuseTextureIndex, 0));
             float3 restirDiffuse = NRD_UnpackSignal(pushConstant.restirGIDenoiserMode, restirTex.Load(int3(pixelCoord, 0)));
             ambientDiffuse = restirDiffuse * diffuseColor;
 
@@ -763,15 +764,15 @@
                 }
             }
         }
-        else if ((pushConstant.diffuseGIMode == 1 || ubo->enableDDGI != 0) && ubo->ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo->ddgiDistanceTextureIndex != 0xFFFFFFFF)
+        else if ((pushConstant.diffuseGIMode == 1 || ubo.enableDDGI != 0) && ubo.ddgiIrradianceTextureIndex != 0xFFFFFFFF && ubo.ddgiDistanceTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiIrradianceTextureIndex, 0));
-            Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->ddgiDistanceTextureIndex, 0));
+            Texture2D ddgiIrrTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiIrradianceTextureIndex, 0));
+            Texture2D ddgiDistTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.ddgiDistanceTextureIndex, 0));
             SamplerState ddgiSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
             // The probe weights follow the flat surface, not its normal map (DDGICommon.slang).
             const float3 geometricNormal = ddgi_geometric_normal(depthTex, int2(pixelCoord), pushConstant.viewportSize, pushConstant.invViewProj, worldPos, n);
-            float3 ddgiIrradiance = sample_ddgi_diffuse_surface(ubo, worldPos, n, geometricNormal, normalize(ubo->cameraWorldPos.xyz - worldPos),
+            float3 ddgiIrradiance = sample_ddgi_diffuse_surface(ubo, worldPos, n, geometricNormal, normalize(ubo.cameraWorldPos.xyz - worldPos),
                                                                 ddgiIrrTex, ddgiDistTex, ddgiSampler);
             ambientDiffuse = ddgiIrradiance * diffuseColor;
 
@@ -785,7 +786,7 @@
         // that found nothing (SSGI.slang: rgb is already irradiance / pi times the hit share).
         if (pushConstant.ssgiTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D ssgiTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssgiTextureIndex, 0));
+            Texture2D ssgiTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.ssgiTextureIndex, 0));
             const float4 ssgi = ssgiTex.Load(int3(pixelCoord, 0));
             ambientDiffuse = ssgi.rgb * diffuseColor + saturate(1.0 - ssgi.a) * ambientDiffuse;
             // Its rays that hit something close by did not reach the sky: the environment's reflection held back as much (indoors most
@@ -806,16 +807,16 @@
         float3 reflectionNormal = n;
         float reflectionRoughness = perceptualRoughness;
         gbuffer_reflection_layer(lobes, reflectionNormal, reflectionRoughness);
-        const bool reflectionTraced = ubo->enableRTReflections != 0 && reflectionRoughness < maxRoughness && ubo->brdfLutIndex != 0xFFFFFFFF;
+        const bool reflectionTraced = ubo.enableRTReflections != 0 && reflectionRoughness < maxRoughness && ubo.brdfLutIndex != 0xFFFFFFFF;
         bool hasRTReflection = reflectionTraced && perceptualRoughness < maxRoughness;
         if (hasRTReflection)
         {
-            Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
+            Texture2D reflTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
             float4 reflSample = reflTex.Load(int3(pixelCoord, 0));
             reflColor = NRD_UnpackSignal(reflDenoiserMode, reflSample);
 
             SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
-            Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+            Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
             float3 brdf = brdfTex.Sample(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness)).rgb;
 
             // Specular Fresnel factor: only ~0.04 (4%) for dielectrics (plants, stone), ~0.9-1.0 for metals
@@ -840,15 +841,15 @@
         // found it, the environment / probes where its confidence is low (SSR.slang; premultiplied: rgb is light x confidence). Its
         // radiance is the lit scene: no sky occlusion.
         float ssrConfidence = 0.0; // (debug view 24)
-        if (!hasRTReflection && pushConstant.ssrTextureIndex != 0xFFFFFFFF && ubo->brdfLutIndex != 0xFFFFFFFF)
+        if (!hasRTReflection && pushConstant.ssrTextureIndex != 0xFFFFFFFF && ubo.brdfLutIndex != 0xFFFFFFFF)
         {
-            Texture2D ssrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.ssrTextureIndex, 0));
+            Texture2D ssrTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.ssrTextureIndex, 0));
             const float4 ssr = ssrTex.Load(int3(pixelCoord, 0));
             ssrConfidence = saturate(ssr.a);
             if (ssr.a > 0.0)
             {
                 SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
-                Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
                 const float3 brdf = brdfTex.Sample(samplerBrdf, float2(NdotV, 1.0 - perceptualRoughness)).rgb;
                 const float3 specularFactor = specularColor * brdf.x + specularEnvironmentR90 * brdf.y;
                 ambientSpecular = ambientSpecular * (1.0 - saturate(ssr.a)) + ssr.rgb * specularFactor;
@@ -880,7 +881,7 @@
                 {
                     if (!hasRTReflection) // the base too rough for it: read here
                     {
-                        Texture2D reflTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
+                        Texture2D reflTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.reflectionTextureIndex, 0));
                         const float4 reflSample = reflTex.Load(int3(pixelCoord, 0));
                         reflColor = NRD_UnpackSignal(reflDenoiserMode, reflSample);
                         const float skyShare = reflDenoiserMode == 1 ? smoothstep(0.85, 0.98, reflSample.a)
@@ -982,7 +983,7 @@
         // Mode 11: Entity ID
         if (pushConstant.debugMode == 11)
         {
-            Texture2D<int4> entityTex = Texture2D<int4>.Handle(uint2(ubo->imageHeapIndexOffset + ubo->entityGBufferTextureIndex, 0));
+            Texture2D<int4> entityTex = Texture2D<int4>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.entityGBufferTextureIndex, 0));
             int entityID = entityTex.Load(int3(pixelCoord, 0)).r;
             return float4(idToColor(entityID), 1.0);
         }
@@ -1017,7 +1018,7 @@
         float3 finalColor = directLighting + ambientDiffuse * occlusion + ambientSpecular;
 #endif
         finalColor += emissionSample.rgb;
-        const float3 toSurface = worldPos - ubo->cameraWorldPos.xyz;
+        const float3 toSurface = worldPos - ubo.cameraWorldPos.xyz;
         const float surfaceDistance = length(toSurface);
         finalColor = applyAerialPerspective(finalColor, pushConstant, uv, surfaceDistance);
         finalColor = applyHeightFog(ubo, finalColor, toSurface / max(surfaceDistance, 1e-6), surfaceDistance);

@@ -8,8 +8,8 @@
 // around, scaling correctly to scenes with thousands of lights instead of the O(numLights) per-thread
 // weighted draw this file used to do.
 
-static LightData* g_LightData;
-static uint2* g_RISBuffer;
+static BufferRef<LightData> g_LightData;
+static RWBufferRef<uint2> g_RISBuffer;
 #define RTXDI_RIS_BUFFER g_RISBuffer
 
 typealias RAB_LightInfo = LightData;
@@ -48,12 +48,12 @@ void compMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConstant
     if (slot >= pushConstant.risTileSize * pushConstant.risTileCount)
         return;
 
-    g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_RISBuffer = (uint2*)pushConstant.risBufferReference;
+    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    g_RISBuffer = RWBufferRef<uint2>(pushConstant.risBufferReference);
 
     if (pushConstant.numLocalLights == 0)
     {
-        g_RISBuffer[slot] = uint2(0, asuint(0.0));
+        g_RISBuffer.Store(slot, uint2(0, asuint(0.0)));
         return;
     }
 

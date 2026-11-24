@@ -19,9 +19,9 @@ ProbePlaceOutput screen_probe_place(uint2 probe, PushConstantScreenProbe pushCon
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
         return output;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
 
     // The frame's offset in the tile (R2 sequence), then fallbacks when that pixel is sky: the tile's centre and its quarters.
     const float tile = float(pushConstant.tileSize);

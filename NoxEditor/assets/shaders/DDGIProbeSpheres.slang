@@ -99,34 +99,31 @@ void meshMain(
 )
 {
     uint probeIndex = groupID.x;
-    if (probeIndex >= pushConstant.probeCountTotal)
+    const uint valid = WaveReadLaneFirst(probeIndex < pushConstant.probeCountTotal ? 1u : 0u);
+    SetMeshOutputCounts(valid * 114u, valid * 224u);
+    if (valid > 0u)
     {
-        SetMeshOutputCounts(0, 0);
-        return;
-    }
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
-    SetMeshOutputCounts(114, 224);
+        float3 probeWorldPos = ddgi_probe_position(ubo, probeIndex);
+        // Coarser cascades draw bigger spheres, in proportion to their cells.
+        const uint cascade = ddgi_cascade_of(ubo, probeIndex);
+        const float sphereRadius = pushConstant.sphereRadius * ddgi_cascade_spacing(ubo, cascade).x / max(ddgi_cascade_spacing(ubo, 0).x, 1e-4);
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        for (uint v = threadID; v < 114; v += 32)
+        {
+            float3 localPos = get_sphere_vertex(v);
+            float3 worldPos = probeWorldPos + localPos * sphereRadius;
 
-    float3 probeWorldPos = ddgi_probe_position(ubo, probeIndex);
-    // Coarser cascades draw bigger spheres, in proportion to their cells.
-    const uint cascade = ddgi_cascade_of(ubo, probeIndex);
-    const float sphereRadius = pushConstant.sphereRadius * ddgi_cascade_spacing(ubo, cascade).x / max(ddgi_cascade_spacing(ubo, 0).x, 1e-4);
+            vertices[v].pos = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
+            vertices[v].normal = localPos;
+            vertices[v].probeID = probeIndex;
+        }
 
-    for (uint v = threadID; v < 114; v += 32)
-    {
-        float3 localPos = get_sphere_vertex(v);
-        float3 worldPos = probeWorldPos + localPos * sphereRadius;
-
-        vertices[v].pos = mul(ubo->proj, mul(ubo->view, float4(worldPos, 1.0)));
-        vertices[v].normal = localPos;
-        vertices[v].probeID = probeIndex;
-    }
-
-    for (uint t = threadID; t < 224; t += 32)
-    {
-        triangles[t] = get_sphere_triangle(t);
+        for (uint t = threadID; t < 224; t += 32)
+        {
+            triangles[t] = get_sphere_triangle(t);
+        }
     }
 }
 
@@ -142,13 +139,13 @@ FragOutput fragMain(
     uniform PushConstantDDGIDebug pushConstant
 )
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     float3 normal = normalize(input.normal);
 
-    uint probesPerRowIrr = uint(ubo->ddgiAtlasParams.x) / 10;
-    float2 irrUV = get_probe_atlas_uv(input.probeID, normal, 8, probesPerRowIrr, ubo->ddgiAtlasParams.xy);
+    uint probesPerRowIrr = uint(ubo.ddgiAtlasParams.x) / 10;
+    float2 irrUV = get_probe_atlas_uv(input.probeID, normal, 8, probesPerRowIrr, ubo.ddgiAtlasParams.xy);
 
-    Texture2D irrAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.irradianceAtlasIndex, 0));
+    Texture2D irrAtlas = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.irradianceAtlasIndex, 0));
     SamplerState atlasSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
     float4 probeSample = irrAtlas.SampleLevel(atlasSampler, irrUV, 0);

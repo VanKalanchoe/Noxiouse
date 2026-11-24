@@ -18,11 +18,11 @@ namespace PathTracer
     };
 
     NEECandidate generateNEECandidate(ShadingData sd, StandardBSDF bsdf,
-        UniformBufferObject* ubo, inout uint rngState, uint skyboxTextureIndex, uint importanceIndex)
+        UniformBufferObject ubo, inout uint rngState, uint skyboxTextureIndex, uint importanceIndex)
     {
         NEECandidate c = (NEECandidate)0;
         c.distance = 1e9;
-        uint analyticCount = ubo->lightCount;
+        uint analyticCount = ubo.lightCount;
         bool hasEnvironment = skyboxTextureIndex != 0xFFFFFFFF;
         uint lightCount = analyticCount + (hasEnvironment ? 1u : 0u);
         // The emissive meshes (EmissiveLights.slang) take this share of the samples, the analytic lights and the environment the rest.
@@ -60,7 +60,7 @@ namespace PathTracer
         {
             // The engine's light sampling (shaderIO.h): the sun's cone, a sphere light's disc, a rect light's area, with the
             // falloff, cone and a rect's area / distance^2 folded in -- the same light the raster and GI passes see.
-            LightData* lights = (LightData*)ubo->lightDataReference;
+            BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
             const LightPointSample lightPoint = sample_light_point(lights[lightIndex], sd.posW,
                                                                    float2(Bridge::rand(rngState), Bridge::rand(rngState)));
             c.L = lightPoint.direction;
@@ -96,9 +96,9 @@ namespace PathTracer
     // (Bridge::OccluderTransmittance). Every non-opaque candidate is looked at (glass is a non-opaque instance in the TLAS, like
     // masked and blended surfaces); an opaque one ends the search in the hardware.
     float3 visibleNEECandidate(NEECandidate c, ShadingData sd,
-        RaytracingAccelerationStructure as, UniformBufferObject* ubo, inout uint rngState)
+        RaytracingAccelerationStructure as, UniformBufferObject ubo, inout uint rngState)
     {
-        const float offset = 0.002 * ubo->unitsPerMeter;
+        const float offset = 0.002 * ubo.unitsPerMeter;
         RayDesc shadowRay;
         shadowRay.Origin = sd.posW + sd.N * (dot(sd.N, c.L) >= 0 ? offset : -offset);
         shadowRay.Direction = c.L;
@@ -109,7 +109,7 @@ namespace PathTracer
         float3 transmittance = float3(1.0);
         while (rq.Proceed())
         {
-            transmittance *= Bridge::OccluderTransmittance(rq.CandidateRayInstanceCustomIndex(), rq.CandidatePrimitiveIndex(),
+            transmittance *= Bridge::OccluderTransmittance(rq.CandidateInstanceID(), rq.CandidatePrimitiveIndex(),
                                                            rq.CandidateTriangleBarycentrics(), ubo);
             if (all(transmittance < 1e-3))
                 rq.CommitNonOpaqueTriangleHit();
@@ -118,7 +118,7 @@ namespace PathTracer
     }
 
     float3 evaluateNEE(ShadingData sd, StandardBSDF bsdf,
-        RaytracingAccelerationStructure as, UniformBufferObject* ubo, inout uint rngState,
+        RaytracingAccelerationStructure as, UniformBufferObject ubo, inout uint rngState,
         uint candidateCount, uint fullSampleCount, uint skyboxTextureIndex, uint importanceIndex,
         out float3 diffuseDirect, out float3 specularDirect)
     {

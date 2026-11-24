@@ -3,15 +3,15 @@
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float3 worldPos;
-    float3 normal;
-    float2 uv0;
-    float2 uv1;
-    float4 color; // vertex color (glTF COLOR_0, white without): multiplies the base color
-    nointerpolation uint drawID;
+    float3 worldPos : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+    float2 uv0 : TEXCOORD2;
+    float2 uv1 : TEXCOORD3;
+    float4 color : TEXCOORD4; // vertex color (glTF COLOR_0, white without): multiplies the base color
+    nointerpolation uint drawID : TEXCOORD5;
 
-    nointerpolation int entityID;
-    float4 tangent; // world tangent, w the bitangent handedness (normal_from_map)
+    nointerpolation int entityID : TEXCOORD6;
+    float4 tangent : TEXCOORD7; // world tangent, w the bitangent handedness (normal_from_map)
 };
 
 [shader("mesh")]
@@ -25,19 +25,19 @@ void meshMain
     uniform PushConstantMeshlets pushConstant
 )
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     SceneInstances instances = SceneInstances(ubo);
 
     // The payload carries the instance slot.
     InstanceData instance = instances[sharedPayload.drawID];
     float4x4 modelMatrix = instance.modelMatrix;
 
-    MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-    uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
-    uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
+    BufferRef<MeshletDraw> meshletDrawStream = BufferRef<MeshletDraw>(ubo.geometryMeshletDrawsReference);
+    BufferRef<uint32_t> meshletVertexStream = BufferRef<uint32_t>(ubo.geometryMeshletVerticesReference);
+    BufferRef<uint> meshletTriangleStream = BufferRef<uint>(ubo.geometryMeshletTrianglesReference);
     
     // Fetch compacted meshlet index from task payload
-    uint8_t localMeshletOffset = sharedPayload.meshletIndices[groupId.x];
+    uint localMeshletOffset = payload_meshlet_index(sharedPayload, groupId.x);
     uint globalMeshletIdx = sharedPayload.groupMeshletOffset + localMeshletOffset;
     
     MeshletDraw meshlet = meshletDrawStream[globalMeshletIdx];
@@ -59,14 +59,14 @@ void meshMain
         // (a frame without the cache: right after a shader reload).
         if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
         {
-            const SkinnedVertex deformed = ((SkinnedVertex*)pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex];
+            const SkinnedVertex deformed = BufferRef<SkinnedVertex>(pushConstant.skinnedVertexReference)[instance.skinnedVertexOffset + localVertexIndex];
             localPos = deformed.position;
             localNormal = deformed.normal.xyz;
             localTangent = deformed.tangent.xyz;
         }
         else if(instance.boneMatrixOffset != 0xFFFFFFFF)
         {
-            float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+            BufferRef<float4x4> boneMatrices = BufferRef<float4x4>(pushConstant.boneMatrixReference);
             uint baseOffset = instance.boneMatrixOffset;
 
             // Blend bone matrices using vertex weights
@@ -86,9 +86,9 @@ void meshMain
 #ifdef NOX_MATERIAL_GRAPH
         // The forward variant's mesh stage (ForwardMeshMaterialGraph.slang): a graph's World Position Offset for translucent surfaces.
         worldPos.xyz += material_graph_offset(instances.material(sharedPayload.drawID), worldPos.xyz, worldNormal, v.uv0, v.uv1,
-                                              loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors), ubo->timeSeconds, ubo);
+                                              loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors), ubo.timeSeconds, ubo);
 #endif
-        float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo->cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
+        float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo.cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
 
         vertices[i].pos = clipPos;
         vertices[i].worldPos = worldPos.xyz;
@@ -107,9 +107,9 @@ void meshMain
     {
         uint triOffset = meshlet.triangleOffset + i * 3;
 
-        uint idx0 = meshletTriangleStream[triOffset + 0];
-        uint idx1 = meshletTriangleStream[triOffset + 1];
-        uint idx2 = meshletTriangleStream[triOffset + 2];
+        uint idx0 = LoadByte(meshletTriangleStream, triOffset + 0);
+        uint idx1 = LoadByte(meshletTriangleStream, triOffset + 1);
+        uint idx2 = LoadByte(meshletTriangleStream, triOffset + 2);
 
         triangles[i] = uint3(idx0, idx1, idx2);
     }
@@ -145,7 +145,7 @@ import Math;
 
 // Find the normal for this fragment, pulling either from a predefined normal map
 // or from the interpolated mesh normal and tangent attributes.
-float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
+float3 getNormal(UniformBufferObject ubo, InstanceData instance, VSOutput vertIn, SamplerState samplerState)
 {
     return normal_from_map(SampleMaterialTexture(ubo, instance.normalTextureIndex, samplerState, instance_texture_uv(instance, instance.normalTextureSet, vertIn.uv0, vertIn.uv1)).xyz,
                            vertIn.normal, vertIn.tangent, instance.normalScale);
@@ -154,11 +154,11 @@ float3 getNormal(UniformBufferObject* ubo, InstanceData instance, VSOutput vertI
 // Calculation of the lighting contribution from an optional Image Based Light source.
 // Precomputed Environment Maps are required uniform inputs and are computed as outlined in [1].
 // See our README.md on Environment Maps [3] for additional discussion.
-float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, vec3 reflection)
+float3 getIBLContribution(UniformBufferObject ubo, PBRInfo pbrInputs, vec3 n, vec3 reflection)
 {
-	if (ubo->irradianceMapIndex == 0xFFFFFFFF || ubo->prefilteredMapIndex == 0xFFFFFFFF || ubo->brdfLutIndex == 0xFFFFFFFF)
+	if (ubo.irradianceMapIndex == 0xFFFFFFFF || ubo.prefilteredMapIndex == 0xFFFFFFFF || ubo.brdfLutIndex == 0xFFFFFFFF)
 		return float3(0.0);
-	float lod = (pbrInputs.perceptualRoughness * ubo->prefilteredCubeMipLevels);
+	float lod = (pbrInputs.perceptualRoughness * ubo.prefilteredCubeMipLevels);
 
     SamplerState samplerBrdf = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0));
     SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
@@ -168,16 +168,16 @@ float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, v
 
     // retrieve a scale and bias to F0. See [1], Figure 3
     // Sample BRDF LUT (2D Texture from heap)
-    Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
     float3 brdf = brdfTex.Sample(samplerBrdf, float2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness)).rgb;
 
     // Sample Irradiance Map (Cube Texture from heap)
-    TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+    TextureCube irradianceTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
     float4 irradianceSample = irradianceTex.Sample(samplerIrradiance, n);
     float3 diffuseLight = irradianceSample.rgb;
 
     // Sample Prefiltered Environment Map with Mip Level LOD (Cube Texture from heap)
-    TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+    TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
     float4 prefilteredSample = prefilteredTex.SampleLevel(samplerPrefiltered, reflection, lod);
     float3 specularLight = prefilteredSample.rgb;
 
@@ -186,8 +186,8 @@ float3 getIBLContribution(UniformBufferObject* ubo, PBRInfo pbrInputs, vec3 n, v
 
 	// For presentation, this allows us to disable IBL terms
 	// For presentation, this allows us to disable IBL terms
-	diffuse *= ubo->scaleIBLAmbient;
-	specular *= ubo->scaleIBLAmbient;
+	diffuse *= ubo.scaleIBLAmbient;
+	specular *= ubo.scaleIBLAmbient;
 
 	return diffuse + specular;
 }
@@ -257,7 +257,7 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
 {
     FSOutput output;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     SceneInstances instances = SceneInstances(ubo);
     InstanceData instance = instances[vertIn.drawID];
 
@@ -381,16 +381,16 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
         n = -n;
     }
     //n.y *= -1.0f;
-    float3 v = normalize(ubo->cameraWorldPos.xyz - vertIn.worldPos);    // Vector from surface point to camera
+    float3 v = normalize(ubo.cameraWorldPos.xyz - vertIn.worldPos);    // Vector from surface point to camera
     float3 reflection = normalize(reflect(-v, n));
     float NdotV = clamp(abs(dot(n, v)), 0.001, 1.0);
 
     float3 directLighting = float3(0.0);
 
     // Cas Buffer device adress to dynamic LightData array
-    LightData* lights = (LightData*)ubo->lightDataReference;
+    BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
 
-    for(uint i = 0; i < ubo->lightCount; i++)
+    for(uint i = 0; i < ubo.lightCount; i++)
     {
         LightData light = lights[i];
         uint lightType = (uint)light.position.w;
@@ -488,8 +488,8 @@ FSOutput fragMain(VSOutput vertIn, bool isFrontFace : SV_IsFrontFace, uniform Pu
     color += emissive;
 
     TonemapParameters tonemapParams;
-    tonemapParams.exposure = ubo->exposure;
-    tonemapParams.gamma = ubo->gamma;
+    tonemapParams.exposure = ubo.exposure;
+    tonemapParams.gamma = ubo.gamma;
     tonemapParams.mode = (int)TonemapMode::KhronosPbrNeutral;
 
     color = toneMap(color, tonemapParams);

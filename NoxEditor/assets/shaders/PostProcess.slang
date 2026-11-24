@@ -39,6 +39,7 @@ import Tonemapping;
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload PostProcessPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex
@@ -64,10 +65,10 @@ import Tonemapping;
         uniform PushConstantPostProcess pushConstant
     ) : SV_Target
     {
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         int2 pixelCoord = int2(input.pos.xy);
 
-        Texture2D hdrTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.hdrTextureIndex, 0));
+        Texture2D hdrTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.hdrTextureIndex, 0));
         float4 hdrColor = hdrTex.Load(int3(pixelCoord, 0));
  
         // When inspecting debug views (Albedo, Normals, Roughness, EntityID, DepthBuffer), pass through directly!
@@ -93,7 +94,7 @@ import Tonemapping;
         }
         if (pushConstant.bloomTextureIndex != 0xFFFFFFFF)
         {
-            Texture2D bloomTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.bloomTextureIndex, 0));
+            Texture2D bloomTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.bloomTextureIndex, 0));
             hdrColor.rgb = lerp(hdrColor.rgb, bloomTex.SampleLevel(linearClamp, uv, 0.0).rgb, saturate(pushConstant.bloomIntensity));
             if (pushConstant.lensFlareIntensity > 0.0)
             {
@@ -125,7 +126,7 @@ import Tonemapping;
         // is only partly made up, as the eye does it -- a night still looks like night instead of a grey day).
         tonemapParams.exposure = scene_exposure(ubo, pushConstant.autoExposureEnabled != 0 ? pushConstant.autoExposureTextureIndex : 0xFFFFFFFF,
                                                 pushConstant.exposureCompensation, pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
-        tonemapParams.gamma = ubo->gamma;
+        tonemapParams.gamma = ubo.gamma;
         tonemapParams.mode = (int)pushConstant.tonemapMode;;
 
 
@@ -151,7 +152,7 @@ import Tonemapping;
         // The grading LUT (a strip of size slices of size x size, blue across the slices), in display space.
         if (pushConstant.lutTextureIndex != 0xFFFFFFFF && pushConstant.lutStrength > 0.0)
         {
-            Texture2D lut = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.lutTextureIndex, 0));
+            Texture2D lut = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.lutTextureIndex, 0));
             uint lutWidth, lutHeight, lutLevels;
             lut.GetDimensions(0, lutWidth, lutHeight, lutLevels);
             const float n = float(lutHeight);

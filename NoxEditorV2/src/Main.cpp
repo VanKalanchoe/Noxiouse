@@ -1,6 +1,16 @@
 #include "NoxCore/Core/Application.h"
 
+#include <cstdint>
 #include <filesystem>
+
+#if defined(_WIN32)
+// Export D3D12 Agility SDK 1.619 parameters from the executable so Windows loads AgilitySDK\D3D12Core.dll
+// and d3d12SDKLayers.dll (providing ID3D12Device15 required by NVIDIA NRI/NRD).
+extern "C" {
+    __declspec(dllexport) extern const uint32_t D3D12SDKVersion = 619;
+    __declspec(dllexport) extern const char* D3D12SDKPath = ".\\AgilitySDK\\";
+}
+#endif
 
 #include "EditorV2Layer.h"
 #include "ProjectManager/ProjectLibrary.h"

@@ -17,21 +17,21 @@ struct IrradianceVolumeSample
 };
 
 // false outside the volume's box, or with no probe captured around (the caller keeps its other ambient).
-bool irradiance_volume_gather(UniformBufferObject* ubo, float3 worldPos, float3 n, out IrradianceVolumeSample result)
+bool irradiance_volume_gather(UniformBufferObject ubo, float3 worldPos, float3 n, out IrradianceVolumeSample result)
 {
     result.shR = result.shG = result.shB = result.shSky = float4(0.0);
     result.weight = 0.0;
     result.scale = 1.0;
-    if (ubo->irradianceVolumeReference == 0)
+    if (ubo.irradianceVolumeReference == 0)
         return false;
-    GpuIrradianceVolume* volume = (GpuIrradianceVolume*)ubo->irradianceVolumeReference;
-    const float3 extents = volume->extents.xyz;
-    const float3 localNormal = normalize(mul(volume->worldToLocal, float4(n, 0.0)).xyz);
-    const float3 local = mul(volume->worldToLocal, float4(worldPos, 1.0)).xyz + localNormal * volume->normalBias;
+    GpuIrradianceVolume volume = BufferRef<GpuIrradianceVolume>(ubo.irradianceVolumeReference)[0];
+    const float3 extents = volume.extents.xyz;
+    const float3 localNormal = normalize(mul(volume.worldToLocal, float4(n, 0.0)).xyz);
+    const float3 local = mul(volume.worldToLocal, float4(worldPos, 1.0)).xyz + localNormal * volume.normalBias;
     const float3 inside = extents - abs(local);
     if (any(inside <= 0.0))
         return false;
-    const uint3 counts = uint3(volume->countX, volume->countY, volume->countZ);
+    const uint3 counts = uint3(volume.countX, volume.countY, volume.countZ);
     const float3 cell = 2.0 * extents / float3(max(counts, uint3(2)) - 1u);
     // Fades over the outermost cell towards the box's sides (into the other ambient).
     const float3 edge = saturate(inside / cell);
@@ -40,7 +40,7 @@ bool irradiance_volume_gather(UniformBufferObject* ubo, float3 worldPos, float3 
     const float3 grid = clamp((local + extents) / cell, float3(0.0), float3(counts - 1u));
     const uint3 base = min(uint3(floor(grid)), counts - 2u);
     const float3 f = grid - float3(base);
-    float4* sh = (float4*)volume->probeSHReference;
+    BufferRef<float4> sh = BufferRef<float4>(volume.probeSHReference);
     float4 shR = float4(0.0), shG = float4(0.0), shB = float4(0.0), shSky = float4(0.0);
     float total = 0.0;
     float coverage = 0.0;
@@ -60,7 +60,7 @@ bool irradiance_volume_gather(UniformBufferObject* ubo, float3 worldPos, float3 
         // beyond that is likely behind a wall from it.
         float visibility = 1.0;
         {
-            const float3 probeToPoint = mul(volume->localToWorld, float4(local - (float3(probe) * cell - extents), 0.0)).xyz;
+            const float3 probeToPoint = mul(volume.localToWorld, float4(local - (float3(probe) * cell - extents), 0.0)).xyz;
             const float distance = length(probeToPoint);
             if (distance > 1e-4 && captured > 0.0)
             {
@@ -94,7 +94,7 @@ bool irradiance_volume_gather(UniformBufferObject* ubo, float3 worldPos, float3 
     result.shB = shB / total;
     result.shSky = shSky / total;
     result.weight = weight;
-    result.scale = volume->extents.w;
+    result.scale = volume.extents.w;
     return true;
 }
 
@@ -123,7 +123,7 @@ float irradiance_volume_sky_visibility(IrradianceVolumeSample volumeSample, floa
 
 // The reflection along r, from the volume: the sky as far as it is seen around r (skyVisibility), the room's light from about r
 // elsewhere (occludedRadiance), faded out towards the box's sides (skyVisibility -> 1). false outside the volume.
-bool irradiance_volume_reflection(UniformBufferObject* ubo, float3 worldPos, float3 n, float3 r, out float skyVisibility, out float3 occludedRadiance)
+bool irradiance_volume_reflection(UniformBufferObject ubo, float3 worldPos, float3 n, float3 r, out float skyVisibility, out float3 occludedRadiance)
 {
     skyVisibility = 1.0;
     occludedRadiance = float3(0.0);
@@ -136,7 +136,7 @@ bool irradiance_volume_reflection(UniformBufferObject* ubo, float3 worldPos, flo
 }
 
 // false outside the volume's box (the caller keeps its other ambient); `irradiance` = E(n) / pi.
-bool irradiance_volume_lookup(UniformBufferObject* ubo, float3 worldPos, float3 n, out float3 irradiance, out float weight)
+bool irradiance_volume_lookup(UniformBufferObject ubo, float3 worldPos, float3 n, out float3 irradiance, out float weight)
 {
     IrradianceVolumeSample volumeSample;
     irradiance = float3(0.0);

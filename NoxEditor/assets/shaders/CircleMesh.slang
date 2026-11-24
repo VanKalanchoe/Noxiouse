@@ -24,11 +24,11 @@ static const float4 positions[4] =
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float4 color;
-    float thickness;
-    float3 localPosition;
-    float fade;
-    int entityID;
+    float4 color : TEXCOORD0;
+    float thickness : TEXCOORD1;
+    float3 localPosition : TEXCOORD2;
+    float fade : TEXCOORD3;
+    nointerpolation int entityID : TEXCOORD4;
 };
 
 [shader("mesh")]
@@ -36,14 +36,15 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
+    in payload CirclePayLoad _payload,
     out indices uint3 triangles[2], out vertices VSOutput vertices[4],
     uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantCircle pushConstant
 )
 {
     uint circleID = DispatchThreadID.x;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    CircleData* circleData = (CircleData*)pushConstant.circleDataReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<CircleData> circleData = BufferRef<CircleData>(pushConstant.circleDataReference);
     CircleData circle = circleData[circleID];
 
 	SetMeshOutputCounts(4, 2); // 4 vertices, 2 triangles

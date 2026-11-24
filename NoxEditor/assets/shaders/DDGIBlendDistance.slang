@@ -47,7 +47,7 @@ uint2 ddgi_distance_border_texel(uint index)
 void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint threadIndex : SV_GroupIndex,
                  uniform PushConstantDDGIBlend pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const uint probeIndex = group.x;
     if (probeIndex >= pushConstant.probeCountTotal)
         return;
@@ -63,7 +63,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     const bool entered = ddgi_probe_entered(ubo, probeIndex);
     if (!updates && hasPrevious)
     {
-        Texture2D keptAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        Texture2D keptAtlas = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
         for (uint texel = threadIndex; texel < totalSide * totalSide; texel += threadCount)
         {
             const uint2 pixel = origin + uint2(texel % totalSide, texel / totalSide);
@@ -73,7 +73,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     }
 
     // The probe's rays, once: their directions (DDGIRadiance.slang's) and distances.
-    Texture2D rayDataTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
+    Texture2D rayDataTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
     const uint rayCount = min(pushConstant.raysPerProbe, DDGI_MAX_RAYS);
     float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
     float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
@@ -84,7 +84,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
         // Clamped to about a cell and a half (in world units): misses and far hits only need to read as "open". A back face
         // (negative, DDGIRadiance.slang) counts as a fifth of its distance, so what lies behind it reads as occluded.
         // Stored in meters: the atlas is 16-bit float, and squared centimeters overflow it.
-        gRayDistances[r] = min(raySample.w < 0.0 ? -raySample.w * 0.2 : raySample.w, ddgi_max_distance(ubo, probeIndex)) / ubo->unitsPerMeter;
+        gRayDistances[r] = min(raySample.w < 0.0 ? -raySample.w * 0.2 : raySample.w, ddgi_max_distance(ubo, probeIndex)) / ubo.unitsPerMeter;
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -111,7 +111,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     const uint2 pixel = origin + interiorCoord;
     if (hasPrevious && !entered)
     {
-        Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
         result = lerp(result, prevAtlasTex.Load(int3(pixel, 0)).rg, pushConstant.hysteresis);
     }
     atlas[pixel] = result;

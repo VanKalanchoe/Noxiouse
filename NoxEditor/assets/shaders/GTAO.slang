@@ -30,7 +30,7 @@ static const float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), floa
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
+void meshMain(in payload GTAOPayload _payload, out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
 {
     SetMeshOutputCounts(3, 1);
     if (threadID < 3)
@@ -43,10 +43,10 @@ static const float PI = 3.14159265358979;
 static const float HALF_PI = 1.57079632679;
 
 // A pixel's view-space position from the depth buffer (0: the sky).
-float3 gtao_view_position(UniformBufferObject* ubo, float4x4 invViewProj, float2 uv, float depth)
+float3 gtao_view_position(UniformBufferObject ubo, float4x4 invViewProj, float2 uv, float depth)
 {
     const float4 worldH = mul(invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
-    return mul(ubo->view, float4(worldH.xyz / worldH.w, 1.0)).xyz;
+    return mul(ubo.view, float4(worldH.xyz / worldH.w, 1.0)).xyz;
 }
 
 // acos with the argument kept in range (the horizons' cosines come from normalized vectors, a hair past 1 in float).
@@ -58,9 +58,9 @@ float gtao_acos(float x)
 [shader("fragment")]
 float fragMain(MSOutput input, uniform PushConstantGTAO pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const int2 pixelCoord = int2(input.pos.xy);
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0) // reverse-Z background
         return 1.0;
@@ -70,14 +70,14 @@ float fragMain(MSOutput input, uniform PushConstantGTAO pushConstant) : SV_Targe
     const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     const float4 worldH = mul(pushConstant.invViewProj, float4(ndc, depth, 1.0));
     const float3 worldPos = worldH.xyz / worldH.w;
-    const float3 P = mul(ubo->view, float4(worldPos, 1.0)).xyz;
+    const float3 P = mul(ubo.view, float4(worldPos, 1.0)).xyz;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     const float3 rawNormal = normalTex.Load(int3(pixelCoord, 0)).rgb;
     const float lenN = length(rawNormal);
-    const float3 N = normalize(mul(ubo->view, float4(lenN > 1e-6 ? rawNormal / lenN : float3(0.0, 1.0, 0.0), 0.0)).xyz);
+    const float3 N = normalize(mul(ubo.view, float4(lenN > 1e-6 ? rawNormal / lenN : float3(0.0, 1.0, 0.0), 0.0)).xyz);
     // Towards the eye: from the point in a perspective view, along the view axis in an orthographic one.
-    const bool perspective = mul(ubo->proj, float4(0.0, 0.0, 2.0, 1.0)).w > 1.5;
+    const bool perspective = mul(ubo.proj, float4(0.0, 0.0, 2.0, 1.0)).w > 1.5;
     const float3 V = perspective ? normalize(-P) : float3(0.0, 0.0, -1.0);
 
     // The radius in world units and in pixels (one pixel's width at the surface).

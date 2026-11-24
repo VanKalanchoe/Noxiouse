@@ -28,7 +28,7 @@ static const float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), floa
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
+void meshMain(in payload ResolvePayload _payload, out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
 {
     SetMeshOutputCounts(3, 1);
     if (threadID < 3)
@@ -42,26 +42,26 @@ static const float NRD_FP16_MAX = 65504.0;
 [shader("fragment")]
 float2 fragMain(MSOutput input, uniform PushConstantShadowMapResolve pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    GpuShadowCascades* cascades = (GpuShadowCascades*)pushConstant.cascadesReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    GpuShadowCascades cascades = BufferRef<GpuShadowCascades>(pushConstant.cascadesReference)[0];
     const int2 pixelCoord = int2(input.pos.xy);
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
-    if (rawDepth <= 0.0 || ubo->shadowMaskLightIndex >= ubo->lightCount) // the sky (reverse Z), or no sun
+    if (rawDepth <= 0.0 || ubo.shadowMaskLightIndex >= ubo.lightCount) // the sky (reverse Z), or no sun
         return float2(NRD_FP16_MAX, 1.0);
 
     const float2 uv = (float2(pixelCoord) + 0.5) / pushConstant.viewportSize;
     const float4 worldPosH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, rawDepth, 1.0));
     const float3 worldPos = worldPosH.xyz / worldPosH.w;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
     const float3 normalSample = normalTex.Load(int3(pixelCoord, 0)).rgb;
     const float lenSqN = dot(normalSample, normalSample);
     float3 normal = lenSqN > 1e-6 ? normalSample * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
 
-    const float3 L = cascades->lightDirection.xyz;
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+    const float3 L = cascades.lightDirection.xyz;
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
     if (gbuffer_double_sided(materialTex.Load(int3(pixelCoord, 0)).a) && dot(normal, L) < 0.0)
         normal = -normal;
     if (dot(normal, L) <= 0.0)

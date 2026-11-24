@@ -15,7 +15,7 @@ static const uint EntryOccluded = 2;
 
 // `grow`: world units the instance's vertices may be moved past its mesh's bounds (SceneInstances::offsetBounds: a material graph's World
 // Position Offset).
-bool IsInsideFrustum(CullView* view, GpuMesh* mesh, GpuTransform* transform, float grow)
+bool IsInsideFrustum(CullView view, GpuMesh mesh, GpuTransform transform, float grow)
 {
     float3 center = mul(transform.world, float4(mesh.boundsSphere.xyz, 1.0)).xyz;
     float scale = max(length(transform.world[0].xyz), max(length(transform.world[1].xyz), length(transform.world[2].xyz)));
@@ -33,7 +33,7 @@ bool IsInsideFrustum(CullView* view, GpuMesh* mesh, GpuTransform* transform, flo
 
 // The instance is behind everything drawn in its screen area: its nearest point is farther than the pyramid's farthest
 // depth there (reverse-Z, so nearest is the largest value).
-bool IsOccluded(PushConstantInstanceCulling pushConstant, GpuMesh* mesh, float4x4 world, float4x4 viewProj, float grow)
+bool IsOccluded(PushConstantInstanceCulling pushConstant, GpuMesh mesh, float4x4 world, float4x4 viewProj, float grow)
 {
     if (pushConstant.hiZTextureIndex == 0xFFFFFFFF)
         return false;
@@ -92,7 +92,7 @@ bool IsOccluded(PushConstantInstanceCulling pushConstant, GpuMesh* mesh, float4x
     return nearest < farthest;
 }
 
-uint BucketOfEntry(CullView* view, uint entry, uint bucket)
+uint BucketOfEntry(CullView view, uint entry, uint bucket)
 {
     while (bucket + 1 < CULL_BUCKET_COUNT && entry >= view.bucketStart[bucket + 1])
         bucket++;
@@ -104,22 +104,22 @@ uint BucketOfEntry(CullView* view, uint entry, uint bucket)
 [numthreads(256, 1, 1)]
 void cullMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling pushConstant)
 {
-    CullView* view = (CullView*)pushConstant.viewReference;
+    CullView view = BufferRef<CullView>(pushConstant.viewReference).Load(0);
     uint entry = id.x;
     if (entry >= view.entryCount)
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint slot = ((uint32_t*)pushConstant.drawListReference)[entry];
-    GpuInstance* instance = &((GpuInstance*)ubo->sceneInstancesReference)[slot];
-    GpuMesh* mesh = &((GpuMesh*)ubo->sceneMeshesReference)[instance.meshIndex];
-    GpuTransform* transform = &((GpuTransform*)ubo->sceneTransformsReference)[slot];
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    uint slot = BufferRef<uint32_t>(pushConstant.drawListReference)[entry];
+    GpuInstance instance = BufferRef<GpuInstance>(ubo.sceneInstancesReference)[slot];
+    GpuMesh mesh = BufferRef<GpuMesh>(ubo.sceneMeshesReference)[instance.meshIndex];
+    GpuTransform transform = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[slot];
 
     uint state = EntryVisible;
     // Skinned vertices leave the bind pose bounds.
     bool testBounds = instance.boneMatrixOffset == 0xFFFFFFFF;
     // A material graph's World Position Offset moves them by up to its Max Displacement.
-    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
     float grow = material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u ? material.graphMaxDisplacement : 0.0;
     if (testBounds && (view.flags & CULL_INSTANCES) != 0 && !IsInsideFrustum(view, mesh, transform, grow))
         state = EntryCulled;
@@ -127,7 +127,7 @@ void cullMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling
              IsOccluded(pushConstant, mesh, transform.previousWorld, view.previousViewProj, grow))
         state = EntryOccluded;
 
-    ((uint32_t*)pushConstant.flagsReference)[entry] = state;
+    RWBufferRef<uint32_t>(pushConstant.flagsReference).Store(entry, state);
 }
 
 // 2. Visible and occluded entries per block (one invocation per block walks its entries in order).
@@ -135,14 +135,16 @@ void cullMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling
 [numthreads(1, 1, 1)]
 void countMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling pushConstant)
 {
-    CullView* view = (CullView*)pushConstant.viewReference;
+    CullView view = BufferRef<CullView>(pushConstant.viewReference).Load(0);
     uint block = id.x;
     if (block >= view.blockCount)
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint32_t* drawList = (uint32_t*)pushConstant.drawListReference;
-    uint32_t* flags = (uint32_t*)pushConstant.flagsReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<uint32_t> drawList = BufferRef<uint32_t>(pushConstant.drawListReference);
+    RWBufferRef<uint32_t> flags = RWBufferRef<uint32_t>(pushConstant.flagsReference);
+    BufferRef<GpuInstance> sceneInstances = BufferRef<GpuInstance>(ubo.sceneInstancesReference);
+    BufferRef<GpuMesh> sceneMeshes = BufferRef<GpuMesh>(ubo.sceneMeshesReference);
     uint begin = block * CULL_BLOCK_SIZE;
     uint end = min(begin + CULL_BLOCK_SIZE, view.entryCount);
     uint visible = 0;
@@ -150,19 +152,22 @@ void countMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCullin
     uint triangles = 0;
     for (uint entry = begin; entry < end; entry++)
     {
-        occluded += flags[entry] == EntryOccluded ? 1 : 0;
-        if (flags[entry] != EntryVisible)
+        uint f = flags[entry];
+        occluded += f == EntryOccluded ? 1 : 0;
+        if (f != EntryVisible)
             continue;
 
         visible++;
-        GpuInstance* instance = &((GpuInstance*)ubo->sceneInstancesReference)[drawList[entry]];
-        triangles += ((GpuMesh*)ubo->sceneMeshesReference)[instance.meshIndex].triangleCount;
+        GpuInstance instance = sceneInstances[drawList[entry]];
+        triangles += sceneMeshes[instance.meshIndex].triangleCount;
     }
 
-    CullBlock* blocks = (CullBlock*)pushConstant.blocksReference;
-    blocks[block].visibleCount = visible;
-    blocks[block].occludedCount = occluded;
-    blocks[block].visibleTriangles = triangles;
+    RWBufferRef<CullBlock> blocks = RWBufferRef<CullBlock>(pushConstant.blocksReference);
+    CullBlock cb = blocks.Load(block);
+    cb.visibleCount = visible;
+    cb.occludedCount = occluded;
+    cb.visibleTriangles = triangles;
+    blocks.Store(block, cb);
 }
 
 // 3. Block offsets, the entries before each bucket start and the draw counts per bucket (one invocation).
@@ -170,21 +175,24 @@ void countMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCullin
 [numthreads(1, 1, 1)]
 void offsetMain(uniform PushConstantInstanceCulling pushConstant)
 {
-    CullView* view = (CullView*)pushConstant.viewReference;
-    CullBlock* blocks = (CullBlock*)pushConstant.blocksReference;
-    uint32_t* flags = (uint32_t*)pushConstant.flagsReference;
-    CullCounts* counts = (CullCounts*)pushConstant.countsReference;
+    CullView view = BufferRef<CullView>(pushConstant.viewReference).Load(0);
+    RWBufferRef<CullBlock> blocks = RWBufferRef<CullBlock>(pushConstant.blocksReference);
+    RWBufferRef<uint32_t> flags = RWBufferRef<uint32_t>(pushConstant.flagsReference);
+    RWBufferRef<CullCounts> countsBuf = RWBufferRef<CullCounts>(pushConstant.countsReference);
+    CullCounts counts = countsBuf.Load(0);
 
     uint visible = 0;
     uint occluded = 0;
     uint triangles = 0;
     for (uint block = 0; block < view.blockCount; block++)
     {
-        blocks[block].visibleBefore = visible;
-        blocks[block].occludedBefore = occluded;
-        visible += blocks[block].visibleCount;
-        occluded += blocks[block].occludedCount;
-        triangles += blocks[block].visibleTriangles;
+        CullBlock cb = blocks.Load(block);
+        cb.visibleBefore = visible;
+        cb.occludedBefore = occluded;
+        visible += cb.visibleCount;
+        occluded += cb.occludedCount;
+        triangles += cb.visibleTriangles;
+        blocks.Store(block, cb);
     }
     counts.visibleTriangles = triangles;
     // Phase 2 adds to these while it re-tests (this pass runs before it).
@@ -195,12 +203,19 @@ void offsetMain(uniform PushConstantInstanceCulling pushConstant)
     {
         uint start = view.bucketStart[bucket];
         uint block = start / CULL_BLOCK_SIZE;
-        uint visibleBefore = block < view.blockCount ? blocks[block].visibleBefore : visible;
-        uint occludedBefore = block < view.blockCount ? blocks[block].occludedBefore : occluded;
+        uint visibleBefore = visible;
+        uint occludedBefore = occluded;
+        if (block < view.blockCount)
+        {
+            CullBlock cb = blocks.Load(block);
+            visibleBefore = cb.visibleBefore;
+            occludedBefore = cb.occludedBefore;
+        }
         for (uint entry = block * CULL_BLOCK_SIZE; entry < start; entry++)
         {
-            visibleBefore += flags[entry] == EntryVisible ? 1 : 0;
-            occludedBefore += flags[entry] == EntryOccluded ? 1 : 0;
+            uint f = flags[entry];
+            visibleBefore += f == EntryVisible ? 1 : 0;
+            occludedBefore += f == EntryOccluded ? 1 : 0;
         }
         counts.visibleBefore[bucket] = visibleBefore;
         counts.occludedBefore[bucket] = occludedBefore;
@@ -211,6 +226,7 @@ void offsetMain(uniform PushConstantInstanceCulling pushConstant)
         counts.drawCount[bucket] = counts.visibleBefore[bucket + 1] - counts.visibleBefore[bucket];
         counts.lateDrawCount[bucket] = counts.occludedBefore[bucket + 1] - counts.occludedBefore[bucket];
     }
+    countsBuf.Store(0, counts);
 }
 
 // 4. Visible entries and phase 2 candidates written from their bucket's start, in entry order (one invocation per block).
@@ -218,48 +234,55 @@ void offsetMain(uniform PushConstantInstanceCulling pushConstant)
 [numthreads(1, 1, 1)]
 void writeMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling pushConstant)
 {
-    CullView* view = (CullView*)pushConstant.viewReference;
+    CullView view = BufferRef<CullView>(pushConstant.viewReference).Load(0);
     uint block = id.x;
     if (block >= view.blockCount)
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint32_t* drawList = (uint32_t*)pushConstant.drawListReference;
-    uint32_t* flags = (uint32_t*)pushConstant.flagsReference;
-    CullCounts* counts = (CullCounts*)pushConstant.countsReference;
-    uint32_t* visibleInstances = (uint32_t*)pushConstant.visibleInstancesReference;
-    uint32_t* lateInstances = (uint32_t*)pushConstant.lateInstancesReference;
-    MeshTasksIndirectCommand* commands = (MeshTasksIndirectCommand*)pushConstant.commandsReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<uint32_t> drawList = BufferRef<uint32_t>(pushConstant.drawListReference);
+    RWBufferRef<uint32_t> flags = RWBufferRef<uint32_t>(pushConstant.flagsReference);
+    CullCounts counts = RWBufferRef<CullCounts>(pushConstant.countsReference).Load(0);
+    RWBufferRef<uint32_t> visibleInstances = RWBufferRef<uint32_t>(pushConstant.visibleInstancesReference);
+    RWBufferRef<uint32_t> lateInstances = RWBufferRef<uint32_t>(pushConstant.lateInstancesReference);
+    RWBufferRef<MeshTasksIndirectCommand> commands = RWBufferRef<MeshTasksIndirectCommand>(pushConstant.commandsReference);
+    BufferRef<GpuInstance> sceneInstances = BufferRef<GpuInstance>(ubo.sceneInstancesReference);
+    BufferRef<GpuMesh> sceneMeshes = BufferRef<GpuMesh>(ubo.sceneMeshesReference);
 
     uint begin = block * CULL_BLOCK_SIZE;
     uint end = min(begin + CULL_BLOCK_SIZE, view.entryCount);
-    CullBlock* blocks = (CullBlock*)pushConstant.blocksReference;
-    uint visibleBefore = blocks[block].visibleBefore;
-    uint occludedBefore = blocks[block].occludedBefore;
+    CullBlock cb = RWBufferRef<CullBlock>(pushConstant.blocksReference).Load(block);
+    uint visibleBefore = cb.visibleBefore;
+    uint occludedBefore = cb.occludedBefore;
 
     uint bucket = BucketOfEntry(view, begin, 0);
     for (uint entry = begin; entry < end; entry++)
     {
         bucket = BucketOfEntry(view, entry, bucket);
         uint slot = drawList[entry];
+        uint f = flags[entry];
 
-        if (flags[entry] == EntryVisible)
+        if (f == EntryVisible)
         {
-            uint target = view.bucketStart[bucket] + visibleBefore - counts.visibleBefore[bucket];
+            uint rank = visibleBefore - counts.visibleBefore[bucket];
+            uint target = view.bucketStart[bucket] + rank;
             visibleBefore++;
 
-            GpuInstance* instance = &((GpuInstance*)ubo->sceneInstancesReference)[slot];
-            uint meshletCount = ((GpuMesh*)ubo->sceneMeshesReference)[instance.meshIndex].meshletCount;
-            visibleInstances[target] = slot;
-            commands[target].groupCountX = (meshletCount + TASK_SHADER_DISPATCH_X - 1) / TASK_SHADER_DISPATCH_X;
-            commands[target].groupCountY = 1;
-            commands[target].groupCountZ = 1;
+            GpuInstance instance = sceneInstances[slot];
+            uint meshletCount = sceneMeshes[instance.meshIndex].meshletCount;
+            visibleInstances.Store(target, slot);
+            MeshTasksIndirectCommand cmd;
+            cmd.drawID = rank;
+            cmd.groupCountX = (meshletCount + TASK_SHADER_DISPATCH_X - 1) / TASK_SHADER_DISPATCH_X;
+            cmd.groupCountY = 1;
+            cmd.groupCountZ = 1;
+            commands.Store(target, cmd);
         }
-        else if (flags[entry] == EntryOccluded)
+        else if (f == EntryOccluded)
         {
             uint target = view.bucketStart[bucket] + occludedBefore - counts.occludedBefore[bucket];
             occludedBefore++;
-            lateInstances[target] = slot;
+            lateInstances.Store(target, slot);
         }
     }
 }
@@ -270,36 +293,44 @@ void writeMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCullin
 [numthreads(256, 1, 1)]
 void lateMain(uint3 id: SV_DispatchThreadID, uniform PushConstantInstanceCulling pushConstant)
 {
-    CullView* view = (CullView*)pushConstant.viewReference;
+    CullView view = BufferRef<CullView>(pushConstant.viewReference).Load(0);
     uint entry = id.x;
     if (entry >= view.entryCount)
         return;
 
-    CullCounts* counts = (CullCounts*)pushConstant.countsReference;
-    MeshTasksIndirectCommand* commands = (MeshTasksIndirectCommand*)pushConstant.lateCommandsReference;
-    commands[entry].groupCountX = 0;
-    commands[entry].groupCountY = 1;
-    commands[entry].groupCountZ = 1;
-
+    CullCounts counts = RWBufferRef<CullCounts>(pushConstant.countsReference).Load(0);
+    RWBufferRef<MeshTasksIndirectCommand> commands = RWBufferRef<MeshTasksIndirectCommand>(pushConstant.lateCommandsReference);
     uint bucket = BucketOfEntry(view, entry, 0);
+    uint rank = entry - view.bucketStart[bucket];
+
+    MeshTasksIndirectCommand cmd;
+    cmd.drawID = rank;
+    cmd.groupCountX = 0;
+    cmd.groupCountY = 1;
+    cmd.groupCountZ = 1;
+    commands.Store(entry, cmd);
+
     if (entry >= view.bucketStart[bucket] + counts.lateDrawCount[bucket])
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    uint slot = ((uint32_t*)pushConstant.lateInstancesReference)[entry];
-    GpuInstance* instance = &((GpuInstance*)ubo->sceneInstancesReference)[slot];
-    GpuMesh* mesh = &((GpuMesh*)ubo->sceneMeshesReference)[instance.meshIndex];
-    GpuTransform* transform = &((GpuTransform*)ubo->sceneTransformsReference)[slot];
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    uint slot = BufferRef<uint32_t>(pushConstant.lateInstancesReference)[entry];
+    GpuInstance instance = BufferRef<GpuInstance>(ubo.sceneInstancesReference)[slot];
+    GpuMesh mesh = BufferRef<GpuMesh>(ubo.sceneMeshesReference)[instance.meshIndex];
+    GpuTransform transform = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[slot];
 
-    GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+    GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
     float grow = material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & MaterialGraphOutputWorldPositionOffset) != 0u ? material.graphMaxDisplacement : 0.0;
     if (IsOccluded(pushConstant, mesh, transform.world, view.viewProj, grow))
         return;
 
-    commands[entry].groupCountX = (mesh.meshletCount + TASK_SHADER_DISPATCH_X - 1) / TASK_SHADER_DISPATCH_X;
+    cmd.groupCountX = (mesh.meshletCount + TASK_SHADER_DISPATCH_X - 1) / TASK_SHADER_DISPATCH_X;
+    commands.Store(entry, cmd);
 
     // What phase 2 adds to the frame, so the counters cover every instance drawn and not only phase 1.
-    uint32_t previous;
-    InterlockedAdd(counts.lateDrawn, 1u, previous);
-    InterlockedAdd(counts.lateTriangles, mesh.triangleCount, previous);
+    // CullCounts layout: drawCount[10], lateDrawCount[10], visibleBefore[11], occludedBefore[11], visibleTriangles, lateDrawn, lateTriangles.
+    const uint kLateDrawnOffset = (CULL_BUCKET_COUNT * 2 + (CULL_BUCKET_COUNT + 1) * 2 + 1) * 4u;
+    const uint kLateTrianglesOffset = kLateDrawnOffset + 4u;
+    AtomicAddRaw(pushConstant.countsReference, kLateDrawnOffset, 1u);
+    AtomicAddRaw(pushConstant.countsReference, kLateTrianglesOffset, mesh.triangleCount);
 }

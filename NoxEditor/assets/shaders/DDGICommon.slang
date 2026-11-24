@@ -79,47 +79,47 @@ float3 get_probe_world_pos(uint probeIndex, float3 origin, float3 spacing, uint 
 // counts (toroidal addressing), so a cascade that follows the camera keeps every probe's history where it is while it scrolls. A
 // probe's place in its cascade ("local" coordinate, 0 at the cascade's origin) is its slot minus the scroll, modulo the counts.
 // =========================================================================
-uint3 ddgi_counts(UniformBufferObject* ubo)
+uint3 ddgi_counts(UniformBufferObject ubo)
 {
-    return uint3(uint(ubo->ddgiGridOrigin.w), uint(ubo->ddgiGridSpacing.w), uint(ubo->ddgiGridParams.x));
+    return uint3(uint(ubo.ddgiGridOrigin.w), uint(ubo.ddgiGridSpacing.w), uint(ubo.ddgiGridParams.x));
 }
 
-uint ddgi_probes_per_cascade(UniformBufferObject* ubo)
+uint ddgi_probes_per_cascade(UniformBufferObject ubo)
 {
     const uint3 counts = ddgi_counts(ubo);
     return counts.x * counts.y * counts.z;
 }
 
-uint ddgi_cascade_of(UniformBufferObject* ubo, uint storageIndex)
+uint ddgi_cascade_of(UniformBufferObject ubo, uint storageIndex)
 {
-    return min(storageIndex / max(ddgi_probes_per_cascade(ubo), 1u), max(ubo->ddgiCascadeCount, 1u) - 1u);
+    return min(storageIndex / max(ddgi_probes_per_cascade(ubo), 1u), max(ubo.ddgiCascadeCount, 1u) - 1u);
 }
 
-float3 ddgi_cascade_origin(UniformBufferObject* ubo, uint cascade)
+float3 ddgi_cascade_origin(UniformBufferObject ubo, uint cascade)
 {
-    const DDGICascade c = ubo->ddgiCascades[cascade];
+    const DDGICascade c = ubo.ddgiCascades[cascade];
     return float3(c.originX, c.originY, c.originZ);
 }
 
-float3 ddgi_cascade_spacing(UniformBufferObject* ubo, uint cascade)
+float3 ddgi_cascade_spacing(UniformBufferObject ubo, uint cascade)
 {
-    const DDGICascade c = ubo->ddgiCascades[cascade];
+    const DDGICascade c = ubo.ddgiCascades[cascade];
     return float3(c.spacingX, c.spacingY, c.spacingZ);
 }
 
-uint ddgi_storage_index(UniformBufferObject* ubo, uint cascade, uint3 localCoord)
+uint ddgi_storage_index(UniformBufferObject ubo, uint cascade, uint3 localCoord)
 {
     const uint3 counts = ddgi_counts(ubo);
-    const DDGICascade c = ubo->ddgiCascades[cascade];
+    const DDGICascade c = ubo.ddgiCascades[cascade];
     const uint3 slot = (localCoord + uint3(c.scrollX, c.scrollY, c.scrollZ)) % counts;
     return cascade * ddgi_probes_per_cascade(ubo) + get_probe_index(slot, counts.x, counts.y);
 }
 
-uint3 ddgi_local_coord(UniformBufferObject* ubo, uint storageIndex)
+uint3 ddgi_local_coord(UniformBufferObject ubo, uint storageIndex)
 {
     const uint3 counts = ddgi_counts(ubo);
     const uint cascade = ddgi_cascade_of(ubo, storageIndex);
-    const DDGICascade c = ubo->ddgiCascades[cascade];
+    const DDGICascade c = ubo.ddgiCascades[cascade];
     const uint3 slot = get_probe_coords(storageIndex - cascade * ddgi_probes_per_cascade(ubo), counts.x, counts.y);
     const uint3 scroll = uint3(c.scrollX, c.scrollY, c.scrollZ) % counts;
     return (slot + counts - scroll) % counts;
@@ -127,12 +127,12 @@ uint3 ddgi_local_coord(UniformBufferObject* ubo, uint storageIndex)
 
 // A probe's relocation (DDGIRelocation.slang) in world units, from an offsets texture (0xFFFFFFFF: none). Bounded to the 45 % of a
 // cell relocation keeps to, so a texture not written yet (the first frames) cannot throw a probe out of its cell.
-float3 ddgi_probe_offset(UniformBufferObject* ubo, uint storageIndex, uint offsetsTextureIndex)
+float3 ddgi_probe_offset(UniformBufferObject ubo, uint storageIndex, uint offsetsTextureIndex)
 {
     if (offsetsTextureIndex == 0xFFFFFFFF)
         return float3(0.0);
-    Texture2D offsetsTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + offsetsTextureIndex, 0));
-    const uint probesPerRow = max(uint(ubo->ddgiAtlasParams.x) / 10, 1u);
+    Texture2D offsetsTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + offsetsTextureIndex, 0));
+    const uint probesPerRow = max(uint(ubo.ddgiAtlasParams.x) / 10, 1u);
     float3 cells = offsetsTex.Load(int3(int(storageIndex % probesPerRow), int(storageIndex / probesPerRow), 0)).xyz;
     if (any(isnan(cells)) || any(isinf(cells)))
         cells = float3(0.0);
@@ -140,19 +140,19 @@ float3 ddgi_probe_offset(UniformBufferObject* ubo, uint storageIndex, uint offse
 }
 
 // Where a probe is: its grid point plus its relocation of this frame's atlases (the uniforms').
-float3 ddgi_probe_position(UniformBufferObject* ubo, uint storageIndex)
+float3 ddgi_probe_position(UniformBufferObject ubo, uint storageIndex)
 {
     const uint cascade = ddgi_cascade_of(ubo, storageIndex);
     return ddgi_cascade_origin(ubo, cascade) + float3(ddgi_local_coord(ubo, storageIndex)) * ddgi_cascade_spacing(ubo, cascade) +
-           ddgi_probe_offset(ubo, storageIndex, ubo->ddgiProbeOffsetsTextureIndex);
+           ddgi_probe_offset(ubo, storageIndex, ubo.ddgiProbeOffsetsTextureIndex);
 }
 
 // The probe came into its cascade this frame (the cascade moved): what its slot holds belongs to a probe that left, so it starts over.
-bool ddgi_probe_entered(UniformBufferObject* ubo, uint storageIndex)
+bool ddgi_probe_entered(UniformBufferObject ubo, uint storageIndex)
 {
     const int3 counts = int3(ddgi_counts(ubo));
     const int3 local = int3(ddgi_local_coord(ubo, storageIndex));
-    const DDGICascade c = ubo->ddgiCascades[ddgi_cascade_of(ubo, storageIndex)];
+    const DDGICascade c = ubo.ddgiCascades[ddgi_cascade_of(ubo, storageIndex)];
     const int3 shift = int3(c.shiftX, c.shiftY, c.shiftZ);
     for (int axis = 0; axis < 3; ++axis)
     {
@@ -168,14 +168,14 @@ bool ddgi_probe_entered(UniformBufferObject* ubo, uint storageIndex)
 
 // Updated this frame: the first cascade's probes every ddgiUpdateStride frames in turn, each further cascade half as often (its
 // probes are farther away, where lighting changes show less), and always the ones that just came in.
-bool ddgi_probe_updates(UniformBufferObject* ubo, uint storageIndex, uint frameIndex)
+bool ddgi_probe_updates(UniformBufferObject ubo, uint storageIndex, uint frameIndex)
 {
-    const uint stride = min(max(ubo->ddgiUpdateStride, 1u) << ddgi_cascade_of(ubo, storageIndex), 16u);
+    const uint stride = min(max(ubo.ddgiUpdateStride, 1u) << ddgi_cascade_of(ubo, storageIndex), 16u);
     return stride == 1 || ((storageIndex + frameIndex) % stride) == 0 || ddgi_probe_entered(ubo, storageIndex);
 }
 
 // How far a probe's distance moments look: rays are clamped to this (about one and a half of its cascade's cells).
-float ddgi_max_distance(UniformBufferObject* ubo, uint storageIndex)
+float ddgi_max_distance(UniformBufferObject ubo, uint storageIndex)
 {
     return 1.5 * length(ddgi_cascade_spacing(ubo, ddgi_cascade_of(ubo, storageIndex)));
 }
@@ -240,7 +240,7 @@ float chebyshev_visibility(float distToProbe, float meanDist, float meanDistSq, 
 // =========================================================================
 
 // How far inside the cascade the point is: 1 one cell or more in from its faces, falling to 0 at them (outside: 0).
-float ddgi_cascade_weight(UniformBufferObject* ubo, uint cascade, float3 worldPos)
+float ddgi_cascade_weight(UniformBufferObject ubo, uint cascade, float3 worldPos)
 {
     const uint3 counts = ddgi_counts(ubo);
     const float3 spacing = ddgi_cascade_spacing(ubo, cascade);
@@ -251,7 +251,7 @@ float ddgi_cascade_weight(UniformBufferObject* ubo, uint cascade, float3 worldPo
 }
 
 float3 sample_ddgi_cascade(
-    UniformBufferObject* ubo,
+    UniformBufferObject ubo,
     uint cascade,
     float3 worldPos,
     float3 shadingNormal,
@@ -270,15 +270,15 @@ float3 sample_ddgi_cascade(
     // The sampling point moves off the surface, mostly towards the viewer (RTXGI's view bias: the surface's own probes see it
     // from the front), by Normal Bias x 1.5 cells (0.2: 0.3 cells).
     const float minSpacing = min(spacing.x, min(spacing.y, spacing.z));
-    const float3 biasedPos = worldPos + (geometricNormal * 0.2 + toViewer * 0.8) * (ubo->ddgiGridParams.w * 1.5 * minSpacing);
+    const float3 biasedPos = worldPos + (geometricNormal * 0.2 + toViewer * 0.8) * (ubo.ddgiGridParams.w * 1.5 * minSpacing);
 
     const float3 relativePos = (biasedPos - origin) / spacing;
     const int3 maxIndices = int3(counts) - 2;
     const int3 baseCoord = clamp(int3(floor(relativePos)), int3(0, 0, 0), maxIndices);
     const float3 fracCoord = saturate(relativePos - float3(baseCoord));
 
-    const uint probesPerRowIrr = uint(ubo->ddgiAtlasParams.x) / 10;
-    const uint probesPerRowDist = uint(ubo->ddgiAtlasParams.z) / 18;
+    const uint probesPerRowIrr = uint(ubo.ddgiAtlasParams.x) / 10;
+    const uint probesPerRowDist = uint(ubo.ddgiAtlasParams.z) / 18;
 
     float3 totalIrradiance = float3(0.0);
     float totalWeight = 0.0;
@@ -303,9 +303,9 @@ float3 sample_ddgi_cascade(
                 const float3 biasedToProbe = probePos - biasedPos;
                 const float biasedDistance = length(biasedToProbe);
                 const float3 biasedDir = biasedDistance > 1e-6 ? biasedToProbe / biasedDistance : geometricNormal;
-                const float2 distUV = get_probe_atlas_uv(probeIndex, -biasedDir, 16, probesPerRowDist, ubo->ddgiAtlasParams.zw);
+                const float2 distUV = get_probe_atlas_uv(probeIndex, -biasedDir, 16, probesPerRowDist, ubo.ddgiAtlasParams.zw);
                 const float2 moments = distanceAtlas.SampleLevel(atlasSampler, distUV, 0).rg;
-                const float distanceMeters = biasedDistance / ubo->unitsPerMeter;
+                const float distanceMeters = biasedDistance / ubo.unitsPerMeter;
                 float chebyshev = 1.0;
                 if (distanceMeters > moments.x)
                 {
@@ -326,7 +326,7 @@ float3 sample_ddgi_cascade(
                           (dz != 0 ? fracCoord.z : (1.0 - fracCoord.z));
 
                 // 4. Irradiance along the shading normal; alpha is the probe's classification (0: buried in geometry).
-                const float2 irrUV = get_probe_atlas_uv(probeIndex, shadingNormal, 8, probesPerRowIrr, ubo->ddgiAtlasParams.xy);
+                const float2 irrUV = get_probe_atlas_uv(probeIndex, shadingNormal, 8, probesPerRowIrr, ubo.ddgiAtlasParams.xy);
                 const float4 probeIrr = irradianceAtlas.SampleLevel(atlasSampler, irrUV, 0);
                 weight *= saturate(probeIrr.a);
 
@@ -374,7 +374,7 @@ float3 ddgi_geometric_normal(Texture2D<float> depthTex, int2 pixel, float2 viewp
 // toViewer: unit vector from the surface towards whoever sees it (the camera; a probe ray's origin for its hits).
 // offsetsTextureIndex: the probe offsets that go with the atlases (0xFFFFFFFF: the grid points).
 float3 sample_ddgi_diffuse_surface(
-    UniformBufferObject* ubo,
+    UniformBufferObject ubo,
     float3 worldPos,
     float3 shadingNormal,
     float3 geometricNormal,
@@ -386,14 +386,14 @@ float3 sample_ddgi_diffuse_surface(
 )
 {
     float3 environment = float3(0.0);
-    if (ubo->irradianceMapIndex != 0xFFFFFFFF)
+    if (ubo.irradianceMapIndex != 0xFFFFFFFF)
     {
-        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->irradianceMapIndex, 0));
+        TextureCube irradianceTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.irradianceMapIndex, 0));
         SamplerState samplerIrradiance = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-        environment = irradianceTex.SampleLevel(samplerIrradiance, shadingNormal, 0).rgb * ubo->scaleIBLAmbient;
+        environment = irradianceTex.SampleLevel(samplerIrradiance, shadingNormal, 0).rgb * ubo.scaleIBLAmbient;
     }
 
-    const uint cascadeCount = clamp(ubo->ddgiCascadeCount, 1u, 4u);
+    const uint cascadeCount = clamp(ubo.ddgiCascadeCount, 1u, 4u);
     uint finest = cascadeCount;
     float finestWeight = 0.0;
     for (uint cascade = 0; cascade < cascadeCount; ++cascade)
@@ -429,7 +429,7 @@ float3 sample_ddgi_diffuse_surface(
 
 // This frame's atlases (the uniforms'), with their probe offsets.
 float3 sample_ddgi_diffuse_surface(
-    UniformBufferObject* ubo,
+    UniformBufferObject ubo,
     float3 worldPos,
     float3 shadingNormal,
     float3 geometricNormal,
@@ -440,12 +440,12 @@ float3 sample_ddgi_diffuse_surface(
 )
 {
     return sample_ddgi_diffuse_surface(ubo, worldPos, shadingNormal, geometricNormal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler,
-                                       ubo->ddgiProbeOffsetsTextureIndex);
+                                       ubo.ddgiProbeOffsetsTextureIndex);
 }
 
 // The common case: one normal for both, seen from the camera.
 float3 sample_ddgi_diffuse(
-    UniformBufferObject* ubo,
+    UniformBufferObject ubo,
     float3 worldPos,
     float3 normal,
     Texture2D irradianceAtlas,
@@ -453,7 +453,7 @@ float3 sample_ddgi_diffuse(
     SamplerState atlasSampler
 )
 {
-    const float3 toCamera = ubo->cameraWorldPos.xyz - worldPos;
+    const float3 toCamera = ubo.cameraWorldPos.xyz - worldPos;
     const float3 toViewer = dot(toCamera, toCamera) > 1e-8 ? normalize(toCamera) : normal;
     return sample_ddgi_diffuse_surface(ubo, worldPos, normal, normal, toViewer, irradianceAtlas, distanceAtlas, atlasSampler);
 }

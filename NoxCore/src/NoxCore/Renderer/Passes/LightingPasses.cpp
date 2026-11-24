@@ -46,7 +46,7 @@ namespace Nox
             [this, triangleCount](RGPassContext& context)
             {
                 shaderio::PushConstantEmissiveGrid push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_emissiveTrianglesPipeline);
@@ -62,7 +62,7 @@ namespace Nox
             [this](RGPassContext& context)
             {
                 shaderio::PushConstantEmissiveGrid push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_emissiveScanPipeline);
@@ -80,7 +80,7 @@ namespace Nox
             [this](RGPassContext& context)
             {
                 shaderio::PushConstantEmissiveGrid push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_emissiveGridPipeline);
@@ -228,7 +228,7 @@ namespace Nox
 
                     shaderio::PushConstantPathTracer ptPush{};
                 ptPush.invViewProj = uniformData.invViewProj;
-                ptPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                ptPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 ptPush.viewportSize = glm::vec2(rw, rh);
                 ptPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 // RTXPT applies its Balanced preset on startup (18 total, 2 diffuse).
@@ -342,7 +342,7 @@ namespace Nox
                     [this, res = &resources, writeIndex](RGPassContext& context)
                     {
                         shaderio::PushConstantPTComposite push{};
-                        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                        push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                         push.emissionTextureIndex = context.Slot(res->PathTracerAccum[writeIndex]);
                         push.diffuseTextureIndex = context.Slot(res->PathTracerDiffuseDenoised);
                         push.specularTextureIndex = context.Slot(res->PathTracerSpecularDenoised);
@@ -402,7 +402,7 @@ namespace Nox
                 cmd.setColorWriteMask(0, nri::ColorComponent::R);
 
                 shaderio::PushConstantSSAOBlur blurPush{};
-                blurPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                blurPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 blurPush.ssaoTextureIndex = context.Slot(res->SSAORaw);
                 blurPush.depthTextureIndex = context.Slot(res->Depth);
                 blurPush.viewportSize = glm::vec2(rw, rh);
@@ -456,7 +456,7 @@ namespace Nox
 
                     shaderio::PushConstantGTAO push{};
                     push.invViewProj = uniformData.invViewProj;
-                    push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     push.depthTextureIndex = context.Slot(res->Depth);
                     push.normalTextureIndex = context.Slot(res->GBufferNormal);
                     push.sliceCount = m_gtaoSlices;
@@ -500,8 +500,8 @@ namespace Nox
                 ssaoPush.invViewProj = uniformData.invViewProj;
                 ssaoPush.view = uniformData.view;
                 ssaoPush.proj = uniformData.proj;
-                ssaoPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                ssaoPush.kernelReference = nriGetBufferDeviceAddress(context.Buffer(res->SSAOKernel));
+                ssaoPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                ssaoPush.kernelReference = bufferReadRef(context.Buffer(res->SSAOKernel));
                 ssaoPush.depthTextureIndex = context.Slot(res->Depth);
                 ssaoPush.normalTextureIndex = context.Slot(res->GBufferNormal);
                 ssaoPush.kernelSize = static_cast<uint32_t>(m_ssaoKernelSize);
@@ -563,8 +563,8 @@ namespace Nox
 
                 shaderio::PushConstantRTAO rtaoPush{};
                 rtaoPush.invViewProj = uniformData.invViewProj;
-                rtaoPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                rtaoPush.kernelReference = nriGetBufferDeviceAddress(context.Buffer(res->SSAOKernel));
+                rtaoPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                rtaoPush.kernelReference = bufferReadRef(context.Buffer(res->SSAOKernel));
                 rtaoPush.depthTextureIndex = context.Slot(res->Depth);
                 rtaoPush.normalTextureIndex = context.Slot(res->GBufferNormal);
                 // 4 rays a pixel (the blur after it and the per-pixel rotation do the rest). It used SSAO's kernel size, 16 rays a
@@ -663,7 +663,7 @@ namespace Nox
             glm::mat4 viewProj = uniformData.proj * uniformData.view;
             shaderio::PushConstantDeferredLighting lightingPush{};
             lightingPush.invViewProj = uniformData.invViewProj;
-            lightingPush.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+            lightingPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
             lightingPush.visibilityTextureIndex = context.Slot(res->Visibility);
             lightingPush.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
             lightingPush.gbufferNormalIndex = context.Slot(res->GBufferNormal);

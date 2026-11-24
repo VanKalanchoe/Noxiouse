@@ -3,10 +3,10 @@
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float4 color;
-    float2 texCooord;
-    uint32_t materialIndex;
-    int entityID;
+    float4 color : TEXCOORD0;
+    float2 texCooord : TEXCOORD1;
+    nointerpolation uint32_t materialIndex : TEXCOORD2;
+    nointerpolation int entityID : TEXCOORD3;
 };
 
 [shader("vertex")]
@@ -14,10 +14,10 @@ VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, 
 {
     VSOutput output;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    Vertex* vertexPTR = (Vertex*)pushConstant.vertexReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<Vertex> vertexPTR = BufferRef<Vertex>(pushConstant.vertexReference);
     Vertex vertex = vertexPTR[vertexID];
-    QuadData* quadData = (QuadData*)pushConstant.quadDataReference;
+    BufferRef<QuadData> quadData = BufferRef<QuadData>(pushConstant.quadDataReference);
     QuadData quad = quadData[instanceID];
 
     output.pos = mul(ubo.proj, mul(ubo.view, mul(quad.modelMatrix, float4(vertex.pos, 1.0))));
@@ -40,9 +40,9 @@ FSOutput fragMain(VSOutput vertIn, uniform PushConstantQuad pushConstant)
 {
     FSOutput output;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
    
-    Texture2D texHandle = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + vertIn.materialIndex, 0));
+    Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + vertIn.materialIndex, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));
     float4 img = texHandle.Sample(sampHandle, vertIn.texCooord);
 

@@ -25,10 +25,16 @@ target_link_libraries(${PROJECT_NAME} PRIVATE NoxCore)
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/NoxCore/src/NoxPCH.h")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-# Next to NoxEditor.exe: the editor's build puts the managed scripts (Scripts/Core, Scripts/Facerun), Coral, slang, Streamline
-# and NRD binaries there, and the runtime loads the same ones. Its own output folder with everything copied is R7 (Build Game).
-set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:NoxEditor>")
-add_dependencies(${PROJECT_NAME} NoxEditor)
+# Next to the active editor (NoxEditorV2 when enabled, otherwise NoxEditor): its build puts the managed scripts
+# (Scripts/Core, Scripts/Facerun), Coral, slang, Streamline, NRD and AgilitySDK binaries there, and the runtime loads
+# the same ones. Its own output folder with everything copied is R7 (Build Game).
+if(TARGET NoxEditorV2)
+    set(_NOX_RUNTIME_HOST_EDITOR NoxEditorV2)
+else()
+    set(_NOX_RUNTIME_HOST_EDITOR NoxEditor)
+endif()
+set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:${_NOX_RUNTIME_HOST_EDITOR}>")
+add_dependencies(${PROJECT_NAME} ${_NOX_RUNTIME_HOST_EDITOR})
 
 # Shipping: a windowed application (no console next to the game); SDL_main.h supplies WinMain.
 if(NOX_DIST AND WIN32)

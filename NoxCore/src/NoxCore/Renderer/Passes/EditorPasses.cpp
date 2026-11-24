@@ -141,8 +141,8 @@ namespace Nox
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_presentPipeline);
 
                     PushConstantBlock references{};
-                    // Pass pointer to the global matrix via a buffer device address
-                    references.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    // Pass pointer to the global matrix via a cross-API buffer reference
+                    references.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     references.vertexReference = -1;
                     references.instanceReference = -1;
                     cmd.pushData(&references, sizeof(PushConstantBlock));
@@ -220,35 +220,59 @@ namespace Nox
             m_raycastsInFlight[frameIndex].push_back(std::move(m_raycastQueue[index].Callback));
         }
         m_raycastQueue.erase(m_raycastQueue.begin(), m_raycastQueue.begin() + count);
-        memcpy(m_raycastBuffers[frameIndex].map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
-        m_raycastBuffers[frameIndex].unmap();
-
-        // Without a TLAS (ray tracing off, nothing built yet) every ray misses: the callbacks fall back by themselves.
         const bool traced = m_editorRaycastPipeline && resources.TLAS.IsValid();
         if (!traced)
         {
-            for (shaderio::EditorRay& ray : rays)
-                ray.hitDistance = -1.0f;
-            memcpy(m_raycastBuffers[frameIndex].map(0, sizeof(shaderio::EditorRay) * count), rays.data(), sizeof(shaderio::EditorRay) * count);
-            m_raycastBuffers[frameIndex].unmap();
+            std::vector<RaycastCallback> callbacks = std::move(m_raycastsInFlight[frameIndex]);
+            m_raycastsInFlight[frameIndex].clear();
+            for (const RaycastCallback& cb : callbacks)
+            {
+                if (cb)
+                    cb(false, -1.0f);
+            }
             return;
         }
+        const uint64_t rayBytes = sizeof(shaderio::EditorRay) * count;
+        memcpy(m_raycastUploadBuffers[frameIndex].map(0, rayBytes), rays.data(), rayBytes);
+        m_raycastUploadBuffers[frameIndex].unmap();
+
         m_renderGraph.AddPass("Editor Raycasts", RGPassFlags::NeverCull,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.TLAS, RGBufferAccess::AccelerationStructureRead);
                 ReadGpuScene(builder, resources);
             },
-            [this, count](RGPassContext& context)
+            [this, count, rayBytes](RGPassContext& context)
             {
-                shaderio::PushConstantEditorRaycast push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                push.raysReference = m_raycastBuffers[frameIndex].getDeviceAddress();
-                push.rayCount = count;
                 nri::CommandBuffer& cmd = context.Cmd();
+                nri::Buffer& uploadBuf = m_raycastUploadBuffers[frameIndex];
+                nri::Buffer& gpuBuf = m_raycastGpuBuffers[frameIndex];
+                nri::Buffer& readbackBuf = m_raycastBuffers[frameIndex];
+
+                const nri::BufferCopyRegion region{ .srcOffset = 0, .dstOffset = 0, .size = rayBytes };
+                cmd.copyBuffer(uploadBuf, gpuBuf, region);
+                const nri::BufferBarrierDesc toCompute{
+                    gpuBuf.handle(),
+                    { nri::AccessBits::TransferWrite, nri::StageBits::Transfer },
+                    { nri::AccessBits::ShaderRead | nri::AccessBits::ShaderWrite, nri::StageBits::Compute }
+                };
+                cmd.resourceBarriers({}, std::span<const nri::BufferBarrierDesc>(&toCompute, 1));
+
+                shaderio::PushConstantEditorRaycast push{};
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.raysReference = bufferWriteRef(gpuBuf);
+                push.rayCount = count;
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_editorRaycastPipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((count + 63) / 64, 1, 1);
+
+                const nri::BufferBarrierDesc toReadback{
+                    gpuBuf.handle(),
+                    { nri::AccessBits::ShaderWrite, nri::StageBits::Compute },
+                    { nri::AccessBits::TransferRead, nri::StageBits::Transfer }
+                };
+                cmd.resourceBarriers({}, std::span<const nri::BufferBarrierDesc>(&toReadback, 1));
+                cmd.copyBuffer(gpuBuf, readbackBuf, region);
             });
     }
 

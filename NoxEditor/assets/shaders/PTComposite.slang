@@ -10,16 +10,16 @@ void compositeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushCon
         return;
 
     int2 pixel = int2(dispatchThreadID.xy);
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
     float3 diffFactor, specFactor;
     float roughness;
     PT_SurfaceFactors(ubo, pixel, pushConstant.depthTextureIndex, pushConstant.gbufferAlbedoIndex, pushConstant.gbufferNormalIndex,
                       pushConstant.gbufferMaterialIndex, diffFactor, specFactor, roughness);
 
-    Texture2D emissionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.emissionTextureIndex, 0));
-    Texture2D diffuseTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.diffuseTextureIndex, 0));
-    Texture2D specularTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.specularTextureIndex, 0));
+    Texture2D emissionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.emissionTextureIndex, 0));
+    Texture2D diffuseTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.diffuseTextureIndex, 0));
+    Texture2D specularTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.specularTextureIndex, 0));
     float3 color = emissionTex.Load(int3(pixel, 0)).rgb +
                    NRD_UnpackSignal(pushConstant.denoiserMode, diffuseTex.Load(int3(pixel, 0))) * diffFactor +
                    NRD_UnpackSignal(pushConstant.denoiserMode, specularTex.Load(int3(pixel, 0))) * specFactor;

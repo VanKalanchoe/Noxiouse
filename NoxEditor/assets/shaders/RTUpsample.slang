@@ -29,7 +29,7 @@ static const float2 RTUpsampleTriangle[3] = { float2(-1.0, -1.0), float2(3.0, -1
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices RTUpsampleVertex vertices[3], uint threadID : SV_GroupIndex)
+void meshMain(in payload RTUpsamplePayload _payload, out indices uint3 triangles[1], out vertices RTUpsampleVertex vertices[3], uint threadID : SV_GroupIndex)
 {
     SetMeshOutputCounts(3, 1);
     if (threadID < 3)
@@ -50,13 +50,13 @@ float3 rt_upsample_normal(Texture2D normalTex, int2 pixel)
 [shader("fragment")]
 float4 fragMain(RTUpsampleVertex input, uniform PushConstantRTUpsample pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    Texture2D source = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.sourceTextureIndex, 0));
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    Texture2D source = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.sourceTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
 
     const int2 pixel = int2(input.pos.xy);
-    const int subsample = int(max(ubo->rtSubsample, 1u));
+    const int subsample = int(max(ubo.rtSubsample, 1u));
     const int2 sourceMax = int2(pushConstant.sourceSize) - 1;
     const int2 pixelMax = int2(pushConstant.viewportSize) - 1;
     const int2 block = min(pixel / subsample, sourceMax);

@@ -16,15 +16,16 @@ void taskMain(uniform UIPushConstants pc)
 struct UIVSOutput
 {
     float4 pos : SV_Position;
-    float2 pixelPos;
-    float2 uv;
-    nointerpolation uint primIndex;
+    float2 pixelPos : TEXCOORD0;
+    float2 uv : TEXCOORD1;
+    nointerpolation uint primIndex : TEXCOORD2;
 };
 
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(1, 1, 1)]
 void meshMain(
+    in payload UIPayload _payload,
     out indices uint3 triangles[2],
     out vertices UIVSOutput vertices[4],
     uint3 DispatchThreadID : SV_DispatchThreadID,

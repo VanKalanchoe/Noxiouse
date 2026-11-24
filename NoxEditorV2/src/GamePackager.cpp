@@ -154,10 +154,16 @@ namespace Nox
                 return true;
             if (directory)
                 return IsWithin(binaryDirectory / relative, output) || (relative.parent_path().empty() && Lower(relative.filename().string()) == "assets") ||
-                       (settings.Server && relative.parent_path().empty() && Lower(relative.filename().string()) == "shaders");
+                       (settings.Server && relative.parent_path().empty() &&
+                        (Lower(relative.filename().string()) == "shaders" || Lower(relative.filename().string()) == "agilitysdk"));
             const std::string name = Lower(relative.filename().string());
             const std::string extension = Lower(relative.extension().string());
-            if (settings.PrecompiledShadersOnly && name.rfind("slang", 0) == 0 && (extension == ".dll" || extension == ".so" || extension == ".dylib"))
+            if (settings.PrecompiledShadersOnly &&
+                ((name.rfind("slang", 0) == 0 || name == "dxcompiler.dll" || name == "dxil.dll") &&
+                 (extension == ".dll" || extension == ".so" || extension == ".dylib")))
+                return true;
+            // Never ship the D3D12 debug validation layer in packaged games; AgilitySDK/D3D12Core.dll is copied automatically.
+            if (name == "d3d12sdklayers.dll")
                 return true;
             return name.rfind("noxeditor", 0) == 0 || name.rfind("noxruntime", 0) == 0 || extension == ".pdb" || extension == ".ilk" ||
                    extension == ".exp" || extension == ".lib" || extension == ".log" || name == "imgui.ini";

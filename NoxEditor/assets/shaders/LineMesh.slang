@@ -16,8 +16,8 @@ void taskMain(uniform PushConstantLine pushConstant)
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float4 color;
-    int entityID;
+    float4 color : TEXCOORD0;
+    nointerpolation int entityID : TEXCOORD1;
 };
 
 [shader("mesh")]
@@ -25,14 +25,15 @@ struct VSOutput
 [numthreads(1, 1, 1)]
 void meshMain
 (
+    in payload LinePayLoad _payload,
     out indices uint2 lines[1], out vertices VSOutput vertices[2],
     uint3 DispatchThreadID : SV_DispatchThreadID,
     uniform PushConstantLine pushConstant
 )
 {
-    uint lineID = DispatchThreadID.x;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    LineData* lineData = (LineData*)pushConstant.lineDataReference;
+    uint lineID = pushConstant.firstElement + DispatchThreadID.x;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    BufferRef<LineData> lineData = BufferRef<LineData>(pushConstant.lineDataReference);
     LineData line = lineData[lineID];
 
 	SetMeshOutputCounts(2, 1); // 2 vertices, 1 line

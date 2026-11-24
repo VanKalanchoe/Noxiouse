@@ -39,7 +39,9 @@
 #include <spdlog/spdlog.h>
 #include <functional>
 #include <set>
+#ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
 

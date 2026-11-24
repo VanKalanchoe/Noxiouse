@@ -9,11 +9,11 @@ void compMain(
     uint3 groupThreadID : SV_GroupThreadID,
     uniform PushConstantSkinning pushConstant)
 {
-    PackedVertex* sourceVertices = (PackedVertex*)pushConstant.sourceVerticesReference;
-    SkinVertex* sourceSkin = (SkinVertex*)pushConstant.sourceSkinReference;
-    SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVerticesReference;
-    float4x4* boneMatrices = (float4x4*)pushConstant.boneMatricesReference;
-    SkinningWorkItem* workItems = (SkinningWorkItem*)pushConstant.workItemsReference;
+    BufferRef<PackedVertex> sourceVertices = BufferRef<PackedVertex>(pushConstant.sourceVerticesReference);
+    BufferRef<SkinVertex> sourceSkin = BufferRef<SkinVertex>(pushConstant.sourceSkinReference);
+    RWBufferRef<SkinnedVertex> skinnedVertices = RWBufferRef<SkinnedVertex>(pushConstant.skinnedVerticesReference);
+    BufferRef<float4x4> boneMatrices = BufferRef<float4x4>(pushConstant.boneMatricesReference);
+    BufferRef<SkinningWorkItem> workItems = BufferRef<SkinningWorkItem>(pushConstant.workItemsReference);
 
     SkinningWorkItem work = workItems[groupID.x];
     for (uint vertexIndex = groupThreadID.x; vertexIndex < work.vertexCount; vertexIndex += 64)
@@ -24,9 +24,9 @@ void compMain(
         // Morph targets first, in the bind pose (Unreal's order): the vertex's deltas, each by its target's weight.
         if (work.morphWeightOffset != NoMorphWeights && pushConstant.morphRangesReference != 0)
         {
-            const GpuMorphRange range = ((GpuMorphRange*)pushConstant.morphRangesReference)[sourceIndex];
-            GpuMorphDelta* deltas = (GpuMorphDelta*)pushConstant.morphDeltasReference;
-            float* weights = (float*)pushConstant.morphWeightsReference;
+            const GpuMorphRange range = BufferRef<GpuMorphRange>(pushConstant.morphRangesReference)[sourceIndex];
+            BufferRef<GpuMorphDelta> deltas = BufferRef<GpuMorphDelta>(pushConstant.morphDeltasReference);
+            BufferRef<float> weights = BufferRef<float>(pushConstant.morphWeightsReference);
             float3 normal = vertex.normal;
             for (uint i = 0; i < range.count; ++i)
             {
@@ -55,6 +55,6 @@ void compMain(
         // Handedness (w) is a fixed sign describing the tangent/bitangent/normal triple's winding, not a direction:
         // skin it like the normal (rotation only, no translation) and carry the sign through unchanged.
         output.tangent = float4(mul((float3x3)skinTransform, vertex.tangent.xyz), vertex.tangent.w);
-        skinnedVertices[work.destinationVertexOffset + vertexIndex] = output;
+        skinnedVertices.Store(work.destinationVertexOffset + vertexIndex, output);
     }
 }

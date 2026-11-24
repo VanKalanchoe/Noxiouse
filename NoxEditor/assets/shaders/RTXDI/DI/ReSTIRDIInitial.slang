@@ -8,9 +8,9 @@
 #define RTXDI_ENABLE_STORE_RESERVOIR 1
 #define RTXDI_LIGHT_RESERVOIR_BUFFER g_ReservoirBuffer
 
-static RTXDI_PackedDIReservoir* g_ReservoirBuffer;
+static RWBufferRef<RTXDI_PackedDIReservoir> g_ReservoirBuffer;
 static PushConstantReSTIRDIInitial g_PushConstant;
-static UniformBufferObject* g_UBO;
+static UniformBufferObject g_UBO;
 
 // Shared RTXDI application bridge and initial light sampler. Both ReSTIR DI primary surfaces and
 // ReSTIR GI path vertices use this implementation, so their light conventions and RIS weights stay
@@ -28,7 +28,7 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
     if (pixelPos.x < 0 || pixelPos.y < 0 ||
         pixelPos.x >= int(g_PushConstant.viewportSize.x) ||
         pixelPos.y >= int(g_PushConstant.viewportSize.y) ||
-        g_UBO == nullptr ||
+        g_PushConstant.matrixReference == 0 ||
         g_PushConstant.depthTextureIndex == 0xFFFFFFFF ||
         g_PushConstant.gbufferNormalIndex == 0xFFFFFFFF)
     {
@@ -36,13 +36,13 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
     }
 
     Texture2D<float> depthTexture = Texture2D<float>.Handle(
-        uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
+        uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
     float rawDepth = depthTexture.Load(int3(pixelPos, 0)).r;
     if (rawDepth <= 0.00001)
         return surface;
 
     Texture2D normalTexture = Texture2D.Handle(
-        uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
+        uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
     float3 encodedNormal = normalTexture.Load(int3(pixelPos, 0)).rgb;
     float normalLengthSquared = dot(encodedNormal, encodedNormal);
     if (normalLengthSquared < 1e-6)
@@ -126,6 +126,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRDIInitialPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -172,8 +173,8 @@ PSOutput fragMain(
     }
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_ReservoirBuffer = (RTXDI_PackedDIReservoir*)pushConstant.reservoirBufferReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_ReservoirBuffer = RWBufferRef<RTXDI_PackedDIReservoir>(pushConstant.reservoirBufferReference);
 
     RTXDI_ReservoirBufferParameters reservoirParams;
     reservoirParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;

@@ -49,7 +49,7 @@ namespace Nox
                 [this, res = &resources, reflectionDistance](RGPassContext& context)
                 {
                     shaderio::PushConstantRRGuides push{};
-                    push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+                    push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     push.depthTextureIndex = context.Slot(res->Depth);
                     push.gbufferAlbedoIndex = context.Slot(res->GBufferAlbedo);
                     push.gbufferNormalIndex = context.Slot(res->GBufferNormal);

@@ -10,16 +10,16 @@ float4 screen_probe_filter_texel(uint2 texel, PushConstantScreenProbe pushConsta
     if (probe.x >= pushConstant.probeCountX || probe.y >= pushConstant.probeCountY)
         return float4(0.0);
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    Texture2D positionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
-    Texture2D irradiance = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.inputTextureIndex, 0));
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    Texture2D positionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.probePositionTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.probeNormalTextureIndex, 0));
+    Texture2D irradiance = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.inputTextureIndex, 0));
 
     const float4 position = positionTex.Load(int3(probe, 0));
     if (position.w <= 0.0)
         return float4(0.0);
     const float3 normal = normalTex.Load(int3(probe, 0)).xyz;
-    const float viewDistance = length(position.xyz - ubo->cameraWorldPos.xyz);
+    const float viewDistance = length(position.xyz - ubo.cameraWorldPos.xyz);
 
     float3 sum = irradiance.Load(int3(texel, 0)).rgb;
     float weightSum = 1.0;

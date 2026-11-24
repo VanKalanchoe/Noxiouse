@@ -71,13 +71,13 @@ float2 unpack_snorm2(uint p)
     return max(float2(float(x), float(y)) / 32767.0, -1.0);
 }
 
-float3 probe_center(GpuIrradianceVolume* volume, uint probe)
+float3 probe_center(GpuIrradianceVolume volume, uint probe)
 {
-    const uint3 counts = uint3(volume->countX, volume->countY, volume->countZ);
+    const uint3 counts = uint3(volume.countX, volume.countY, volume.countZ);
     const uint3 coord = uint3(probe % counts.x, (probe / counts.x) % counts.y, probe / (counts.x * counts.y));
-    const float3 extents = volume->extents.xyz;
+    const float3 extents = volume.extents.xyz;
     const float3 cell = 2.0 * extents / float3(max(counts, uint3(2)) - 1u);
-    return mul(volume->localToWorld, float4(float3(coord) * cell - extents, 1.0)).xyz;
+    return mul(volume.localToWorld, float4(float3(coord) * cell - extents, 1.0)).xyz;
 }
 
 // --- packMain ----------------------------------------------------------------------------------------------------------------------
@@ -91,15 +91,16 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
               uniform PushConstantIrradianceProbePack pushConstant)
 {
     const uint row = groupId.x;
-    const uint probe = ((uint*)pushConstant.probeIndicesReference)[row];
-    GpuIrradianceVolume* volume = (GpuIrradianceVolume*)pushConstant.volumeReference;
+    const uint probe = BufferRef<uint>(pushConstant.probeIndicesReference)[row];
+    GpuIrradianceVolume volume = BufferRef<GpuIrradianceVolume>(pushConstant.volumeReference)[0];
     Texture2D albedoAtlas = Texture2D.Handle(uint2(pushConstant.albedoTextureIndex, 0));
     Texture2D emissionAtlas = Texture2D.Handle(uint2(pushConstant.emissionTextureIndex, 0));
     Texture2D<float> depthAtlas = Texture2D<float>.Handle(uint2(pushConstant.depthTextureIndex, 0));
     const float faceSize = float(IrradianceProbeFaceSize);
-    const uint cacheSize = max(volume->cacheFaceSize, 1u);
+    const uint cacheSize = max(volume.cacheFaceSize, 1u);
     const uint block = max(IrradianceProbeFaceSize / cacheSize, 1u);
-    uint4* cache = (uint4*)volume->surfaceCacheReference + probe * 6u * cacheSize * cacheSize;
+    RWBufferRef<uint4> cache = RWBufferRef<uint4>(volume.surfaceCacheReference);
+    const uint cacheBase = probe * 6u * cacheSize * cacheSize;
 
     float4 shD = float4(0.0), shD2 = float4(0.0), shSky = float4(0.0);
     for (uint face = 0; face < 6; ++face)
@@ -156,8 +157,8 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
                 normal = -direction;
             }
             const uint cacheTexel = (face * cacheSize + threadId.y / block) * cacheSize + threadId.x / block;
-            cache[cacheTexel] = uint4(pack_unorm4(float4(albedo, sky)), pack_half2(emission.r, emission.g), pack_half2(emission.b, distanceSum),
-                                      pack_snorm2(oct_encode(normal)));
+            cache.Store(cacheBase + cacheTexel, uint4(pack_unorm4(float4(albedo, sky)), pack_half2(emission.r, emission.g), pack_half2(emission.b, distanceSum),
+                                                      pack_snorm2(oct_encode(normal))));
         }
     }
     gDistanceSH[threadIndex][0] = shD;
@@ -176,10 +177,10 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
     }
     if (threadIndex == 0)
     {
-        float4* sh = (float4*)volume->probeSHReference;
-        sh[probe * IrradianceProbeSHStride + 4] = gDistanceSH[0][0];
-        sh[probe * IrradianceProbeSHStride + 5] = gDistanceSH[0][1];
-        sh[probe * IrradianceProbeSHStride + 6] = gSkySH[0];
+        RWBufferRef<float4> sh = RWBufferRef<float4>(volume.probeSHReference);
+        sh.Store(probe * IrradianceProbeSHStride + 4, gDistanceSH[0][0]);
+        sh.Store(probe * IrradianceProbeSHStride + 5, gDistanceSH[0][1]);
+        sh.Store(probe * IrradianceProbeSHStride + 6, gSkySH[0]);
     }
 }
 
@@ -187,31 +188,31 @@ void packMain(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uin
 
 // The sun at a cache texel's surface through the volume's sun shadow map (one bilinear comparison: the probes' light is soft
 // anyway). Normal offset and a step towards the sun of a texel or so against the averaged surface's self shadowing.
-float relight_sun_visibility(UniformBufferObject* ubo, GpuIrradianceVolume* volume, float3 position, float3 n, float3 L)
+float relight_sun_visibility(UniformBufferObject ubo, GpuIrradianceVolume volume, float3 position, float3 n, float3 L)
 {
-    if (volume->sunShadowTextureIndex == 0xFFFFFFFF)
+    if (volume.sunShadowTextureIndex == 0xFFFFFFFF)
         return 1.0;
-    const float texel = volume->sunTexelWorld;
+    const float texel = volume.sunTexelWorld;
     const float NoL = saturate(dot(n, L));
     const float sinTheta = sqrt(saturate(1.0 - NoL * NoL));
     const float3 receiver = position + n * (2.0 * texel * sinTheta) + L * texel;
-    const float4 clip = mul(volume->sunViewProj, float4(receiver, 1.0));
+    const float4 clip = mul(volume.sunViewProj, float4(receiver, 1.0));
     const float2 uv = float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5);
     if (any(uv <= 0.0) || any(uv >= 1.0) || clip.z <= 0.0 || clip.z > 1.0)
         return 1.0;
-    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + volume->sunShadowTextureIndex, 0));
+    Texture2D<float> map = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + volume.sunShadowTextureIndex, 0));
     SamplerState pointClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP, 0));
     const float slope = min(sinTheta / max(NoL, 0.05), 4.0);
-    const float bias = (1.0 + slope) * texel / max(volume->sunDepthRange, 1e-6);
-    return shadow_map_bilinear(map, pointClamp, uv, clip.z + bias, float(volume->sunShadowResolution));
+    const float bias = (1.0 + slope) * texel / max(volume.sunDepthRange, 1e-6);
+    return shadow_map_bilinear(map, pointClamp, uv, clip.z + bias, float(volume.sunShadowResolution));
 }
 
 // The direct light's irradiance at a surface (E, not yet / pi), every light of the frame.
-float3 relight_direct(UniformBufferObject* ubo, GpuIrradianceVolume* volume, float3 position, float3 n, float noise)
+float3 relight_direct(UniformBufferObject ubo, GpuIrradianceVolume volume, float3 position, float3 n, float noise)
 {
     float3 irradiance = float3(0.0);
-    LightData* lights = (LightData*)ubo->lightDataReference;
-    for (uint i = 0; i < ubo->lightCount; ++i)
+    BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
+    for (uint i = 0; i < ubo.lightCount; ++i)
     {
         const LightData light = lights[i];
         const uint type = (uint)light.position.w;
@@ -223,7 +224,7 @@ float3 relight_direct(UniformBufferObject* ubo, GpuIrradianceVolume* volume, flo
             if (NoL <= 0.0)
                 continue;
             float visibility = cloud_shadow(ubo, position, i, L);
-            if (i == ubo->shadowMaskLightIndex && visibility > 0.0)
+            if (i == ubo.shadowMaskLightIndex && visibility > 0.0)
                 visibility *= relight_sun_visibility(ubo, volume, position, n, L);
             irradiance += radiance * (NoL * visibility);
             continue;
@@ -259,24 +260,25 @@ groupshared float4 gRadianceSH[64][3];
 [numthreads(64, 1, 1)]
 void relightMain(uint3 groupId : SV_GroupID, uint threadIndex : SV_GroupIndex, uniform PushConstantIrradianceRelight pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    GpuIrradianceVolume* volume = (GpuIrradianceVolume*)pushConstant.volumeReference;
-    const uint probe = ((uint*)pushConstant.probeIndicesReference)[groupId.x];
-    const uint cacheSize = max(volume->cacheFaceSize, 1u);
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    GpuIrradianceVolume volume = BufferRef<GpuIrradianceVolume>(pushConstant.volumeReference)[0];
+    const uint probe = BufferRef<uint>(pushConstant.probeIndicesReference)[groupId.x];
+    const uint cacheSize = max(volume.cacheFaceSize, 1u);
     const uint texelsPerFace = cacheSize * cacheSize;
     const uint texelCount = 6u * texelsPerFace;
     const float size = float(cacheSize);
-    uint4* cache = (uint4*)volume->surfaceCacheReference + probe * texelCount;
+    BufferRef<uint4> cache = BufferRef<uint4>(volume.surfaceCacheReference);
+    const uint cacheBase = probe * texelCount;
     const float3 center = probe_center(volume, probe);
 
     // The sky around: the environment's prefiltered radiance at about a cache texel's width; its irradiance where the volume gives
     // no light (outside it, or probes not lit yet).
-    const bool environment = ubo->prefilteredMapIndex != 0xFFFFFFFF && ubo->irradianceMapIndex != 0xFFFFFFFF;
-    TextureCube prefiltered = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + (environment ? ubo->prefilteredMapIndex : 0u), 0));
-    TextureCube irradianceMap = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + (environment ? ubo->irradianceMapIndex : 0u), 0));
+    const bool environment = ubo.prefilteredMapIndex != 0xFFFFFFFF && ubo.irradianceMapIndex != 0xFFFFFFFF;
+    TextureCube prefiltered = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + (environment ? ubo.prefilteredMapIndex : 0u), 0));
+    TextureCube irradianceMap = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + (environment ? ubo.irradianceMapIndex : 0u), 0));
     SamplerState prefilterSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
     SamplerState irradianceSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_IRRADIANCE, 0));
-    const float skyLod = 0.6 * float(ubo->prefilteredCubeMipLevels);
+    const float skyLod = 0.6 * float(ubo.prefilteredCubeMipLevels);
 
     float4 shR = float4(0.0), shG = float4(0.0), shB = float4(0.0);
     for (uint t = threadIndex; t < texelCount; t += 64u)
@@ -287,12 +289,12 @@ void relightMain(uint3 groupId : SV_GroupID, uint threadIndex : SV_GroupIndex, u
         const float3 direction = face_direction(face, ndc);
         const float solidAngle = (4.0 / (size * size)) / pow(1.0 + dot(ndc, ndc), 1.5);
 
-        const uint4 texel = cache[t];
+        const uint4 texel = cache[cacheBase + t];
         const float4 albedoSky = unpack_unorm4(texel.x);
         const float sky = albedoSky.w;
         float3 radiance = float3(0.0);
         if (sky > 0.0 && environment)
-            radiance += sky * prefiltered.SampleLevel(prefilterSampler, direction, skyLod).rgb * ubo->scaleIBLAmbient;
+            radiance += sky * prefiltered.SampleLevel(prefilterSampler, direction, skyLod).rgb * ubo.scaleIBLAmbient;
         if (sky < 1.0)
         {
             const float2 emissionRG = unpack_half2(texel.y);
@@ -303,7 +305,7 @@ void relightMain(uint3 groupId : SV_GroupID, uint threadIndex : SV_GroupIndex, u
             const float noise = frac(52.9829189 * frac(0.06711056 * float(t) + 0.00583715 * float(probe)) + 0.618034 * float(pushConstant.frameIndex & 63u));
             float3 lit = relight_direct(ubo, volume, position, n, noise) / PI;
             // Further bounces: the light the volume gives there (last frame's probes), the sky's irradiance where it gives none.
-            float3 bounce = environment ? irradianceMap.SampleLevel(irradianceSampler, n, 0.0).rgb * ubo->scaleIBLAmbient : float3(0.0);
+            float3 bounce = environment ? irradianceMap.SampleLevel(irradianceSampler, n, 0.0).rgb * ubo.scaleIBLAmbient : float3(0.0);
             float3 volumeLight;
             float weight;
             if (irradiance_volume_lookup(ubo, position, n, volumeLight, weight))
@@ -332,10 +334,10 @@ void relightMain(uint3 groupId : SV_GroupID, uint threadIndex : SV_GroupIndex, u
     }
     if (threadIndex == 0)
     {
-        float4* sh = (float4*)volume->probeSHReference;
-        sh[probe * IrradianceProbeSHStride + 0] = gRadianceSH[0][0];
-        sh[probe * IrradianceProbeSHStride + 1] = gRadianceSH[0][1];
-        sh[probe * IrradianceProbeSHStride + 2] = gRadianceSH[0][2];
-        sh[probe * IrradianceProbeSHStride + 3] = float4(1.0, 0.0, 0.0, 0.0); // lit
+        RWBufferRef<float4> sh = RWBufferRef<float4>(volume.probeSHReference);
+        sh.Store(probe * IrradianceProbeSHStride + 0, gRadianceSH[0][0]);
+        sh.Store(probe * IrradianceProbeSHStride + 1, gRadianceSH[0][1]);
+        sh.Store(probe * IrradianceProbeSHStride + 2, gRadianceSH[0][2]);
+        sh.Store(probe * IrradianceProbeSHStride + 3, float4(1.0, 0.0, 0.0, 0.0)); // lit
     }
 }

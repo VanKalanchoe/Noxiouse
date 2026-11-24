@@ -235,17 +235,17 @@ namespace Nox
 
         if (!m_irradianceTableBuffers[frameIndex])
         {
-            m_irradianceTableBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuIrradianceVolume), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceTableBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::GpuIrradianceVolume), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_irradianceTableBuffersMapped[frameIndex] = m_irradianceTableBuffers[frameIndex].map(0, sizeof(shaderio::GpuIrradianceVolume));
-            m_irradianceProbeListBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceProbeListBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame, .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_irradianceProbeListBuffersMapped[frameIndex] = m_irradianceProbeListBuffers[frameIndex].map(0, sizeof(uint32_t) * shaderio::MaxIrradianceProbesPerFrame);
-            m_irradianceRelightListBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame, .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceRelightListBuffers[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame, .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_irradianceRelightListBuffersMapped[frameIndex] = m_irradianceRelightListBuffers[frameIndex].map(0, sizeof(uint32_t) * shaderio::MaxIrradianceRelightsPerFrame);
             for (auto& cullView : m_irradianceCullViews[frameIndex])
-                cullView = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
+                cullView = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_irradianceSunUniforms[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::UniformBufferObject), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_irradianceSunUniformsMapped[frameIndex] = m_irradianceSunUniforms[frameIndex].map(0, sizeof(shaderio::UniformBufferObject));
-            m_irradianceSunCullViews[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_STORAGE });
+            m_irradianceSunCullViews[frameIndex] = m_device.createBuffer(nri::BufferDesc{ .size = sizeof(shaderio::CullView), .usage = NRI_BUFFER_USAGE_UNIFORM });
         }
         shaderio::GpuIrradianceVolume& volume = m_irradianceTable;
         volume = {};
@@ -256,14 +256,14 @@ namespace Nox
         volume.countY = state.Counts.y;
         volume.countZ = state.Counts.z;
         volume.probeCount = state.ProbeCount;
-        volume.probeSHReference = state.SH.getDeviceAddress();
-        volume.surfaceCacheReference = state.SurfaceCache.getDeviceAddress();
+        volume.probeSHReference = bufferWriteRef(state.SH);
+        volume.surfaceCacheReference = bufferWriteRef(state.SurfaceCache);
         volume.cacheFaceSize = state.CacheFaceSize;
         volume.sunShadowTextureIndex = 0xFFFFFFFF;
         // A quarter of a cell along the normal (in local units).
         volume.normalBias = 0.25f * std::min({ cell.x, cell.y, cell.z });
         // The table's contents are final after Compile (the sun map's slot): updateIrradianceVolumeUniforms.
-        const uint64_t tableAddress = m_irradianceTableBuffers[frameIndex].getDeviceAddress();
+        const uint64_t tableAddress = bufferReadRef(m_irradianceTableBuffers[frameIndex]);
         uniformData.irradianceVolumeReference = tableAddress;
 
         // A cleared volume (zero SH: nothing lit) before its first probes are.
@@ -465,7 +465,7 @@ namespace Nox
                             const float size = static_cast<float>(faceSize);
                             cmd.setViewportWithCount({ x, y + size, size, -size }, 0.0f, 1.0f); // the graph's flipped viewport on the face
                             cmd.setScissorRect(static_cast<int32_t>(x), static_cast<int32_t>(y), faceSize, faceSize);
-                            cursor.references.matrixReference = m_irradianceFaceUniforms[frameIndex][k * 6 + face].getDeviceAddress();
+                            cursor.references.matrixReference = bufferReadRef(m_irradianceFaceUniforms[frameIndex][k * 6 + face]);
                             drawMeshletBucket(cmd, cursor, RenderBucket::Opaque, m_irradianceCapturePipeline, NRI_CULL_MODE_BACK, true, false);
                             drawMeshletBucket(cmd, cursor, RenderBucket::OpaqueDoubleSided, m_irradianceCapturePipeline, NRI_CULL_MODE_NONE, true, false);
                             drawMeshletBucket(cmd, cursor, RenderBucket::Mask, m_irradianceCapturePipeline, NRI_CULL_MODE_BACK, true, false);
@@ -492,7 +492,7 @@ namespace Nox
                 {
                     nri::CommandBuffer& cmd = context.Cmd();
                     shaderio::PushConstantIrradianceProbePack push{};
-                    push.probeIndicesReference = probeListBuffer->getDeviceAddress();
+                    push.probeIndicesReference = bufferReadRef(*probeListBuffer);
                     push.volumeReference = tableAddress;
                     push.albedoTextureIndex = uniformData.imageHeapIndexOffset + context.Slot(albedo);
                     push.emissionTextureIndex = uniformData.imageHeapIndexOffset + context.Slot(emission);
@@ -535,8 +535,8 @@ namespace Nox
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 shaderio::PushConstantIrradianceRelight push{};
-                push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
-                push.probeIndicesReference = relightListBuffer->getDeviceAddress();
+                push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.probeIndicesReference = bufferReadRef(*relightListBuffer);
                 push.volumeReference = tableAddress;
                 push.probeCount = relightCount;
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);

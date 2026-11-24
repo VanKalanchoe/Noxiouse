@@ -38,6 +38,7 @@
     [outputtopology("triangle")]
     [numthreads(3, 1, 1)]
     void meshMain(
+        in payload GBufferPayload _payload,
         out indices uint3 triangles[1],
         out vertices MSOutput vertices[3],
         uint threadID : SV_GroupIndex,
@@ -139,8 +140,8 @@
     {
         GBufferOutput output;
 
-        UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-        Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
+        UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+        Texture2D<uint4> visTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.visibilityTextureIndex, 0));
 
         int2 pixelCoord = int2(input.pos.xy);
         uint4 rawData = visTex.Load(int3(pixelCoord, 0));
@@ -164,8 +165,8 @@
                 float2 uv = (input.pos.xy / pushConstant.viewportSize) * 2.0 - 1.0;
                 float4 currClipJittered = float4(uv, 0.001, 1.0); // far along the ray: a precise direction (see Skybox.slang)
                 // Reconstruct the actual world-space point along this (jittered) pixel's view ray.
-                // ubo->invViewProj is jittered on purpose here: it must match the matrix the pixel was rasterized with.
-                float4 worldPos4 = mul(ubo->invViewProj, currClipJittered);
+                // ubo.invViewProj is jittered on purpose here: it must match the matrix the pixel was rasterized with.
+                float4 worldPos4 = mul(ubo.invViewProj, currClipJittered);
                 float3 worldPos = worldPos4.xyz / worldPos4.w;
 
                 // Re-project that same world point with the CLEAN (non-jittered) matrices for both frames,
@@ -174,9 +175,9 @@
                 // unprojected near-plane point instead (w = 1, as this did) treated every sky pixel as 0.01 units from
                 // the eye, so any camera translation -- an orbiting editor camera moves its eye all the time -- gave
                 // it large false motion and DLSS / temporal filters smeared and shimmered the image.
-                float3 rayDirection = worldPos - ubo->cameraWorldPos.xyz;
-                float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(rayDirection, 0.0)));
-                float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(rayDirection, 0.0)));
+                float3 rayDirection = worldPos - ubo.cameraWorldPos.xyz;
+                float4 currClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(rayDirection, 0.0)));
+                float4 prevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(rayDirection, 0.0)));
                 float2 currNDC = currClip.xy / currClip.w;
                 float2 prevNDC = prevClip.xy / prevClip.w;
 
@@ -195,17 +196,17 @@
         InstanceData instance = instances[instanceSlot];
 
         // Pull the geometry streams
-        MeshletDraw* meshletDrawStream = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-        uint32_t* meshletVertexStream = (uint32_t*)ubo->geometryMeshletVerticesReference;
-        uint8_t* meshletTriangleStream = (uint8_t*)ubo->geometryMeshletTrianglesReference;
+        BufferRef<MeshletDraw> meshletDrawStream = BufferRef<MeshletDraw>(ubo.geometryMeshletDrawsReference);
+        BufferRef<uint32_t> meshletVertexStream = BufferRef<uint32_t>(ubo.geometryMeshletVerticesReference);
+        BufferRef<uint> meshletTriangleStream = BufferRef<uint>(ubo.geometryMeshletTrianglesReference);
 
         MeshletDraw meshlet = meshletDrawStream[meshletID];
 
         // Fetch Triangle Indices
         uint triBase = meshlet.triangleOffset + (primitiveID * 3);
-        uint i0 = meshletTriangleStream[triBase];
-        uint i1 = meshletTriangleStream[triBase + 1];
-        uint i2 = meshletTriangleStream[triBase + 2];
+        uint i0 = LoadByte(meshletTriangleStream, triBase);
+        uint i1 = LoadByte(meshletTriangleStream, triBase + 1);
+        uint i2 = LoadByte(meshletTriangleStream, triBase + 2);
 
         // Fetch Local Vertex Indices
         uint vIdx0 = meshletVertexStream[meshlet.vertexOffset + i0];
@@ -233,7 +234,7 @@
 
         if (instance.skinnedVertexOffset != NoSkinnedVertices && pushConstant.skinnedVertexReference != 0)
         {
-            SkinnedVertex* skinnedVertices = (SkinnedVertex*)pushConstant.skinnedVertexReference;
+            BufferRef<SkinnedVertex> skinnedVertices = BufferRef<SkinnedVertex>(pushConstant.skinnedVertexReference);
             const uint skinnedBase = instance.skinnedVertexOffset;
             SkinnedVertex skinned0 = skinnedVertices[skinnedBase + vIdx0];
             SkinnedVertex skinned1 = skinnedVertices[skinnedBase + vIdx1];
@@ -253,7 +254,7 @@
             previousLocalPos2 = localPos2;
             if (pushConstant.skinnedHistoryValid != 0 && pushConstant.previousSkinnedVertexReference != 0)
             {
-                SkinnedVertex* previousSkinnedVertices = (SkinnedVertex*)pushConstant.previousSkinnedVertexReference;
+                BufferRef<SkinnedVertex> previousSkinnedVertices = BufferRef<SkinnedVertex>(pushConstant.previousSkinnedVertexReference);
                 previousLocalPos0 = previousSkinnedVertices[skinnedBase + vIdx0].position;
                 previousLocalPos1 = previousSkinnedVertices[skinnedBase + vIdx1].position;
                 previousLocalPos2 = previousSkinnedVertices[skinnedBase + vIdx2].position;
@@ -261,7 +262,7 @@
         }
         else if (instance.boneMatrixOffset != 0xFFFFFFFF && pushConstant.boneMatrixReference != 0)
         {
-            float4x4* boneMatrices = (float4x4*)pushConstant.boneMatrixReference;
+            BufferRef<float4x4> boneMatrices = BufferRef<float4x4>(pushConstant.boneMatrixReference);
             uint baseOffset = instance.boneMatrixOffset;
 
             float4x4 skin0 = boneMatrices[baseOffset + v0.boneIDs.x] * v0.boneWeights.x +
@@ -307,7 +308,7 @@
             // MaterialGraph.slang, with the same inputs: the vertex normal as the mesh stage reads it, the UVs, the vertex colour, this
             // frame's time), so it is rebuilt moved; and where it was last frame, for the motion vectors: last frame's transform and pose
             // with the offset at last frame's time (Unreal's previous-frame World Position Offset).
-            GpuMaterial* offsetMaterial = instances.material(instanceSlot);
+            GpuMaterial offsetMaterial = instances.material(instanceSlot);
             if (material_graph_has_offset(offsetMaterial))
             {
                 const uint vertexBase = meshlet.globalVertexOffset;
@@ -320,12 +321,12 @@
                 const float3 previousCorner0 = mul(instance.previousModelMatrix, previousLocalPos0).xyz;
                 const float3 previousCorner1 = mul(instance.previousModelMatrix, previousLocalPos1).xyz;
                 const float3 previousCorner2 = mul(instance.previousModelMatrix, previousLocalPos2).xyz;
-                previousOffset0 = material_graph_offset(offsetMaterial, previousCorner0, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo->previousTimeSeconds, ubo);
-                previousOffset1 = material_graph_offset(offsetMaterial, previousCorner1, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo->previousTimeSeconds, ubo);
-                previousOffset2 = material_graph_offset(offsetMaterial, previousCorner2, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo->previousTimeSeconds, ubo);
-                worldPos0.xyz += material_graph_offset(offsetMaterial, worldPos0.xyz, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo->timeSeconds, ubo);
-                worldPos1.xyz += material_graph_offset(offsetMaterial, worldPos1.xyz, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo->timeSeconds, ubo);
-                worldPos2.xyz += material_graph_offset(offsetMaterial, worldPos2.xyz, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo->timeSeconds, ubo);
+                previousOffset0 = material_graph_offset(offsetMaterial, previousCorner0, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.previousTimeSeconds, ubo);
+                previousOffset1 = material_graph_offset(offsetMaterial, previousCorner1, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.previousTimeSeconds, ubo);
+                previousOffset2 = material_graph_offset(offsetMaterial, previousCorner2, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.previousTimeSeconds, ubo);
+                worldPos0.xyz += material_graph_offset(offsetMaterial, worldPos0.xyz, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.timeSeconds, ubo);
+                worldPos1.xyz += material_graph_offset(offsetMaterial, worldPos1.xyz, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.timeSeconds, ubo);
+                worldPos2.xyz += material_graph_offset(offsetMaterial, worldPos2.xyz, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.timeSeconds, ubo);
             }
 #endif
 
@@ -351,7 +352,7 @@
             // the triangle is seen at a grazing angle to the view ray -- everywhere on a curved surface, nowhere on a flat
             // one, which is exactly the "fine on a cube, speckled on a sphere, in every view including the path tracer's
             // separate (unaffected) hardware ray intersection" pattern this turned out to cause.
-            Texture2D<float> gbufferDepthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+            Texture2D<float> gbufferDepthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
             float pixelDepth = gbufferDepthTex.Load(int3(pixelCoord, 0)).r;
             if (pixelDepth <= 0.0)
             {
@@ -364,11 +365,11 @@
                 output.specular = float4(0.0);
                 return output;
             }
-            float4 hitPosH = mul(ubo->invViewProj, float4(ndc, pixelDepth, 1.0));
+            float4 hitPosH = mul(ubo.invViewProj, float4(ndc, pixelDepth, 1.0));
             float3 hitPos = hitPosH.xyz / hitPosH.w;
             float3 bary = barycentricOfPoint(hitPos, worldPos0.xyz, e1, e2, d00, d01, d11, invDenom);
             // Camera-to-surface direction (double-sided normal flip, below), from the same accurate hit position.
-            float3 viewDir = normalize(hitPos - ubo->cameraWorldPos.xyz);
+            float3 viewDir = normalize(hitPos - ubo.cameraWorldPos.xyz);
 
             // Derivatives (texture LOD only, not the normal/position above): an analytic ray/triangle-plane solve
             // against THIS pixel's own triangle, like the main bary above used to be -- not a hardware ddx/ddy of the
@@ -384,11 +385,11 @@
             // directly with distance from the world origin, which was the original "blurry far from the origin" bug.
             // Unprojecting at this pixel's own depth instead recovers a delta on the same scale as the real distance to
             // the surface (the same reason hitPos above is precise), at any distance from the origin.
-            float4 targetH_dx = mul(ubo->invViewProj, float4(ndc + float2(2.0 * invViewport.x, 0.0), pixelDepth, 1.0));
-            float4 targetH_dy = mul(ubo->invViewProj, float4(ndc - float2(0.0, 2.0 * invViewport.y), pixelDepth, 1.0));
+            float4 targetH_dx = mul(ubo.invViewProj, float4(ndc + float2(2.0 * invViewport.x, 0.0), pixelDepth, 1.0));
+            float4 targetH_dy = mul(ubo.invViewProj, float4(ndc - float2(0.0, 2.0 * invViewport.y), pixelDepth, 1.0));
             float3 pAtDepth_dx = targetH_dx.xyz / targetH_dx.w;
             float3 pAtDepth_dy = targetH_dy.xyz / targetH_dy.w;
-            float3 rayOrigin = ubo->cameraWorldPos.xyz;
+            float3 rayOrigin = ubo.cameraWorldPos.xyz;
             float3 rayDir_dx = normalize(pAtDepth_dx - rayOrigin);
             float3 rayDir_dy = normalize(pAtDepth_dy - rayOrigin);
             float3 bary_dx = computeBarycentric3D(rayOrigin, rayDir_dx, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
@@ -471,7 +472,7 @@
         float2 ddy_mr = instance_texture_uv_delta(instance, instance.physicalDescriptorTextureSet, ddy_uv0, ddy_uv1);
 
         // Texture streaming: the mips this surface's textures need, from the same derivatives the samples use.
-        if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame))
+        if (ubo.mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo.mipFeedbackFrame))
         {
             reportMipFeedback(ubo, instance.baseColorTextureIndex, baseColorUV, ddx_bc, ddy_bc);
             reportMipFeedback(ubo, instance.metallicRoughnessTextureIndex, mrUV, ddx_mr, ddy_mr);
@@ -483,7 +484,7 @@
 
         // Sampled as for the shown resolution, not the (upscaled) render resolution: the gradients scaled by the LOD bias.
         {
-            const float lodScale = exp2(ubo->textureLodBias);
+            const float lodScale = exp2(ubo.textureLodBias);
             ddx_uv0 *= lodScale; ddy_uv0 *= lodScale;
             ddx_uv1 *= lodScale; ddy_uv1 *= lodScale;
             ddx_bc *= lodScale; ddy_bc *= lodScale;
@@ -601,7 +602,7 @@
                 // itself a pixel's UV step away (at the same mip) -- the surface's own steps, so a neighbouring object across a
                 // silhouette does not count, as a ddx of the resolved normal would. AnisotropyRotationTest's groove map sparkled
                 // under TAA and DLSS: grooves finer than a pixel make a highlight no pixel can hold.
-                const float pixelStep = exp2(-ubo->textureLodBias); // one render pixel (the gradients are scaled by the LOD bias)
+                const float pixelStep = exp2(-ubo.textureLodBias); // one render pixel (the gradients are scaled by the LOD bias)
                 const float3 normalDx = normalize(mul(tangent_normal_from_map(SampleMaterialTextureGrad(ubo, instance.normalTextureIndex, samp,
                     normalUV + ddx_normal * pixelStep, ddx_normal, ddy_normal).xyz, instance.normalScale), TBN));
                 const float3 normalDy = normalize(mul(tangent_normal_from_map(SampleMaterialTextureGrad(ubo, instance.normalTextureIndex, samp,
@@ -626,7 +627,7 @@
         }
 
         // 3b. THE LOBES past the core model (MaterialLobes.slang): clear coat, sheen, specular, iridescence, anisotropy.
-        GpuMaterial* gpuMaterial = instances.material(instanceSlot);
+        GpuMaterial gpuMaterial = instances.material(instanceSlot);
         GBufferLobes lobes = gbuffer_default_lobes();
         float3 anisotropicT = float3(0.0);
         if (gpuMaterial.lobes != 0u && instance.shadingModel == ShadingModelDefaultLit) // (the lobes are Default Lit's)
@@ -641,7 +642,7 @@
             lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, samp, geomNormal, rawGeomTangent, tangentHandedness, backFace, anisotropicT);
             lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, -viewDir); // a coat normal map tipped away from the camera
             // Texture streaming: the lobe textures' mips, as the base textures' above.
-            if (ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame))
+            if (ubo.mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo.mipFeedbackFrame))
             {
                 const uint lobeTextures[10] = { gpuMaterial.clearcoatTextureIndex, gpuMaterial.clearcoatRoughnessTextureIndex, gpuMaterial.clearcoatNormalTextureIndex,
                                                 gpuMaterial.sheenColorTextureIndex, gpuMaterial.sheenRoughnessTextureIndex, gpuMaterial.specularColorTextureIndex,
@@ -651,7 +652,7 @@
                                            gpuMaterial.sheenColorTextureSet, gpuMaterial.sheenRoughnessTextureSet, gpuMaterial.specularColorTextureSet,
                                            gpuMaterial.specularStrengthTextureSet, gpuMaterial.iridescenceTextureSet,
                                            gpuMaterial.iridescenceThicknessTextureSet, gpuMaterial.anisotropyTextureSet };
-                const float lodScale = exp2(-ubo->textureLodBias); // the gradients before the LOD bias (as the base textures report)
+                const float lodScale = exp2(-ubo.textureLodBias); // the gradients before the LOD bias (as the base textures report)
                 for (uint t = 0; t < 10; ++t)
                 {
                     reportMipFeedback(ubo, lobeTextures[t], material_texture_uv(gpuMaterial, lobeSets[t], coords.uv[0], coords.uv[1]),
@@ -687,7 +688,7 @@
         // the Material Output pins the graph connects replace the values above, the others stay the material's own.
         if (gpuMaterial.graphSlot != 0xFFFFFFFFu)
         {
-            const float unbiased = exp2(-ubo->textureLodBias); // (the graph's Texture Samples apply the LOD bias themselves)
+            const float unbiased = exp2(-ubo.textureLodBias); // (the graph's Texture Samples apply the LOD bias themselves)
             MaterialGraphInputs graphIn;
             graphIn.uv0 = uv0;
             graphIn.uv0Dx = ddx_uv0 * unbiased;
@@ -695,7 +696,7 @@
             graphIn.uv1 = uv1;
             graphIn.uv1Dx = ddx_uv1 * unbiased;
             graphIn.uv1Dy = ddy_uv1 * unbiased;
-            graphIn.position = worldPos + ubo->renderOrigin;
+            graphIn.position = worldPos + ubo.renderOrigin;
             graphIn.positionDx = ddx_pos;
             graphIn.positionDy = ddy_pos;
             graphIn.normal = backFace ? -geomNormal : geomNormal;
@@ -708,10 +709,10 @@
             graphIn.screenUV = uvScreen;
             graphIn.screenUVDx = float2(invViewport.x, 0.0);
             graphIn.screenUVDy = float2(0.0, invViewport.y);
-            graphIn.time = ubo->timeSeconds;
-            graphIn.cameraPosition = ubo->cameraWorldPos.xyz + ubo->renderOrigin;
+            graphIn.time = ubo.timeSeconds;
+            graphIn.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
             graphIn.material = gpuMaterial;
-            graphIn.mipFeedback = ubo->mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo->mipFeedbackFrame);
+            graphIn.mipFeedback = ubo.mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo.mipFeedbackFrame);
             graphIn.ubo = ubo;
             MaterialGraphOutputs graphOut;
             graphOut.baseColor = baseColor.rgb;
@@ -756,7 +757,7 @@
         // Debug view 21: the cluster's LOD level (original geometry green, then yellow, orange, red, magenta, blue).
         if (pushConstant.debugMode == 21)
         {
-            MeshletBounds* bounds = &((MeshletBounds*)ubo->geometryMeshletBoundsReference)[instance.boundsOffset + (meshletID - instance.drawsOffset)];
+            MeshletBounds bounds = BufferRef<MeshletBounds>(ubo.geometryMeshletBoundsReference)[instance.boundsOffset + (meshletID - instance.drawsOffset)];
             const float3 levelColors[6] = { float3(0.2, 0.85, 0.2), float3(0.95, 0.9, 0.2), float3(1.0, 0.55, 0.1),
                                             float3(0.95, 0.15, 0.1), float3(0.85, 0.2, 0.85), float3(0.25, 0.35, 1.0) };
             output.albedo.rgb = levelColors[min(bounds.lodLevel, 5u)] * (0.35 + 0.65 * dot(baseColor.rgb, float3(0.2126, 0.7152, 0.0722)));
@@ -769,8 +770,8 @@
             float3 color = float3(0.45, 0.45, 0.45);
             if (instance.pageOffset != NoGeometryRange)
             {
-                MeshletBounds* bounds = &((MeshletBounds*)ubo->geometryMeshletBoundsReference)[instance.boundsOffset + (meshletID - instance.drawsOffset)];
-                GpuGeometryPage* page = &((GpuGeometryPage*)ubo->geometryPagesReference)[instance.pageOffset + bounds.page];
+                MeshletBounds bounds = BufferRef<MeshletBounds>(ubo.geometryMeshletBoundsReference)[instance.boundsOffset + (meshletID - instance.drawsOffset)];
+                GpuGeometryPage page = RWBufferRef<GpuGeometryPage>(ubo.geometryPagesReference)[instance.pageOffset + bounds.page];
                 if (page.lodError >= ClusterTerminalError)
                     color = float3(0.2, 0.35, 1.0);
                 else
@@ -814,8 +815,8 @@
         if (writeVelocity)
         {
             // --- Screen-Space Motion Vector (Jitter-Free) ---
-            float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(worldPos, 1.0)));
-            float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(previousWorldPos, 1.0)));
+            float4 currClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(worldPos, 1.0)));
+            float4 prevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(previousWorldPos, 1.0)));
 
             float2 currNDC = currClip.xy / currClip.w;
             float2 prevNDC = prevClip.xy / prevClip.w;

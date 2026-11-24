@@ -31,7 +31,7 @@ static const float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), floa
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
+void meshMain(in payload SSGIPayload _payload, out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
 {
     SetMeshOutputCounts(3, 1);
     if (threadID < 3)
@@ -54,17 +54,17 @@ float3 ssgi_world_position(float4x4 invViewProj, float2 uv, float depth)
 [shader("fragment")]
 float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
-    if (depth <= 0.0 || mul(ubo->proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5)
+    if (depth <= 0.0 || mul(ubo.proj, float4(0.0, 0.0, 2.0, 1.0)).w < 1.5)
         return float4(0.0);
 
     const float2 uv = (float2(pixelCoord) + 0.5) / viewportSize;
     const float3 worldPos = ssgi_world_position(pushConstant.invViewProj, uv, depth);
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     const float3 rawNormal = normalTex.Load(int3(pixelCoord, 0)).rgb;
     if (dot(rawNormal, rawNormal) < 1e-8)
         return float4(0.0);
@@ -72,10 +72,10 @@ float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Tar
     float3 tangent = normalize(cross(abs(N.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0), N));
     const float3 bitangent = cross(N, tangent);
 
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
-    const float4x4 viewProj = mul(ubo->proj, ubo->view);
-    const float3 start = worldPos + N * raster_surface_bias(ubo, worldPos, 0.01 * ubo->unitsPerMeter);
-    Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
+    const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float4x4 viewProj = mul(ubo.proj, ubo.view);
+    const float3 start = worldPos + N * raster_surface_bias(ubo, worldPos, 0.01 * ubo.unitsPerMeter);
+    Texture2D historyTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
     SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
 
     // Per pixel and frame: interleaved gradient noise and an R2 sequence for the rays' directions and the steps' offset.
@@ -102,8 +102,8 @@ float4 traceMain(MSOutput input, uniform PushConstantSSGI pushConstant) : SV_Tar
         const float3 direction = normalize(tangent * (r * cos(phi)) + bitangent * (r * sin(phi)) + N * sqrt(max(1.0 - xi.x, 0.0)));
 
         float rayLength = pushConstant.maxDistance;
-        const float3 viewDirection = mul(ubo->view, float4(direction, 0.0)).xyz;
-        const float startZ = mul(ubo->view, float4(start, 1.0)).z;
+        const float3 viewDirection = mul(ubo.view, float4(direction, 0.0)).xyz;
+        const float startZ = mul(ubo.view, float4(start, 1.0)).z;
         if (viewDirection.z < 0.0)
             rayLength = min(rayLength, max(startZ - 2.0 * nearPlane, 0.0) / -viewDirection.z);
         if (rayLength <= 0.0)
@@ -173,17 +173,17 @@ SSGIDenoiseOutput denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pu
     SSGIDenoiseOutput output;
     output.accumulated = float4(0.0);
     output.depthHistory = float2(0.0);
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const int2 pixelCoord = int2(input.pos.xy);
     const float2 viewportSize = pushConstant.viewportSize;
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     const float depth = depthTex.Load(int3(pixelCoord, 0)).r;
     if (depth <= 0.0)
         return output;
-    Texture2D rawTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawTextureIndex, 0));
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
+    Texture2D rawTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rawTextureIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.normalTextureIndex, 0));
     const float3 normal = normalize(normalTex.Load(int3(pixelCoord, 0)).rgb + float3(0.0, 1e-6, 0.0));
-    const float nearPlane = mul(ubo->proj, float4(0.0, 0.0, 1.0, 1.0)).z;
+    const float nearPlane = mul(ubo.proj, float4(0.0, 0.0, 1.0, 1.0)).z;
     const float viewZ = nearPlane / depth;
 
     // 5x5 neighbours on the same surface (view depth within 2%, normals alike), Gaussian falloff -- each also by its brightness on
@@ -224,12 +224,12 @@ SSGIDenoiseOutput denoiseMain(MSOutput input, uniform PushConstantSSGIDenoise pu
         const float2 previousUV = previousFrame.xy;
         if (previousFrame.w > 0.0 && all(previousUV > 0.0) && all(previousUV < 1.0))
         {
-            Texture2D<float2> historyDepth = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyDepthTextureIndex, 0));
+            Texture2D<float2> historyDepth = Texture2D<float2>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.historyDepthTextureIndex, 0));
             const float2 previous = historyDepth.Load(int3(int2(previousUV * viewportSize), 0));
-            const float expectedZ = mul(ubo->prevView, float4(worldPos, 1.0)).z;
+            const float expectedZ = mul(ubo.prevView, float4(worldPos, 1.0)).z;
             if (previous.x > 0.0 && abs(previous.x - expectedZ) < 0.05 * expectedZ)
             {
-                Texture2D historyTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
+                Texture2D historyTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.historyTextureIndex, 0));
                 SamplerState linearClamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
                 frames = min(previous.y + 1.0, max(pushConstant.maxHistory, 1.0));
                 result = lerp(historyTex.SampleLevel(linearClamp, previousUV, 0.0), current, 1.0 / frames);

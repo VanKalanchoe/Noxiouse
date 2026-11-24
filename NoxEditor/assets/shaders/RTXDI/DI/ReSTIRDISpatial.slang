@@ -18,12 +18,12 @@
 #define RTXDI_NEIGHBOR_OFFSETS_BUFFER g_NeighborOffsetsBuffer
 #define RTXDI_ALLOWED_BIAS_CORRECTION RTXDI_BIAS_CORRECTION_BASIC
 
-static RTXDI_PackedDIReservoir* g_InputReservoirBuffer;  // buffer A: read only
-static RTXDI_PackedDIReservoir* g_OutputReservoirBuffer; // buffer B: write only
-static float2* g_NeighborOffsetsBuffer; // reuses the same buffer/format as ReSTIR GI's spatial pass
+static BufferRef<RTXDI_PackedDIReservoir> g_InputReservoirBuffer;  // buffer A: read only
+static RWBufferRef<RTXDI_PackedDIReservoir> g_OutputReservoirBuffer; // buffer B: write only
+static BufferRef<float2> g_NeighborOffsetsBuffer; // reuses the same buffer/format as ReSTIR GI's spatial pass
 static PushConstantReSTIRDISpatial g_PushConstant;
-static UniformBufferObject* g_UBO;
-static LightData* g_LightData;
+static UniformBufferObject g_UBO;
+static BufferRef<LightData> g_LightData;
 
 typealias RAB_LightInfo = LightData;
 
@@ -181,15 +181,15 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos, bool isPreviousFrame)
         return s;
     }
 
-    if (g_UBO == nullptr) return s;
+    if (g_PushConstant.matrixReference == 0) return s;
     if (g_PushConstant.depthTextureIndex == 0xFFFFFFFF) return s;
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelPos, 0)).r;
     if (rawDepth <= 0.00001) return s;
 
     if (g_PushConstant.gbufferNormalIndex == 0xFFFFFFFF) return s;
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelPos, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6) return s;
@@ -277,6 +277,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRDISpatialPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -329,11 +330,11 @@ PSOutput fragMain(
     }
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_InputReservoirBuffer = (RTXDI_PackedDIReservoir*)pushConstant.inputReservoirReference;
-    g_OutputReservoirBuffer = (RTXDI_PackedDIReservoir*)pushConstant.outputReservoirReference;
-    g_NeighborOffsetsBuffer = (float2*)pushConstant.neighborOffsetsReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    g_InputReservoirBuffer = BufferRef<RTXDI_PackedDIReservoir>(pushConstant.inputReservoirReference);
+    g_OutputReservoirBuffer = RWBufferRef<RTXDI_PackedDIReservoir>(pushConstant.outputReservoirReference);
+    g_NeighborOffsetsBuffer = BufferRef<float2>(pushConstant.neighborOffsetsReference);
 
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
@@ -346,11 +347,11 @@ PSOutput fragMain(
     RAB_Surface surface = RAB_GetGBufferSurface(int2(pixelCoord), false);
     if (!surface.valid)
     {
-        g_OutputReservoirBuffer[pointer] = RTXDI_PackDIReservoir(RTXDI_EmptyDIReservoir());
+        g_OutputReservoirBuffer.Store(pointer, RTXDI_PackDIReservoir(RTXDI_EmptyDIReservoir()));
         return outVal;
     }
 
-    RTXDI_DIReservoir centerSample = RTXDI_UnpackDIReservoir(g_InputReservoirBuffer[pointer]);
+    RTXDI_DIReservoir centerSample = RTXDI_UnpackDIReservoir(g_InputReservoirBuffer.Load(pointer));
 
     RTXDI_RuntimeParameters rParams;
     rParams.neighborOffsetMask = pushConstant.neighborOffsetMask;
@@ -387,7 +388,7 @@ PSOutput fragMain(
         selectedLightSample
     );
 
-    g_OutputReservoirBuffer[pointer] = RTXDI_PackDIReservoir(resampledReservoir);
+    g_OutputReservoirBuffer.Store(pointer, RTXDI_PackDIReservoir(resampledReservoir));
 
     if (RTXDI_IsValidDIReservoir(resampledReservoir))
     {

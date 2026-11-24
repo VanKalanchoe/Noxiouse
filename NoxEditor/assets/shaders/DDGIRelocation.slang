@@ -38,6 +38,7 @@ static const float2 positions[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload DDGIRelocationPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex
@@ -55,7 +56,7 @@ void meshMain(
 [shader("fragment")]
 float4 fragMain(MSOutput input, uniform PushConstantDDGIBlend pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const uint2 pixel = uint2(input.pos.xy);
     const uint probeIndex = pixel.x + pixel.y * pushConstant.probesPerRow;
     if (probeIndex >= pushConstant.probeCountTotal || ddgi_probe_entered(ubo, probeIndex))
@@ -64,7 +65,7 @@ float4 fragMain(MSOutput input, uniform PushConstantDDGIBlend pushConstant) : SV
     float3 previous = float3(0.0);
     if (pushConstant.firstFrame == 0 && pushConstant.prevAtlasTextureIndex != 0xFFFFFFFF)
     {
-        Texture2D previousTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        Texture2D previousTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
         previous = previousTex.Load(int3(pixel, 0)).xyz;
         if (any(isnan(previous)) || any(isinf(previous)))
             previous = float3(0.0);
@@ -77,7 +78,7 @@ float4 fragMain(MSOutput input, uniform PushConstantDDGIBlend pushConstant) : SV
     const float minFrontfaceDistance = 0.2 * min(spacing.x, min(spacing.y, spacing.z));
     const float3 offset = previous * spacing;
 
-    Texture2D rayDataTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
+    Texture2D rayDataTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
     const float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
     const float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
 

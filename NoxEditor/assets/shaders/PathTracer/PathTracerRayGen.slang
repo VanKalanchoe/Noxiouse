@@ -5,9 +5,6 @@
 #include "../PathTracerSignals.slang"
 #include "../HeightFog.slang"
 
-[[vk::push_constant]]
-ConstantBuffer<PushConstantPathTracer> pushConstant;
-
 // One camera path to its end, then the branch the first smooth glass left (PathTracerHit.slang), if any. `dispersedChannel`: the
 // channel the camera's delta path took at a dispersive refraction (PathFlags::cameraDispersion), else 0.
 void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, out uint dispersedChannel)
@@ -48,14 +45,14 @@ void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, ou
 }
 
 [shader("raygeneration")]
-void rayGenMain()
+void rayGenMain(uniform PushConstantPathTracer pushConstant)
 {
     uint2 pixelPos = DispatchRaysIndex().xy;
     if (pixelPos.x >= uint(pushConstant.viewportSize.x) || pixelPos.y >= uint(pushConstant.viewportSize.y))
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    RaytracingAccelerationStructure as = LoadTlas(ubo.tlasDeviceAddress);
 
     uint rngState = Bridge::initRNG(pixelPos, pushConstant.frameIndex);
 
@@ -81,8 +78,8 @@ void rayGenMain()
         rrDepth[pixelPos] = 0.0; // reverse-Z invalid/background value
         // A primary miss is the sky: it moves with the camera's ROTATION only (a direction, w = 0), not its position.
         // Zero here told DLSS-RR the sky never moves, so it smeared and shimmered whenever the camera turned.
-        const float4 skyCurrClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(cameraRay.dir, 0.0)));
-        const float4 skyPrevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(cameraRay.dir, 0.0)));
+        const float4 skyCurrClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(cameraRay.dir, 0.0)));
+        const float4 skyPrevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(cameraRay.dir, 0.0)));
         const float2 skyMotion = (skyPrevClip.xy / skyPrevClip.w - skyCurrClip.xy / skyCurrClip.w) * float2(0.5, -0.5);
         rrMotion[pixelPos] = skyMotion;
         rrSpecularMotion[pixelPos] = skyMotion;
@@ -156,9 +153,9 @@ void rayGenMain()
             {
                 // The guide surface's point on this pixel's ray (its depth was written with the jittered projection).
                 const float2 ndc = (float2(pixelPos) + 0.5) / pushConstant.viewportSize * float2(2.0, -2.0) + float2(-1.0, 1.0);
-                const float4 world = mul(ubo->invViewProj, float4(ndc, depth, 1.0));
+                const float4 world = mul(ubo.invViewProj, float4(ndc, depth, 1.0));
                 const float3 hitPosition = world.xyz / world.w;
-                const float3 rayDirection = normalize(hitPosition - ubo->cameraWorldPos.xyz);
+                const float3 rayDirection = normalize(hitPosition - ubo.cameraWorldPos.xyz);
                 const float3 reflection = reflect(rayDirection, normalize(normalRoughness.xyz)) * specularHitDistance;
                 RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixelPos] =
                     Bridge::rrSpecularMotionVector(ubo, hitPosition, rayDirection, reflection);
@@ -169,13 +166,13 @@ void rayGenMain()
     // The air and the height fog between the camera and what its ray hit first (the sky: the height fog alone, as the skybox
     // has it), on each sample before it is accumulated or denoised -- it is linear (color * transmittance + scattered light).
     {
-        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+        Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
         const float depth = depthTex.Load(int3(pixelPos, 0));
         float4 fog;
         if (depth > 0.0)
         {
             const float2 ndc = (float2(pixelPos) + 0.5) / pushConstant.viewportSize * float2(2.0, -2.0) + float2(-1.0, 1.0);
-            const float4 world = mul(ubo->invViewProj, float4(ndc, depth, 1.0));
+            const float4 world = mul(ubo.invViewProj, float4(ndc, depth, 1.0));
             fog = sceneFogTerms(ubo, world.xyz / world.w);
         }
         else
@@ -194,9 +191,9 @@ void rayGenMain()
                       pushConstant.gbufferMaterialIndex, surfaceDiffFactor, surfaceSpecFactor, surfaceRoughness);
 
     float4 outDiffuse = NRD_PackSignal(pushConstant.denoiserMode, path.diffuseRadiance / surfaceDiffFactor,
-                                       path.primaryLobe == LobeType::DiffuseReflection ? path.firstBounceHitDist : 0.0, path.primaryViewZ, 1.0, ubo->unitsPerMeter);
+                                       path.primaryLobe == LobeType::DiffuseReflection ? path.firstBounceHitDist : 0.0, path.primaryViewZ, 1.0, ubo.unitsPerMeter);
     float4 outSpecular = NRD_PackSignal(pushConstant.denoiserMode, path.specularRadiance / surfaceSpecFactor,
-                                        (path.primaryLobe & (LobeType::Specular | LobeType::Delta)) != 0 ? path.firstBounceHitDist : 0.0, path.primaryViewZ, surfaceRoughness, ubo->unitsPerMeter);
+                                        (path.primaryLobe & (LobeType::Specular | LobeType::Delta)) != 0 ? path.firstBounceHitDist : 0.0, path.primaryViewZ, surfaceRoughness, ubo.unitsPerMeter);
 
     float4 outColor;
     if (pushConstant.denoiserMode != NRD_SIGNAL_RAW)
@@ -225,7 +222,7 @@ void rayGenMain()
         else
         {
             // Progressive Accumulation
-            Texture2D accumTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.accumulationTextureIndex, 0));
+            Texture2D accumTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.accumulationTextureIndex, 0));
             float4 prevColor = accumTex.Load(int3(pixelPos, 0));
             float blendFactor = 1.0 / float(pushConstant.sampleCount);
             outColor = float4(lerp(prevColor.rgb, radiance, blendFactor), 1.0);

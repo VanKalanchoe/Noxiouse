@@ -11,7 +11,7 @@
 // level for every texture (ray hits: lod >= 0). A texture reads them through its UV channel (material_texture_uv).
 struct MaterialSampleCoords
 {
-    GpuMaterial* material;
+    GpuMaterial material;
     float2 uv[2];
     float2 ddx[2];
     float2 ddy[2];
@@ -20,7 +20,7 @@ struct MaterialSampleCoords
     float lodBias;   // (with a footprint)
 };
 
-float4 material_sample(UniformBufferObject* ubo, uint textureIndex, int set, MaterialSampleCoords coords, SamplerState samplerState)
+float4 material_sample(UniformBufferObject ubo, uint textureIndex, int set, MaterialSampleCoords coords, SamplerState samplerState)
 {
     const float2 uv = material_texture_uv(coords.material, set, coords.uv[0], coords.uv[1]);
     if (coords.footprint > 0.0)
@@ -38,7 +38,7 @@ float4 material_sample(UniformBufferObject* ubo, uint textureIndex, int set, Mat
 }
 
 // A texture's value where the material has one, else `fallback` (the spec's "a missing texture reads 1").
-float4 material_sample_or(UniformBufferObject* ubo, uint textureIndex, int set, MaterialSampleCoords coords, SamplerState samplerState, float4 fallback)
+float4 material_sample_or(UniformBufferObject ubo, uint textureIndex, int set, MaterialSampleCoords coords, SamplerState samplerState, float4 fallback)
 {
     return textureIndex == 0xFFFFFFFF ? fallback : material_sample(ubo, textureIndex, set, coords, samplerState);
 }
@@ -64,7 +64,7 @@ float3 dispersion_iors(float ior, float dispersion)
 // map), `tangent` / `tangentSign` the vertex tangent frame (zero length: the mesh has none, so no anisotropy and no coat normal map),
 // `backFace` a double-sided surface seen from behind (its normals flipped, as the base's). `anisotropicT` is the world direction the
 // highlights stretch along (with MaterialLobeAnisotropy).
-GBufferLobes evaluate_material_lobes(UniformBufferObject* ubo, GpuMaterial* material, MaterialSampleCoords coords, SamplerState samplerState,
+GBufferLobes evaluate_material_lobes(UniformBufferObject ubo, GpuMaterial material, MaterialSampleCoords coords, SamplerState samplerState,
                                      float3 geometricNormal, float3 tangent, float tangentSign, bool backFace, out float3 anisotropicT)
 {
     GBufferLobes lobes = gbuffer_default_lobes();

@@ -7,14 +7,14 @@
 #define RTXDI_RESERVOIR_BLOCK_SIZE 16
 #endif
 
-static RTXDI_PackedPTReservoir* g_ReservoirBuffer;
+static RWBufferRef<RTXDI_PackedPTReservoir> g_ReservoirBuffer;
 #define RTXDI_PT_RESERVOIR_BUFFER g_ReservoirBuffer
-static RTXDI_PackedPTReservoir* g_PreservedReservoirBuffer;
+static RWBufferRef<RTXDI_PackedPTReservoir> g_PreservedReservoirBuffer;
 
 static PushConstantReSTIRPTInitial g_PushConstant;
-static UniformBufferObject* g_UBO;
-static LightData* g_LightData;
-static GpuRayTracingInstance* g_InstanceLUT;
+static UniformBufferObject g_UBO;
+static BufferRef<LightData> g_LightData;
+static BufferRef<GpuRayTracingInstance> g_InstanceLUT;
 
 // =========================================================================
 // RAB_Surface / RAB_Material -- v1: no PSR (Path Space Regularization / DLSS-RR guide) fields, no
@@ -325,7 +325,7 @@ float RAB_LightSampleSolidAnglePdf(RAB_LightSample lightSample) { return lightSa
 // tests visibility for every NEE candidate at initial-sampling time, see RAB_PathTracer.hlsli's CalculateNEE).
 bool RAB_GetConservativeVisibility(RAB_Surface surface, float3 lightPos)
 {
-    if (g_UBO->tlasDeviceAddress == 0)
+    if (g_UBO.tlasDeviceAddress == 0)
         return true;
 
     float3 toLight = lightPos - surface.worldPos;
@@ -340,7 +340,7 @@ bool RAB_GetConservativeVisibility(RAB_Surface surface, float3 lightPos)
     shadowRay.TMin = 0.01;
     shadowRay.TMax = max(0.02, dist - 0.02);
 
-    RaytracingAccelerationStructure as = RaytracingAccelerationStructure(g_UBO->tlasDeviceAddress);
+    RaytracingAccelerationStructure as = LoadTlas(g_UBO.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> sq;
     sq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE, 0xFF, shadowRay);
     sq.Proceed();
@@ -951,11 +951,11 @@ struct RTXDI_InitialSamplingPathTracerContext
 
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
     uint i0 = indices[primIndex * 3 + 0];
     uint i1 = indices[primIndex * 3 + 1];
     uint i2 = indices[primIndex * 3 + 2];
-    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+    BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
     float w0 = 1.0 - barycentrics.x - barycentrics.y;
     float w1 = barycentrics.x;
     float w2 = barycentrics.y;
@@ -998,7 +998,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     RAB_Surface surface = RAB_EmptySurface();
 
     GpuRayTracingInstance lut = g_InstanceLUT[rp.instanceID];
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
     uint i0 = indices[rp.primitiveIndex * 3 + 0];
     uint i1 = indices[rp.primitiveIndex * 3 + 1];
     uint i2 = indices[rp.primitiveIndex * 3 + 2];
@@ -1045,7 +1045,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     roughness = clamp(graphSurface.roughness, kMinRoughness, 1.0);
     if ((graphOutputs & MaterialGraphOutputNormal) != 0u)
         hitNormal = material_graph_world_normal(graphSurface.normal, hitNormal,
-                                                mul((float3x3)((GpuTransform*)g_UBO->sceneTransformsReference)[lut.instanceSlot].world,
+                                                mul((float3x3)BufferRef<GpuTransform>(g_UBO.sceneTransformsReference)[lut.instanceSlot].world,
                                                     w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz),
                                                 vertex0.tangent.w < 0.0 ? -1.0 : 1.0);
     else
@@ -1102,14 +1102,14 @@ RAB_RayPayload TraceNextBounce(RayDesc ray)
     RAB_RayPayload result = (RAB_RayPayload)0;
     result.instanceID = 0xFFFFFFFF;
 
-    RaytracingAccelerationStructure as = RaytracingAccelerationStructure(g_UBO->tlasDeviceAddress);
+    RaytracingAccelerationStructure as = LoadTlas(g_UBO.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
     rq.TraceRayInline(as, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
 
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
     while (rq.Proceed())
     {
-        uint instID = rq.CandidateRayInstanceCustomIndex();
+        uint instID = rq.CandidateInstanceID();
         uint primIndex = rq.CandidatePrimitiveIndex();
         GpuRayTracingInstance lut = g_InstanceLUT[instID];
 
@@ -1127,7 +1127,7 @@ RAB_RayPayload TraceNextBounce(RayDesc ray)
 
     if (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
-        result.instanceID = rq.CommittedRayInstanceCustomIndex();
+        result.instanceID = rq.CommittedInstanceID();
         result.primitiveIndex = rq.CommittedPrimitiveIndex();
         result.barycentrics = rq.CommittedTriangleBarycentrics();
         result.committedRayT = rq.CommittedRayT();
@@ -1443,6 +1443,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRPTInitialPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -1472,12 +1473,12 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos)
         g_PushConstant.gbufferAlbedoIndex == 0xFFFFFFFF || g_PushConstant.gbufferMaterialIndex == 0xFFFFFFFF)
         return s;
 
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.depthTextureIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelPos, 0)).r;
     if (rawDepth <= 0.00001)
         return s;
 
-    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.gbufferNormalIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelPos, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6)
@@ -1493,8 +1494,8 @@ RAB_Surface RAB_GetGBufferSurface(int2 pixelPos)
     s.viewDir = normalize(g_PushConstant.cameraWorldPos.xyz - s.worldPos);
     s.viewDepth = length(s.worldPos - g_PushConstant.cameraWorldPos.xyz);
 
-    Texture2D albedoTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.gbufferAlbedoIndex, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(g_UBO->imageHeapIndexOffset + g_PushConstant.gbufferMaterialIndex, 0));
+    Texture2D albedoTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.gbufferAlbedoIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(g_UBO.imageHeapIndexOffset + g_PushConstant.gbufferMaterialIndex, 0));
     float4 albedoSample = albedoTex.Load(int3(pixelPos, 0));
     float4 materialSample = materialTex.Load(int3(pixelPos, 0));
 
@@ -1536,13 +1537,13 @@ PSOutput fragMain(
         return outVal;
 
     g_PushConstant = pushConstant;
-    g_UBO = (UniformBufferObject*)pushConstant.matrixReference;
-    g_LightData = (LightData*)pushConstant.lightDataReference;
-    g_InstanceLUT = (GpuRayTracingInstance*)g_UBO->sceneRayTracingInstancesReference;
-    g_ReservoirBuffer = (RTXDI_PackedPTReservoir*)pushConstant.reservoirBufferReference;
-    g_PreservedReservoirBuffer = (RTXDI_PackedPTReservoir*)pushConstant.preservedReservoirReference;
+    g_UBO = loadUbo(pushConstant.matrixReference);
+    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    g_InstanceLUT = BufferRef<GpuRayTracingInstance>(g_UBO.sceneRayTracingInstancesReference);
+    g_ReservoirBuffer = RWBufferRef<RTXDI_PackedPTReservoir>(pushConstant.reservoirBufferReference);
+    g_PreservedReservoirBuffer = RWBufferRef<RTXDI_PackedPTReservoir>(pushConstant.preservedReservoirReference);
 
-    if (g_UBO->tlasDeviceAddress == 0)
+    if (g_UBO.tlasDeviceAddress == 0)
         return outVal;
 
     RTXDI_ReservoirBufferParameters resParams;

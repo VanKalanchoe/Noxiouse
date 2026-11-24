@@ -2,7 +2,9 @@
 #include "NoxCore/Animation/AnimationSequence.h"
 #include "NoxCore/Animation/Skeleton.h"
 
+#ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>

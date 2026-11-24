@@ -56,7 +56,7 @@ namespace Nox
             return;
 
         shaderio::PushConstantSceneOutline push{};
-        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+        push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
         push.toonOnly = settings.OutlineToonOnly ? 1u : 0u;
         push.color = glm::vec4(glm::clamp(settings.OutlineColor, glm::vec3(0.0f), glm::vec3(1.0f)), 1.0f);
         // The thickness is in output pixels: at a lower render resolution (DLSS) the same line is fewer render pixels.
@@ -137,7 +137,7 @@ namespace Nox
         imageDesc.Height = height;
         imageDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
         imageDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
-        const uint64_t uniforms = m_uniformBuffers[frameIndex].getDeviceAddress();
+        const uint64_t uniforms = bufferReadRef(m_uniformBuffers[frameIndex]);
 
         // Depth of field: needs the depth and a perspective camera (the depth's view distance is near / depth).
         const bool perspective = uniformData.nonJitteredProj[3][3] == 0.0f;

@@ -2,7 +2,7 @@
 
 #define RTXDI_ENABLE_STORE_RESERVOIR 0
 #define RTXDI_GI_RESERVOIR_BUFFER g_DummyReservoirBuffer
-RWStructuredBuffer<RTXDI_PackedGIReservoir> g_DummyReservoirBuffer;
+static BufferRef<RTXDI_PackedGIReservoir> g_DummyReservoirBuffer;
 #include "Rtxdi/GI/Reservoir.hlsli"
 #include "Rtxdi/Utils/Math.hlsli"
 #include "RTXDI/RTXDILightSampling.slang"
@@ -45,6 +45,7 @@ static const float2 uvs[3] = {
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
 void meshMain(
+    in payload ReSTIRGIPayload _payload,
     out indices uint3 triangles[1],
     out vertices MSOutput vertices[3],
     uint threadID : SV_GroupIndex,
@@ -116,8 +117,8 @@ float2 sample_vogel_disk(uint sampleIndex, uint sampleCount, float phiOffset, fl
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
     if (lut.vertexBufferAddress == 0) return float2(0.0);
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
-    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
+    BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
 
     uint i0, i1, i2;
     if (lut.indexBufferAddress != 0)
@@ -141,25 +142,25 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 }
 
 bool trace_visibility_alpha(
-    UniformBufferObject* ubo,
-    GpuRayTracingInstance* instanceLUTBuffer,
+    UniformBufferObject ubo,
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer,
     SamplerState textureSampler,
     float3 origin,
     float3 direction,
     float maxDist)
 {
-    if (ubo->tlasDeviceAddress == 0)
+    if (ubo.tlasDeviceAddress == 0)
     {
         return true;
     }
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
     RayDesc shadowRay;
     shadowRay.Origin = origin;
     shadowRay.Direction = direction;
     // World units (the project's: meters or centimeters).
-    shadowRay.TMin = 0.005 * ubo->unitsPerMeter;
-    shadowRay.TMax = max(0.01 * ubo->unitsPerMeter, maxDist);
+    shadowRay.TMin = 0.005 * ubo.unitsPerMeter;
+    shadowRay.TMax = max(0.01 * ubo.unitsPerMeter, maxDist);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
     shadowQuery.TraceRayInline(accelerationStructure,
@@ -168,7 +169,7 @@ bool trace_visibility_alpha(
 
     while (shadowQuery.Proceed())
     {
-        uint sInst = shadowQuery.CandidateRayInstanceCustomIndex();
+        uint sInst = shadowQuery.CandidateInstanceID();
         uint sPrim = shadowQuery.CandidatePrimitiveIndex();
         GpuRayTracingInstance sLut = instanceLUTBuffer[sInst];
         if (ray_shadow_passes(sLut))
@@ -193,8 +194,8 @@ bool trace_visibility_alpha(
 // Sample analytic lighting through RTXDI instead of walking every scene light at every GI vertex.
 // The selected sample's reservoir inverse PDF reconstructs the complete-light estimate.
 float3 sample_direct_light(
-    UniformBufferObject* ubo,
-    GpuRayTracingInstance* instanceLUTBuffer,
+    UniformBufferObject ubo,
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer,
     SamplerState textureSampler,
     RTXDILightSamplingParams lightSampling,
     float3 worldPos,
@@ -230,7 +231,7 @@ float3 sample_direct_light(
     if (lightSample.lightType == 0)
     {
         lightDir = normalize(lightSample.normal);
-        lightDist = 100000.0 * ubo->unitsPerMeter;
+        lightDist = 100000.0 * ubo.unitsPerMeter;
     }
     else
     {
@@ -249,7 +250,7 @@ float3 sample_direct_light(
     float3 shadowNormal = doubleSided && signedNdotL < 0.0 ? -normal : normal;
     bool visible = trace_visibility_alpha(
         ubo, instanceLUTBuffer, textureSampler,
-        worldPos + shadowNormal * (0.02 * ubo->unitsPerMeter), lightDir, lightDist - 0.02 * ubo->unitsPerMeter);
+        worldPos + shadowNormal * (0.02 * ubo.unitsPerMeter), lightDir, lightDist - 0.02 * ubo.unitsPerMeter);
     if (!visible)
     {
         return float3(0.0);
@@ -260,8 +261,8 @@ float3 sample_direct_light(
 }
 
 float evaluate_soft_visibility_alpha(
-    UniformBufferObject* ubo,
-    GpuRayTracingInstance* instanceLUTBuffer,
+    UniformBufferObject ubo,
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer,
     SamplerState textureSampler,
     LightData light,
     float3 worldPos,
@@ -340,38 +341,38 @@ PSOutput fragMain(
         return outVal;
     }
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     RTXDI_ReservoirBufferParameters resParams;
     resParams.reservoirBlockRowPitch = pushConstant.reservoirBlockRowPitch;
     resParams.reservoirArrayPitch = pushConstant.reservoirArrayPitch;
 
     uint pointer = RTXDI_ReservoirPositionToPointer(resParams, pixelCoord, 0);
-    RTXDI_PackedGIReservoir* reservoirBuffer = (RTXDI_PackedGIReservoir*)pushConstant.reservoirBufferReference;
+    RWBufferRef<RTXDI_PackedGIReservoir> reservoirBuffer = RWBufferRef<RTXDI_PackedGIReservoir>(pushConstant.reservoirBufferReference);
 
-    if (ubo->tlasDeviceAddress == 0 || ubo->sceneRayTracingInstancesReference == 0)
+    if (ubo.tlasDeviceAddress == 0 || ubo.sceneRayTracingInstancesReference == 0)
     {
-        reservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
+        reservoirBuffer.Store(pointer, (RTXDI_PackedGIReservoir)0);
         return outVal;
     }
 
     // 1. Read Depth Buffer (Reverse-Z: 1.0 = near, 0.0 = infinity)
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float rawDepth = depthTex.Load(int3(pixelCoord, 0)).r;
 
     if (rawDepth <= 0.00001)
     {
         // Sky / void: Store empty reservoir
-        reservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
+        reservoirBuffer.Store(pointer, (RTXDI_PackedGIReservoir)0);
         return outVal;
     }
 
     // 2. Read Primary Normal Buffer (m_gbufferNormal stores raw world normals directly in [-1, 1])
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixelCoord, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     if (lenSqN < 1e-6)
     {
-        reservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
+        reservoirBuffer.Store(pointer, (RTXDI_PackedGIReservoir)0);
         return outVal;
     }
     float3 normal = normalSample.rgb * rsqrt(lenSqN);
@@ -392,25 +393,25 @@ PSOutput fragMain(
     float rayPdf = max(NdotL / 3.14159265359, 1e-6);
 
     // 5. Trace Indirect Diffuse Ray against TLAS
-    float3 rayOrigin = worldPos + normal * (0.01 * ubo->unitsPerMeter);
+    float3 rayOrigin = worldPos + normal * (0.01 * ubo.unitsPerMeter);
     RayDesc diffuseRay;
     diffuseRay.Origin = rayOrigin;
     diffuseRay.Direction = rayDir;
-    diffuseRay.TMin = 0.005 * ubo->unitsPerMeter;
-    diffuseRay.TMax = 1000.0 * ubo->unitsPerMeter;
+    diffuseRay.TMin = 0.005 * ubo.unitsPerMeter;
+    diffuseRay.TMax = 1000.0 * ubo.unitsPerMeter;
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
     let rayFlags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 
     rq.TraceRayInline(accelerationStructure, rayFlags, 0xFF, diffuseRay);
 
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
 
     while (rq.Proceed())
     {
-        uint instanceID = rq.CandidateRayInstanceCustomIndex();
+        uint instanceID = rq.CandidateInstanceID();
         uint primIndex = rq.CandidatePrimitiveIndex();
 
         GpuRayTracingInstance lut = instanceLUTBuffer[instanceID];
@@ -438,15 +439,15 @@ PSOutput fragMain(
     if (!hit)
     {
         // Miss: Sample Environment Cubemap Skybox
-        if (ubo->prefilteredMapIndex != 0xFFFFFFFF)
+        if (ubo.prefilteredMapIndex != 0xFFFFFFFF)
         {
-            TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+            TextureCube prefilteredTex = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
             SamplerState samplerPrefiltered = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0));
-            hitRadiance = prefilteredTex.SampleLevel(samplerPrefiltered, rayDir, 0).rgb * ubo->scaleIBLAmbient;
+            hitRadiance = prefilteredTex.SampleLevel(samplerPrefiltered, rayDir, 0).rgb * ubo.scaleIBLAmbient;
         }
         else
         {
-            hitRadiance = lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(rayDir.y * 0.5 + 0.5)) * ubo->scaleIBLAmbient;
+            hitRadiance = lerp(float3(0.08, 0.08, 0.12), float3(0.4, 0.6, 0.95), saturate(rayDir.y * 0.5 + 0.5)) * ubo.scaleIBLAmbient;
         }
         hitPos = worldPos + rayDir * 1000.0;
         hitNormal = -rayDir;
@@ -454,18 +455,18 @@ PSOutput fragMain(
     else
     {
         // Closest Hit Secondary Surface
-        uint committedInstanceID = rq.CommittedRayInstanceCustomIndex();
+        uint committedInstanceID = rq.CommittedInstanceID();
         uint committedPrimIndex = rq.CommittedPrimitiveIndex();
         float2 committedBary = rq.CommittedTriangleBarycentrics();
 
         GpuRayTracingInstance hitLut = instanceLUTBuffer[committedInstanceID];
         if (hitLut.vertexBufferAddress == 0)
         {
-            reservoirBuffer[pointer] = (RTXDI_PackedGIReservoir)0;
+            reservoirBuffer.Store(pointer, (RTXDI_PackedGIReservoir)0);
             return outVal;
         }
 
-        uint32_t* indices = (uint32_t*)hitLut.indexBufferAddress;
+        BufferRef<uint32_t> indices = BufferRef<uint32_t>(hitLut.indexBufferAddress);
 
         uint i0, i1, i2;
         if (hitLut.indexBufferAddress != 0)
@@ -532,7 +533,7 @@ PSOutput fragMain(
 
     // 6. Pack Initial Reservoir (M = 1, weightSum = 1.0 / rayPdf, age = 0)
     RTXDI_GIReservoir reservoir = RTXDI_MakeGIReservoir(hitPos, hitNormal, hitRadiance, rayPdf);
-    reservoirBuffer[pointer] = RTXDI_PackGIReservoir(reservoir, 0);
+    reservoirBuffer.Store(pointer, RTXDI_PackGIReservoir(reservoir, 0));
 
     outVal.initialDiffuse = float4(hitRadiance, 1.0);
     return outVal;

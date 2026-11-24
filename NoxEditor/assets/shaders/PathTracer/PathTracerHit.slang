@@ -5,13 +5,10 @@
 #include "PathTracerNEE.slang"
 #include "../MipFeedback.slang"
 
-[[vk::push_constant]]
-ConstantBuffer<PushConstantPathTracer> pushConstant;
-
 // RTXPT's realtime firefly filter threshold: 0.1 * sqrt(the luminance the exposure maps to middle grey) * 1000 (Sample.cpp,
 // ToneMappingPass::GetPreExposedGray). It was fixed at the manual-exposure value (exposure 1): with auto exposure the light near
 // lamps and every bounce of it was clamped several times harder than RTXPT does -- lamp-lit walls and rooms came out dark.
-float fireflyThreshold(UniformBufferObject* ubo)
+float fireflyThreshold(UniformBufferObject ubo, PushConstantPathTracer pushConstant)
 {
     const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
                                           pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
@@ -37,12 +34,12 @@ bool rrPlanePassesThrough(GpuRayTracingInstance instance)
 }
 
 // Where a stable plane leaving along `direction` ends: the first surface it does not pass through. False: the sky.
-bool rrPlaneBase(float3 origin, float3 direction, float rayConeWidth, UniformBufferObject* ubo, out Bridge::SurfaceData base, out float hitT)
+bool rrPlaneBase(float3 origin, float3 direction, float rayConeWidth, UniformBufferObject ubo, out Bridge::SurfaceData base, out float hitT)
 {
     base = (Bridge::SurfaceData)0;
     hitT = 0.0;
-    RaytracingAccelerationStructure tlas = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-    GpuRayTracingInstance* instances = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    RaytracingAccelerationStructure tlas = LoadTlas(ubo.tlasDeviceAddress);
+    BufferRef<GpuRayTracingInstance> instances = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
@@ -52,7 +49,7 @@ bool rrPlaneBase(float3 origin, float3 direction, float rayConeWidth, UniformBuf
     query.TraceRayInline(tlas, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, ray);
     while (query.Proceed())
     {
-        const uint slot = query.CandidateRayInstanceCustomIndex();
+        const uint slot = query.CandidateInstanceID();
         if (rrPlanePassesThrough(instances[slot]))
             continue;
         if (instances[slot].alphaMode == 0 || Bridge::AlphaTest(slot, query.CandidatePrimitiveIndex(), query.CandidateTriangleBarycentrics(), ubo))
@@ -60,8 +57,8 @@ bool rrPlaneBase(float3 origin, float3 direction, float rayConeWidth, UniformBuf
     }
     if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
         return false;
-    const uint slot = query.CommittedRayInstanceCustomIndex();
-    const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[slot].world;
+    const uint slot = query.CommittedInstanceID();
+    const float4x4 world = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[slot].world;
     hitT = query.CommittedRayT();
     base = Bridge::loadSurface(slot, query.CommittedPrimitiveIndex(), query.CommittedTriangleBarycentrics(), direction,
                                rayConeWidth, ubo, float3x4(world[0], world[1], world[2]));
@@ -69,11 +66,11 @@ bool rrPlaneBase(float3 origin, float3 direction, float rayConeWidth, UniformBuf
 }
 
 // RR's depth and motion for a point the camera sees (directly, or the virtual point a reflection shows).
-void writeRRDepthMotion(uint2 pixel, float3 position, UniformBufferObject* ubo)
+void writeRRDepthMotion(uint2 pixel, float3 position, UniformBufferObject ubo, PushConstantPathTracer pushConstant)
 {
-    const float4 depthClip = mul(ubo->proj, mul(ubo->view, float4(position, 1.0)));
-    const float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(position, 1.0)));
-    const float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(position, 1.0)));
+    const float4 depthClip = mul(ubo.proj, mul(ubo.view, float4(position, 1.0)));
+    const float4 currClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(position, 1.0)));
+    const float4 prevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(position, 1.0)));
     const float2 motion = (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5);
     RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0))[pixel] = depthClip.z / depthClip.w;
     RWTexture2D<float2>.Handle(uint2(pushConstant.rrMotionStorageIndex, 0))[pixel] = motion;
@@ -83,7 +80,7 @@ void writeRRDepthMotion(uint2 pixel, float3 position, UniformBufferObject* ubo)
 // The guides at the glass where the camera's path splits (PathTracerHit's stable-plane split): `pane` the glass, `thp` the path's
 // throughput reaching it, the two delta lobes as RTXPT evaluates them (its planes' throughputs).
 void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, DeltaLobe transmitted, DeltaLobe reflected, uint paneFlags,
-                        float rayConeWidth, UniformBufferObject* ubo)
+                        float rayConeWidth, UniformBufferObject ubo, PushConstantPathTracer pushConstant)
 {
     const float thpT = saturate(Average(thp * transmitted.thp));
     const float thpR = saturate(Average(thp * reflected.thp));
@@ -135,13 +132,13 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
         float4(normalLength >= 1e-5 ? normal / normalLength : float3(0.0, 0.0, 1.0), roughness);
     if (pushConstant.rrDepthStorageIndex != 0xFFFFFFFF)
     {
-        writeRRDepthMotion(pixel, dominantPosition, ubo);
+        writeRRDepthMotion(pixel, dominantPosition, ubo, pushConstant);
         RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixel] = specularMotion;
     }
 }
 
 [shader("closesthit")]
-void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib)
+void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib, uniform PushConstantPathTracer pushConstant)
 {
     PathState path = PathPayload::unpack(payload);
 
@@ -155,8 +152,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
 
     uint vertexIdx = path.getVertexIndex();
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
-    RaytracingAccelerationStructure as = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    RaytracingAccelerationStructure as = LoadTlas(ubo.tlasDeviceAddress);
 
     // A rect light's face in front of the surface, seen by the camera or in a mirror (its own sampling covers every other path).
     if (vertexIdx == 1 || path.hasFlag(PathFlags::delta))
@@ -227,11 +224,11 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // Texture streaming: the mips the surfaces the camera sees (directly, in mirrors, through glass) ask for, with the ray cone LOD
     // the samples use. Raster feedback alone asked for the render resolution's mips without the path tracer's sharper bias, and
     // never for what is seen in a mirror.
-    if ((vertexIdx == 1 || path.hasFlag(PathFlags::deltaOnlyPath)) && ubo->mipFeedbackReference != 0 &&
-        isMipFeedbackPixel(int2(path.id & 0xFFFFu, path.id >> 16), ubo->mipFeedbackFrame))
+    if ((vertexIdx == 1 || path.hasFlag(PathFlags::deltaOnlyPath)) && ubo.mipFeedbackReference != 0 &&
+        isMipFeedbackPixel(int2(path.id & 0xFFFFu, path.id >> 16), ubo.mipFeedbackFrame))
     {
-        GpuRayTracingInstance lut = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[InstanceID()];
-        GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[lut.materialIndex];
+        GpuRayTracingInstance lut = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[InstanceID()];
+        GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[lut.materialIndex];
         const uint textures[5] = { lut.baseColorTextureIndex, lut.metallicRoughnessTextureIndex, lut.normalTextureIndex,
                                    lut.emissiveTextureIndex, lut.transmissionTextureIndex };
         const int sets[5] = { material.baseColorTextureSet, material.physicalDescriptorTextureSet, material.normalTextureSet,
@@ -245,7 +242,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             // Each texture where its UV channel reads it (KHR_texture_transform), its footprint scaled by the channel.
             reportMaterialTextureLod(ubo, textures[t], material_texture_uv(material, sets[t], surface.meshUV0, surface.meshUV1),
                                      log2(max(surface.uvFootprint * material_texture_uv_scale(material, sets[t]), 1e-20)) +
-                                         0.5 * log2(float(width) * float(height)) + ubo->pathTracerTexLodBias);
+                                         0.5 * log2(float(width) * float(height)) + ubo.pathTracerTexLodBias);
         }
     }
 
@@ -276,12 +273,12 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     const bool rrVisibleSurface = !path.hasFlag(PathFlags::rrGuidesDone) &&
                                   (vertexIdx == 1 || (vertexIdx > 1 && path.hasFlag(PathFlags::deltaOnlyPath)));
     if (pushConstant.rrDepthStorageIndex != 0xFFFFFFFF && rrVisibleSurface)
-        writeRRDepthMotion(uint2(path.id & 0xFFFFu, path.id >> 16), surface.shadingData.posW, ubo);
+        writeRRDepthMotion(uint2(path.id & 0xFFFFu, path.id >> 16), surface.shadingData.posW, ubo, pushConstant);
 
     // Record primary surface view Z and first bounce hit distance for NRD denoiser
     if (vertexIdx == 1)
     {
-        float4 viewPos = mul(ubo->view, float4(surface.shadingData.posW, 1.0));
+        float4 viewPos = mul(ubo.view, float4(surface.shadingData.posW, 1.0));
         path.primaryViewZ = abs(viewPos.z);
 
         if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
@@ -335,7 +332,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // bright bulbs seen through a window kept only ~38.
         const float3 weightedEmission = surface.emission * misWeight;
         float3 filteredEmission = (vertexIdx == 1 || path.hasFlag(PathFlags::deltaTree))
-            ? weightedEmission : FireflyFilter(weightedEmission, fireflyThreshold(ubo), path.fireflyFilterK);
+            ? weightedEmission : FireflyFilter(weightedEmission, fireflyThreshold(ubo, pushConstant), path.fireflyFilterK);
         float3 emissionContrib = path.thp * filteredEmission;
         path.L.rgb += emissionContrib;
         if (vertexIdx == 1 || path.hasFlag(PathFlags::deltaTree))
@@ -371,7 +368,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // the fewer candidates of a bounce, and more of its light firefly-clamped away): every candidate loads a triangle and a texel, and
     // 12 at every vertex of every path cost more than the rest of the path tracer.
     const bool cameraSurface = vertexIdx == 1 || path.hasFlag(PathFlags::deltaTree);
-    const uint candidateSamples = (ubo->emissiveLightCount > 0 && cameraSurface) ? max(pushConstant.neeCandidateSamples, 8u)
+    const uint candidateSamples = (ubo.emissiveLightCount > 0 && cameraSurface) ? max(pushConstant.neeCandidateSamples, 8u)
                                                                                  : pushConstant.neeCandidateSamples;
     // No light sampling on a surface with only delta lobes (smooth glass, mirrors): no direction of light could be weighed, RTXPT
     // skips it (PathTracerNEE.hlsli) -- the light beyond is found by the path going on.
@@ -384,7 +381,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
 
     if (any(directLight > float3(0.0)))
     {
-        float3 filteredDirect = FireflyFilter(directLight, fireflyThreshold(ubo), path.fireflyFilterK);
+        float3 filteredDirect = FireflyFilter(directLight, fireflyThreshold(ubo, pushConstant), path.fireflyFilterK);
         float filterScale = Average(directLight) > 0.0 ? Average(filteredDirect) / Average(directLight) : 1.0;
         directLight = filteredDirect;
         directDiffuse *= filterScale;
@@ -455,8 +452,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF && !path.hasFlag(PathFlags::rrGuidesDone))
             {
                 writeSplitRRGuides(uint2(path.id & 0xFFFFu, path.id >> 16), surface, path.thp, transmitted, reflected,
-                                   ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[InstanceID()].pathTracerFlags,
-                                   path.rayCone.getWidth(), ubo);
+                                   BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[InstanceID()].pathTracerFlags,
+                                   path.rayCone.getWidth(), ubo, pushConstant);
                 path.setFlag(PathFlags::rrGuidesDone, true);
             }
 

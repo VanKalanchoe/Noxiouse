@@ -27,7 +27,7 @@ static const float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), floa
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(3, 1, 1)]
-void meshMain(out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
+void meshMain(in payload GuidesPayload _payload, out indices uint3 triangles[1], out vertices MSOutput vertices[3], uint threadID : SV_GroupIndex)
 {
     SetMeshOutputCounts(3, 1);
     if (threadID < 3)
@@ -46,11 +46,11 @@ struct GuidesOutput
 GuidesOutput fragMain(MSOutput input, uniform PushConstantNRDGuides pushConstant)
 {
     GuidesOutput output;
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     int2 pixel = int2(input.pos.xy);
 
     // Reverse-Z: nothing drawn at 0 -- infinitely far, facing up, fully rough.
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float depth = depthTex.Load(int3(pixel, 0));
     if (depth <= 0.0)
     {
@@ -62,12 +62,12 @@ GuidesOutput fragMain(MSOutput input, uniform PushConstantNRDGuides pushConstant
     float2 uv = (float2(pixel) + 0.5) / pushConstant.viewportSize;
     float4 worldPosH = mul(pushConstant.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
     float3 worldPos = worldPosH.xyz / worldPosH.w;
-    output.viewZ = abs(mul(ubo->view, float4(worldPos, 1.0)).z);
+    output.viewZ = abs(mul(ubo.view, float4(worldPos, 1.0)).z);
 
     // The G-buffer normal's alpha is the roughness the lighting uses; the reflections are of the reflection layer (a clear coat's
     // blend, gbuffer_reflection_layer), so the guide describes that.
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
     float4 normalSample = normalTex.Load(int3(pixel, 0));
     float lenSqN = dot(normalSample.rgb, normalSample.rgb);
     float3 normal = lenSqN > 1e-6 ? normalSample.rgb * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);

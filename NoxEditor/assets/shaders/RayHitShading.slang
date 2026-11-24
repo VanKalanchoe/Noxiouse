@@ -10,7 +10,7 @@
 // Intersection UV interpolation
 float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycentrics)
 {
-    uint32_t* indices = (uint32_t*)lut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(lut.indexBufferAddress);
     uint i0, i1, i2;
     if (lut.indexBufferAddress != 0)
     {
@@ -25,7 +25,7 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
         i2 = primIndex * 3 + 2;
     }
 
-    PackedVertex* vertices = (PackedVertex*)lut.vertexBufferAddress;
+    BufferRef<PackedVertex> vertices = BufferRef<PackedVertex>(lut.vertexBufferAddress);
     float2 uv0 = vertices[i0].uv0;
     float2 uv1 = vertices[i1].uv0;
     float2 uv2 = vertices[i2].uv0;
@@ -41,11 +41,11 @@ float2 intersection_uv(GpuRayTracingInstance lut, uint primIndex, float2 barycen
 // ExcludeFromNEE surfaces (RTXPT's window and lantern glass) through with their color only; glass seen through (and any transmission without an RTXPT material file)
 // tinted by its transmission and base color; blended surfaces by 1 - alpha; alpha-masked ones cut out; anything else 0. Glass used
 // to let light through untouched: a wall lantern's yellow panes lit the wall with its bulb's white.
-// [noinline]: one copy of this secondary-ray code, called where it is needed, instead of being inlined into every caller -- the forward
+// NOX_NOINLINE: one copy of this secondary-ray code, called where it is needed, instead of being inlined into every caller -- the forward
 // shader inlined it several times over (refraction -> hit shading -> lights -> shadow rays): a single 276,000-line function, 4.7 MB of
 // SPIR-V for fragMain, 20 s in Slang and about 30 s in the GPU driver. With these six: 1.2 MB, 3 s (the main lighting stays inlined).
-[noinline]
-float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstance lut, uint primitive, float2 barycentrics)
+NOX_NOINLINE
+float3 ray_occluder_transmittance(UniformBufferObject ubo, GpuRayTracingInstance lut, uint primitive, float2 barycentrics)
 {
     if ((lut.pathTracerFlags & PathTracerExcludeFromNEE) != 0)
         return lut.transmissionFactor > 0.0 ? saturate(lut.baseColorFactor.rgb) : float3(1.0);
@@ -63,7 +63,7 @@ float3 ray_occluder_transmittance(UniformBufferObject* ubo, GpuRayTracingInstanc
 
 // What reaches `origin` along `direction` from `maxDistance` away: 0 behind an opaque surface, else the product of what every surface
 // passed lets through (ray_occluder_transmittance), as the path tracer's shadow rays (PathTracerNEE.slang visibleNEECandidate).
-float3 ray_transmittance(UniformBufferObject* ubo, float3 origin, float3 direction, float tMin, float maxDistance)
+float3 ray_transmittance(UniformBufferObject ubo, float3 origin, float3 direction, float tMin, float maxDistance)
 {
     RayDesc shadowRay;
     shadowRay.Origin = origin;
@@ -71,14 +71,14 @@ float3 ray_transmittance(UniformBufferObject* ubo, float3 origin, float3 directi
     shadowRay.TMin = tMin;
     shadowRay.TMax = maxDistance;
 
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> shadowRq;
     shadowRq.TraceRayInline(accelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xFF, shadowRay);
     float3 transmittance = float3(1.0);
     while (shadowRq.Proceed())
     {
-        transmittance *= ray_occluder_transmittance(ubo, instanceLUTBuffer[shadowRq.CandidateRayInstanceCustomIndex()],
+        transmittance *= ray_occluder_transmittance(ubo, instanceLUTBuffer[shadowRq.CandidateInstanceID()],
                                                     shadowRq.CandidatePrimitiveIndex(), shadowRq.CandidateTriangleBarycentrics());
         if (all(transmittance < 1e-3))
             shadowRq.CommitNonOpaqueTriangleHit();
@@ -89,8 +89,8 @@ float3 ray_transmittance(UniformBufferObject* ubo, float3 origin, float3 directi
 // A ray hit's diffuse albedo, specular F0 and perceptual roughness, as the path tracer reads its material (PathTracerBridge.slang):
 // metallic-roughness from the factors and the metallic-roughness texture (G roughness, B metallic) with the IoR's dielectric F0;
 // specular-glossiness (RGB specular, A glossiness) converted to it (specGlossToMetalRough there, Donut's formula).
-[noinline]
-void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 color, float2 uv, SamplerState textureSampler,
+NOX_NOINLINE
+void hit_material(UniformBufferObject ubo, GpuRayTracingInstance lut, float3 color, float2 uv, SamplerState textureSampler,
                   out float3 albedo, out float3 specularF0, out float roughness, out float metallic)
 {
     const float ior = lut.ior > 0.0 ? lut.ior : 1.5;
@@ -138,18 +138,18 @@ void hit_material(UniformBufferObject* ubo, GpuRayTracingInstance lut, float3 co
 // Diffuse only (the hit's own reflections are not traced). For rays traced from raster passes: RT reflections
 // (Reflection.slang), RT refraction (Material_TransparentLit_Mesh.slang). `emissionWeight` scales the hit's emission: the MIS weight
 // of a ray whose pass also samples the emissive triangles as lights (Reflection.slang), 1 otherwise.
-[noinline]
-float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 rayOrigin, float3 R, float hitT,
+NOX_NOINLINE
+float3 shadeRayHit(UniformBufferObject ubo, uint instanceSlot, uint primitive, float2 barycentrics, float3 rayOrigin, float3 R, float hitT,
                    float emissionWeight = 1.0)
 {
-    GpuRayTracingInstance* instanceLUTBuffer = (GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference;
-    RaytracingAccelerationStructure accelerationStructure = RaytracingAccelerationStructure(ubo->tlasDeviceAddress);
+    BufferRef<GpuRayTracingInstance> instanceLUTBuffer = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference);
+    RaytracingAccelerationStructure accelerationStructure = LoadTlas(ubo.tlasDeviceAddress);
     SamplerState textureSampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
     uint committedPrimIndex = primitive;
     float2 committedBary = barycentrics;
 
     GpuRayTracingInstance hitLut = instanceLUTBuffer[instanceSlot];
-    uint32_t* indices = (uint32_t*)hitLut.indexBufferAddress;
+    BufferRef<uint32_t> indices = BufferRef<uint32_t>(hitLut.indexBufferAddress);
 
     uint i0, i1, i2;
     if (hitLut.indexBufferAddress != 0)
@@ -174,7 +174,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     float w2 = committedBary.y;
 
     // Each texture through its own UV channel (KHR_texture_transform: material_texture_uv).
-    GpuMaterial* hitMaterial = &((GpuMaterial*)ubo->sceneMaterialsReference)[hitLut.materialIndex];
+    GpuMaterial hitMaterial = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[hitLut.materialIndex];
     const float2 meshUV0 = w0 * vertex0.uv0 + w1 * vertex1.uv0 + w2 * vertex2.uv0;
     const float2 meshUV1 = w0 * vertex0.uv1 + w1 * vertex1.uv1 + w2 * vertex2.uv1;
     float2 hitUV = material_texture_uv(hitMaterial, hitMaterial.baseColorTextureSet, meshUV0, meshUV1);
@@ -222,7 +222,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     roughness = graphSurface.roughness;
     if ((graphOutputs & MaterialGraphOutputNormal) != 0u)
     {
-        const float3x3 graphWorld = (float3x3)((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
+        const float3x3 graphWorld = (float3x3)BufferRef<GpuTransform>(ubo.sceneTransformsReference)[instanceSlot].world;
         hitNormal = material_graph_world_normal(graphSurface.normal, hitNormal,
                                                 mul(graphWorld, w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz),
                                                 vertex0.tangent.w < 0.0 ? -1.0 : 1.0);
@@ -234,10 +234,10 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // sheen and clear coat over what this last bounce has (no coat normal map or anisotropy: the hit has no tangent frame here).
     float3 specularF90 = float3(1.0);
     bool hasLobes = false;
-    LobeShading lobeShading;
+    LobeShading lobeShading = (LobeShading)0;
     if (hitLut.lobes != 0u && hitLut.workflow != 1.0)
     {
-        GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[hitLut.materialIndex];
+        GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[hitLut.materialIndex];
         MaterialSampleCoords coords;
         coords.material = material;
         coords.uv[0] = meshUV0;
@@ -248,7 +248,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
         coords.lodBias = 0.0;
         // The hit's tangent frame (the vertex tangents through the instance's transform: a tangent runs along the surface, so the model
         // matrix, not the normal matrix), for a coat normal map and the anisotropy direction.
-        const float3x3 world = (float3x3)((GpuTransform*)ubo->sceneTransformsReference)[instanceSlot].world;
+        const float3x3 world = (float3x3)BufferRef<GpuTransform>(ubo.sceneTransformsReference)[instanceSlot].world;
         float3 hitTangent = mul(world, w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz);
         const bool backFace = hitLut.doubleSided != 0 && dot(mul((float3x3)hitLut.normalMatrix, w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal), -R) < 0.0;
         float3 anisotropicT;
@@ -275,13 +275,14 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     uint lightRng = (primitive * 9781u + instanceSlot * 6271u + asuint(hitT) * 26699u) | 1u;
     // Lights closer than 10 cm count as 10 cm away (as the screen probes' rays do): a hit right next to a lamp otherwise gets an
     // inverse-square spike that a 1-sample reflection shows as fireflies, worst at night where lamps are most of the light.
-    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.1 * ubo->unitsPerMeter, lightRng);
+    const LightSelection selectedLights = select_lights(ubo, hitPos, hitNormal, 0.1 * ubo.unitsPerMeter, lightRng);
     float3 directIrradiance = float3(0.0);
+    [loop]
     for (uint i = 0; i < selectedLights.count; ++i)
     {
         directIrradiance += selectedLights.irradiance[i] *
-                            ray_transmittance(ubo, hitPos + hitNormal * (0.02 * ubo->unitsPerMeter), selectedLights.direction[i],
-                                              0.005 * ubo->unitsPerMeter, max(selectedLights.distance[i] - 0.02 * ubo->unitsPerMeter, 0.0));
+                            ray_transmittance(ubo, hitPos + hitNormal * (0.02 * ubo.unitsPerMeter), selectedLights.direction[i],
+                                              0.005 * ubo.unitsPerMeter, max(selectedLights.distance[i] - 0.02 * ubo.unitsPerMeter, 0.0));
     }
     const float3 directLight = (albedo / 3.14159265) * directIrradiance;
 
@@ -289,7 +290,7 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // times it): the same light the camera sees on that surface where it is on screen, else DDGI or the environment. (The
     // environment's term matches getIBLContribution's diffuse in PBRLighting.slang exactly -- an extra * 0.2 here once made
     // reflections of environment-lit scenes such as Bistro almost black.)
-    float3 ambientLight = albedo * 0.05 * ubo->scaleIBLAmbient;
+    float3 ambientLight = albedo * 0.05 * ubo.scaleIBLAmbient;
     float3 sceneIrradiance;
     float specularOcclusion = 1.0;
     if (sample_scene_gi(ubo, hitPos, hitNormal, hitNormal, -R, sceneIrradiance))
@@ -306,17 +307,17 @@ float3 shadeRayHit(UniformBufferObject* ubo, uint instanceSlot, uint primitive, 
     // (reflection captures for the last bounce). Without it every reflection of a metal was black: the headlight's chrome reflector,
     // which the path tracer shows mirroring the street, its rays bouncing on.
     float3 specularLight = float3(0.0);
-    if (ubo->prefilteredMapIndex != 0xFFFFFFFF && ubo->brdfLutIndex != 0xFFFFFFFF && any(specularF0 > 0.0))
+    if (ubo.prefilteredMapIndex != 0xFFFFFFFF && ubo.brdfLutIndex != 0xFFFFFFFF && any(specularF0 > 0.0))
     {
         const float NdotV = hitNdotV;
-        TextureCube environment = TextureCube.Handle(uint2(ubo->imageHeapIndexOffset + ubo->prefilteredMapIndex, 0));
+        TextureCube environment = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + ubo.prefilteredMapIndex, 0));
         // Along an anisotropic surface's bent reflection (lobe_reflection), else the mirror direction.
         const float3 mirrorDirection = hasLobes ? lobe_reflection(lobeShading, hitNormal, -R, roughness) : reflect(R, hitNormal);
         const float3 environmentLight = environment.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_PREFILTER, 0)),
-                                                                mirrorDirection, roughness * ubo->prefilteredCubeMipLevels).rgb;
-        Texture2D brdfTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + ubo->brdfLutIndex, 0));
+                                                                mirrorDirection, roughness * ubo.prefilteredCubeMipLevels).rgb;
+        Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
         const float2 brdf = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - roughness), 0).rg;
-        specularLight = environmentLight * ubo->scaleIBLAmbient * (specularF0 * brdf.x + specularF90 * brdf.y) * specularOcclusion;
+        specularLight = environmentLight * ubo.scaleIBLAmbient * (specularF0 * brdf.x + specularF90 * brdf.y) * specularOcclusion;
     }
 
     float3 directShare = directLight;

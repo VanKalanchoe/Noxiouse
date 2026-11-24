@@ -545,10 +545,13 @@ namespace Nox
         {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count();
         };
+        const char* basePath = SDL_GetBasePath();
+        const std::string shaderCacheDir = (std::filesystem::path(basePath ? basePath : "") / "shader_cache").string();
         nriSetLogCallback(&NoxRHILogCallback, nullptr);
         nri::DeviceDesc deviceDesc{};
         deviceDesc.api = api;
         deviceDesc.window = m_window->GetNativeWindowHandle();
+        deviceDesc.shaderCacheDir = shaderCacheDir;
         deviceDesc.enableStreamline = true;
         deviceDesc.logCallback = &NoxRHILogCallback;
         m_device = nri::createDevice(deviceDesc);
@@ -572,7 +575,6 @@ namespace Nox
 
         {
             // A progress window while pipelines are created, should shaders have to be compiled (first start, changed shaders).
-            const char* basePath = SDL_GetBasePath();
             ShaderCompileSplash splash(std::filesystem::path(basePath ? basePath : "") / "shaders" / (m_isEditor ? "pipeline_count_editor.txt" : "pipeline_count.txt"));
             const auto initBegin = std::chrono::steady_clock::now();
             initRenderer();
@@ -694,17 +696,27 @@ namespace Nox
         {
             m_pickerStagingBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = maxPickerBufferSize,
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
         }
+        m_raycastUploadBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
+        m_raycastGpuBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         m_raycastBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
         m_raycastsInFlight.resize(MAX_FRAMES_IN_FLIGHT);
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            // Host visible and reached through its address: the CPU writes the rays, the shader the distances, the CPU reads them.
+            const uint64_t raycastBytes = sizeof(shaderio::EditorRay) * shaderio::EDITOR_RAYCAST_MAX;
+            m_raycastUploadBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
+                .size = raycastBytes,
+                .usage = NRI_BUFFER_USAGE_STAGING
+            }));
+            m_raycastGpuBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
+                .size = raycastBytes,
+                .usage = NRI_BUFFER_USAGE_STORAGE_STATIC
+            }));
             m_raycastBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
-                .size = sizeof(shaderio::EditorRay) * shaderio::EDITOR_RAYCAST_MAX,
-                .usage = NRI_BUFFER_USAGE_UNIFORM
+                .size = raycastBytes,
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
         }
         m_pickerDepthStagingBuffers.reserve(MAX_FRAMES_IN_FLIGHT);
@@ -712,7 +724,7 @@ namespace Nox
         {
             m_pickerDepthStagingBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = 1024, // up to a 9 x 9 block of floats
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
         }
         m_pickerReadbackRequests.resize(MAX_FRAMES_IN_FLIGHT);
@@ -721,7 +733,7 @@ namespace Nox
         {
             m_inspectionProbeBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(float) * 4,
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
         }
         m_inspectionProbePending.resize(MAX_FRAMES_IN_FLIGHT, 0);
@@ -730,19 +742,19 @@ namespace Nox
         {
             m_cullViewBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::CullView),
-                .usage = NRI_BUFFER_USAGE_STORAGE
+                .usage = NRI_BUFFER_USAGE_UNIFORM
             }));
             m_cullStatsBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::CullCounts),
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
             m_mipFeedbackReadback.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = MipFeedbackBytes,
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
             m_clusterStatsReadback.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::ClusterStats),
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
             m_blasCompactionQueryPools.emplace_back(m_device.createQueryPool(nri::QueryPoolDesc{
                 .type = NRI_QUERY_TYPE_AS_COMPACTED_SIZE,
@@ -765,7 +777,7 @@ namespace Nox
         {
             m_geometryFeedbackReadback.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = sizeof(shaderio::GeometryStreamingFeedback),
-                .usage = NRI_BUFFER_USAGE_STAGING
+                .usage = NRI_BUFFER_USAGE_READBACK
             }));
         }
 
@@ -783,6 +795,10 @@ namespace Nox
                                                         [this](nri::CommandBuffer&& commandBuffer)
                                                         {
                                                             endSingleTimeCommands(std::move(commandBuffer));
+                                                        },
+                                                        [this](const nri::Buffer& b)
+                                                        {
+                                                            return bufferReadRef(b);
                                                         }
                                                     }
         );
@@ -1766,7 +1782,7 @@ namespace Nox
         uint64_t offsetsBufferSize = sizeof(floatOffsets);
         m_restirGINeighborOffsetsBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = offsetsBufferSize,
-            .usage = NRI_BUFFER_USAGE_STORAGE
+            .usage = NRI_BUFFER_USAGE_UNIFORM
         });
 
         void* mapped = m_restirGINeighborOffsetsBuffer.map(0, offsetsBufferSize);
@@ -1796,7 +1812,7 @@ namespace Nox
         const uint64_t kernelBufferSize = sizeof(glm::vec4) * kernel.size();
         m_ssaoKernelBuffer = m_device.createBuffer(nri::BufferDesc{
             .size = kernelBufferSize,
-            .usage = NRI_BUFFER_USAGE_STORAGE
+            .usage = NRI_BUFFER_USAGE_UNIFORM
         });
         void* mapped = m_ssaoKernelBuffer.map(0, kernelBufferSize);
         memcpy(mapped, kernel.data(), kernelBufferSize);
@@ -2746,7 +2762,7 @@ namespace Nox
             {
                 nri::Buffer buffer = m_device.createBuffer(nri::BufferDesc{
                     .size = m_particleBufferCapacity,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
                 m_particleBuffersMapped.push_back(buffer.map(0, m_particleBufferCapacity));
                 m_particleBuffers.push_back(std::move(buffer));
@@ -3857,7 +3873,7 @@ namespace Nox
 
         const SkyAtmosphereSettings& settings = m_proceduralSky;
         shaderio::PushConstantAerialPerspective push{};
-        push.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+        push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
         push.outputStorageIndex = m_skyStorageSlots.back();
         push.transmittanceTextureIndex = m_skyTransmittanceLut->GetDescriptorIndexSlot();
         push.multiScatteringTextureIndex = m_skyMultiScatteringLut->GetDescriptorIndexSlot();
@@ -4512,7 +4528,7 @@ namespace Nox
         m_morphWeightBuffersMapped.clear();
         for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
         {
-            nri::Buffer buffer = m_device.createBuffer(nri::BufferDesc{ .size = size, .usage = NRI_BUFFER_USAGE_STORAGE });
+            nri::Buffer buffer = m_device.createBuffer(nri::BufferDesc{ .size = size, .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_morphWeightBuffersMapped.push_back(buffer.map(0, size));
             m_morphWeightBuffers.push_back(std::move(buffer));
         }
@@ -4550,7 +4566,7 @@ namespace Nox
             nri::Buffer uboBuffer = m_device.createBuffer(nri::BufferDesc
                 {
                     .size = size,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
             void* mappedMemory = uboBuffer.map(0, size);
@@ -4578,7 +4594,7 @@ namespace Nox
 
             nri::Buffer workItems = m_device.createBuffer(nri::BufferDesc{
                 .size = workItemSize,
-                .usage = NRI_BUFFER_USAGE_STORAGE
+                .usage = NRI_BUFFER_USAGE_UNIFORM
             });
             m_skinningWorkItemBuffersMapped.push_back(workItems.map(0, workItemSize));
             m_skinningWorkItemBuffers.emplace_back(std::move(workItems));
@@ -4744,7 +4760,7 @@ namespace Nox
                 }));
                 nri::Buffer workItems = m_device.createBuffer(nri::BufferDesc{
                     .size = m_rayTracingOffsetWorkItemCapacity,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
                 m_rayTracingOffsetWorkItemBuffersMapped.push_back(workItems.map(0, m_rayTracingOffsetWorkItemCapacity));
                 m_rayTracingOffsetWorkItemBuffers.emplace_back(std::move(workItems));
@@ -4800,31 +4816,40 @@ namespace Nox
             return;
         }
 
-        // Each deformed instance with the vertices its BLAS is built from (and its hits read): the moved ones when a graph offsets it,
-        // else its skinned ones.
+        // Each deformed instance with the vertices its BLAS is built from (hardware GPU VA) and the shader BufferRef its hits read.
         struct DeformedInstance
         {
             uint32_t instanceSlot;
             uint64_t vertexAddress;
+            uint64_t shaderVertexRef;
         };
         std::vector<DeformedInstance> deformed;
         deformed.reserve(m_skinningLayout.size() + m_rayTracingOffsetLayout.size());
+        const uint32_t refOffsetShift = (m_device.getAPI() == NRI_GRAPHICS_API_D3D12) ? 32u : 0u;
         const uint64_t offsetVertexBase = offsetsReady ? m_rayTracingOffsetVertexBuffers[currentImage].getDeviceAddress() : 0;
-        auto offsetAddress = [&](uint32_t instanceSlot) -> uint64_t
+        const uint64_t offsetVertexRefBase = offsetsReady ? bufferReadRef(m_rayTracingOffsetVertexBuffers[currentImage]) : 0;
+        auto offsetEntry = [&](uint32_t instanceSlot) -> std::pair<uint64_t, uint64_t>
         {
             const auto found = std::lower_bound(m_rayTracingOffsetLayout.begin(), m_rayTracingOffsetLayout.end(), instanceSlot,
                                                 [](const RayTracingOffsetEntry& entry, uint32_t slot) { return entry.instanceSlot < slot; });
-            return offsetsReady && found != m_rayTracingOffsetLayout.end() && found->instanceSlot == instanceSlot
-                ? offsetVertexBase + uint64_t(found->destinationVertexOffset) * sizeof(shaderio::SkinnedVertex) : 0;
+            if (offsetsReady && found != m_rayTracingOffsetLayout.end() && found->instanceSlot == instanceSlot)
+            {
+                const uint64_t byteOffset = uint64_t(found->destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+                return { offsetVertexBase + byteOffset, offsetVertexRefBase + (byteOffset << refOffsetShift) };
+            }
+            return { 0ull, 0ull };
         };
         if (skinningReady)
         {
             const uint64_t skinnedVertexBase = m_skinnedVertexBuffers[currentImage].getDeviceAddress();
+            const uint64_t skinnedVertexRefBase = bufferReadRef(m_skinnedVertexBuffers[currentImage]);
             for (const SkinningLayoutEntry& layout : m_skinningLayout)
             {
-                const uint64_t moved = offsetAddress(layout.instanceSlot);
-                deformed.push_back({ layout.instanceSlot, moved != 0 ? moved
-                                                                     : skinnedVertexBase + uint64_t(layout.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex) });
+                const auto [movedAddr, movedRef] = offsetEntry(layout.instanceSlot);
+                const uint64_t byteOffset = uint64_t(layout.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+                deformed.push_back({ layout.instanceSlot,
+                                     movedAddr != 0 ? movedAddr : skinnedVertexBase + byteOffset,
+                                     movedAddr != 0 ? movedRef : skinnedVertexRefBase + (byteOffset << refOffsetShift) });
             }
         }
         if (offsetsReady)
@@ -4832,7 +4857,12 @@ namespace Nox
             for (const RayTracingOffsetEntry& entry : m_rayTracingOffsetLayout)
             {
                 if (!entry.skinned) // (a skinned one is above)
-                    deformed.push_back({ entry.instanceSlot, offsetVertexBase + uint64_t(entry.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex) });
+                {
+                    const uint64_t byteOffset = uint64_t(entry.destinationVertexOffset) * sizeof(shaderio::SkinnedVertex);
+                    deformed.push_back({ entry.instanceSlot,
+                                         offsetVertexBase + byteOffset,
+                                         offsetVertexRefBase + (byteOffset << refOffsetShift) });
+                }
             }
         }
 
@@ -4915,7 +4945,7 @@ namespace Nox
             }
 
             animated.active = true;
-            m_gpuScene.SetInstanceRayTracingGeometry(layout.instanceSlot, animated.Resource.as.getDeviceAddress(), skinnedVertexAddress);
+            m_gpuScene.SetInstanceRayTracingGeometry(layout.instanceSlot, animated.Resource.as.getDeviceAddress(), layout.shaderVertexRef);
             m_animatedBLASUpdates.push_back({ layout.instanceSlot, std::move(buildDesc), !animated.built });
             requiredScratchSize = std::max(requiredScratchSize,
                                            animated.built ? animated.updateScratchSize : animated.buildScratchSize);
@@ -4972,7 +5002,7 @@ namespace Nox
         {
             m_drawListBuffers.emplace_back(m_device.createBuffer(nri::BufferDesc{
                 .size = bufferSize,
-                .usage = NRI_BUFFER_USAGE_STORAGE
+                .usage = NRI_BUFFER_USAGE_UNIFORM
             }));
         }
         m_drawListStale.fill(true);
@@ -4993,7 +5023,7 @@ namespace Nox
             auto buffer = m_device.createBuffer(
                 nri::BufferDesc{
                     .size = bufferSize,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 }
             );
 
@@ -5006,7 +5036,7 @@ namespace Nox
             m_selectedEntityIDBuffersMapped.emplace_back(mapped);
 
             // The selection mask's draw list: GPU scene instance slots of the selected entities (as many as entity IDs).
-            auto instances = m_device.createBuffer(nri::BufferDesc{ .size = maxSelectedEntities * sizeof(uint32_t), .usage = NRI_BUFFER_USAGE_STORAGE });
+            auto instances = m_device.createBuffer(nri::BufferDesc{ .size = maxSelectedEntities * sizeof(uint32_t), .usage = NRI_BUFFER_USAGE_UNIFORM });
             m_selectionInstanceBuffersMapped.emplace_back(instances.map(0, maxSelectedEntities * sizeof(uint32_t)));
             m_selectionInstanceBuffers.emplace_back(std::move(instances));
         }
@@ -5024,7 +5054,7 @@ namespace Nox
             nri::Buffer lightBuffer = m_device.createBuffer(nri::BufferDesc
                 {
                     .size = bufferSize,
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 });
 
             void* mappedMemory = lightBuffer.map(0, bufferSize);
@@ -5180,37 +5210,83 @@ namespace Nox
 
         m_resourceHeap = m_device.createDescriptorHeap(nri::DescriptorHeapDesc{
             .type = NRI_DESCRIPTOR_HEAP_RESOURCE,
-            .maxBufferDescriptors = 128,
+            .maxBufferDescriptors = 4096,
             .maxImageDescriptors = 4096 // a streamed texture's old and new image coexist until the old one is released
         });
+    }
 
-        /*
-        Abstract storage tracking vectors
-        std::vector<nri::Buffer> m_modelDataBuffers;
-        
-        m_modelDataBuffers.reserve(2);
-        for (uint32_t i = 0; i < 2; i++)
+    uint64_t Renderer::bufferReadRef(const nri::Buffer& buffer)
+    {
+        return buffer ? bufferReadRef(buffer.handle()) : 0ull;
+    }
+
+    uint64_t Renderer::bufferReadRef(NriBuffer buffer)
+    {
+        if (!buffer)
+            return 0ull;
+        if (m_device.getAPI() != NRI_GRAPHICS_API_D3D12)
+            return nriGetBufferDeviceAddress(buffer);
         {
-            // Create an abstract Storage Buffer
-            nri::Buffer modelBuffer = m_device.createBuffer(nri::BufferDesc{
-                .size = sizeof(ModelData),
-                .usage = NRI_BUFFER_USAGE_STORAGE
-            });
-            
-            // Map and fill initial CPU data
-            void* mappedData = modelBuffer->map(0, sizeof(ModelData));
-            const glm::vec4 positions[2] = {glm::vec4(-1.5f, 0.0f, 0.0f, 0.0f), glm::vec4(1.5f, 0.0f, 0.0f, 0.0f)};
-            const glm::vec4 colors[2] = {glm::vec4(0.5f, 1.0f, 0.5f, 0.0f), glm::vec4(0.5f, 0.5f, 1.0f, 0.0f)};
-            ModelData mdata{.pos = positions[i], .color = colors[i]};
-            std::memcpy(mappedData, &mdata, sizeof(ModelData));
-            modelBuffer->unmap();
-    
-            /#1#/ 4. Register the buffer directly to the Resource Heap at runtime!
-            uint32_t bufferBindlessIndex = m_resourceHeap.registerBuffer(*modelBuffer, sizeof(ModelData));#1#
-            
-            // Cache your model buffer in the renderer
-            m_modelDataBuffers.emplace_back(std::move(modelBuffer));
-        }*/
+            std::shared_lock lock(m_bufferRefMutex);
+            if (auto it = m_bufferReadSlots.find(buffer); it != m_bufferReadSlots.end())
+                return static_cast<uint64_t>(it->second);
+        }
+        std::unique_lock lock(m_bufferRefMutex);
+        if (auto it = m_bufferReadSlots.find(buffer); it != m_bufferReadSlots.end())
+            return static_cast<uint64_t>(it->second);
+        const uint32_t slot = nriRegisterBuffer(m_resourceHeap.handle(), buffer, nriGetBufferSize(buffer));
+        m_bufferReadSlots.emplace(buffer, slot);
+        return static_cast<uint64_t>(slot);
+    }
+
+    uint64_t Renderer::bufferWriteRef(const nri::Buffer& buffer)
+    {
+        return buffer ? bufferWriteRef(buffer.handle()) : 0ull;
+    }
+
+    uint64_t Renderer::bufferWriteRef(NriBuffer buffer)
+    {
+        if (!buffer)
+            return 0ull;
+        if (m_device.getAPI() != NRI_GRAPHICS_API_D3D12)
+            return nriGetBufferDeviceAddress(buffer);
+        {
+            std::shared_lock lock(m_bufferRefMutex);
+            if (auto it = m_bufferWriteSlots.find(buffer); it != m_bufferWriteSlots.end())
+                return static_cast<uint64_t>(it->second);
+        }
+        std::unique_lock lock(m_bufferRefMutex);
+        if (auto it = m_bufferWriteSlots.find(buffer); it != m_bufferWriteSlots.end())
+            return static_cast<uint64_t>(it->second);
+        const uint32_t slot = nriRegisterStorageBuffer(m_resourceHeap.handle(), buffer, nriGetBufferSize(buffer));
+        m_bufferWriteSlots.emplace(buffer, slot);
+        return static_cast<uint64_t>(slot);
+    }
+
+    void Renderer::releaseBufferRefs(NriBuffer buffer)
+    {
+        if (!buffer || !m_resourceHeap || m_device.getAPI() != NRI_GRAPHICS_API_D3D12)
+            return;
+        std::unique_lock lock(m_bufferRefMutex);
+        if (auto it = m_bufferReadSlots.find(buffer); it != m_bufferReadSlots.end())
+        {
+            m_resourceHeap.unregisterBuffer(it->second);
+            m_bufferReadSlots.erase(it);
+        }
+        if (auto it = m_bufferWriteSlots.find(buffer); it != m_bufferWriteSlots.end())
+        {
+            m_resourceHeap.unregisterBuffer(it->second);
+            m_bufferWriteSlots.erase(it);
+        }
+    }
+
+    uint64_t Renderer::tlasRef() const
+    {
+        if (!m_sceneTLAS)
+            return 0ull;
+        if (m_device.getAPI() == NRI_GRAPHICS_API_D3D12)
+            return static_cast<uint64_t>(m_tlasHeapSlot);
+        return m_sceneTLAS.getDeviceAddress();
     }
 
     nri::CommandBuffer Renderer::beginSingleTimeCommands()
@@ -5411,13 +5487,13 @@ namespace Nox
         {
             // drawInstancesReference: the view's visible instances, a graph buffer (beginMeshletDraws).
             shaderio::PushConstantMeshlets& references = frame.meshletReferences;
-            references.matrixReference = m_uniformBuffers[frameIndex].getDeviceAddress();
+            references.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
             bool hasBoneBuffers = frameIndex < m_boneBuffers.size() && static_cast<bool>(m_boneBuffers[frameIndex]);
             bool hasBones = !m_boneMatrices.empty();
-            references.boneMatrixReference = (hasBones && hasBoneBuffers) ? m_boneBuffers[frameIndex].getDeviceAddress() : 0;
+            references.boneMatrixReference = (hasBones && hasBoneBuffers) ? bufferReadRef(m_boneBuffers[frameIndex]) : 0;
             const bool hasSkinnedVertices = m_computeSkinningPipeline && !m_skinningWorkItems.empty() && frameIndex < m_skinnedVertexBuffers.size() &&
                                             static_cast<bool>(m_skinnedVertexBuffers[frameIndex]);
-            references.skinnedVertexReference = hasSkinnedVertices ? m_skinnedVertexBuffers[frameIndex].getDeviceAddress() : 0;
+            references.skinnedVertexReference = hasSkinnedVertices ? bufferReadRef(m_skinnedVertexBuffers[frameIndex]) : 0;
             // Real value (or left at "none") set later, in addForward3DPass, once SSAO/RTAO's result actually exists.
             references.ssaoTextureIndex = 0xFFFFFFFF;
             // Set by the pass that draws glass over a copy of the scene (addForward3DPass).
@@ -5722,7 +5798,7 @@ namespace Nox
     {
         MeshletDrawCursor cursor;
         cursor.references = m_frame.meshletReferences;
-        cursor.references.drawInstancesReference = nriGetBufferDeviceAddress(context.Buffer(late ? draws.LateInstances : draws.VisibleInstances));
+        cursor.references.drawInstancesReference = context.BufferReadRef(late ? draws.LateInstances : draws.VisibleInstances);
         cursor.commands = context.Buffer(late ? draws.LateCommands : draws.Commands);
         cursor.counts = context.Buffer(draws.Counts);
         cursor.late = late;
@@ -5755,7 +5831,7 @@ namespace Nox
         constexpr uint32_t CommandStride = sizeof(shaderio::MeshTasksIndirectCommand);
         const size_t countArray = cursor.late ? offsetof(shaderio::CullCounts, lateDrawCount) : offsetof(shaderio::CullCounts, drawCount);
         const uint64_t countOffset = countArray + sizeof(uint32_t) * static_cast<size_t>(bucket);
-        nriCmdDrawMeshTasksIndirectCount(cmd.handle(), cursor.commands, static_cast<uint64_t>(firstEntry) * CommandStride, cursor.counts, countOffset, maxDrawCount, CommandStride);
+        nriCmdDrawMeshTasksIndirectCountWithDrawId(cmd.handle(), cursor.commands, static_cast<uint64_t>(firstEntry) * CommandStride, cursor.counts, countOffset, maxDrawCount, CommandStride);
     }
 
     void Renderer::updateEntityIDBuffer(uint32_t currentImage)
@@ -5799,16 +5875,16 @@ namespace Nox
         uniformData.prevJitterOffset = m_prevJitter;
         uniformData.samplerIndex = selectedSampler;
         uniformData.imageHeapIndexOffset = m_resourceHeap.getImageHeapIndexOffset();
-        uniformData.mipFeedbackReference = m_mipFeedbackBuffer.getDeviceAddress();
-        uniformData.virtualFeedbackReference = m_mipFeedbackBuffer.getDeviceAddress() + sizeof(uint32_t) * shaderio::MipFeedbackSlots;
-        uniformData.virtualTexturesReference = m_virtualTextureTable ? m_virtualTextureTable.getDeviceAddress() : 0;
-        uniformData.virtualPageTableReference = m_virtualPageTable ? m_virtualPageTable.getDeviceAddress() : 0;
-        uniformData.virtualTileStampsReference = m_virtualTileStamps ? m_virtualTileStamps.getDeviceAddress() : 0;
+        uniformData.mipFeedbackReference = bufferWriteRef(m_mipFeedbackBuffer);
+        uniformData.virtualFeedbackReference = bufferWriteRef(m_mipFeedbackBuffer);
+        uniformData.virtualTexturesReference = bufferReadRef(m_virtualTextureTable);
+        uniformData.virtualPageTableReference = bufferReadRef(m_virtualPageTable);
+        uniformData.virtualTileStampsReference = bufferWriteRef(m_virtualTileStamps);
         uniformData.mipFeedbackFrame = static_cast<uint32_t>(m_sceneFrameCounter);
         uniformData.lodErrorThreshold = m_lodErrorPixels / static_cast<float>(std::max(m_renderSize.height, 1u));
         uniformData.lodCameraNear = m_cameraNear;
         uniformData.lodFullDetail = (m_lodFullDetail || m_orthographic) ? 1u : 0u; // the LOD cut assumes a perspective camera
-        uniformData.clusterStatsReference = m_clusterStatsBuffer.getDeviceAddress();
+        uniformData.clusterStatsReference = bufferWriteRef(m_clusterStatsBuffer);
         uniformData.unitsPerMeter = WorldUnits::PerMeter();
         {
             // Animated Custom Lit shaders (CustomLitSurface::time): seconds since the renderer started, wrapped every hour.
@@ -5881,7 +5957,7 @@ namespace Nox
     void Renderer::updateGpuScene(uint32_t currentImage)
     {
         refreshGpuMaterials();
-        m_gpuScene.SetGeometryBases(m_vertexStream.GetDeviceAddress(), m_rtIndexStream.GetDeviceAddress(), m_colorStream.GetDeviceAddress());
+        m_gpuScene.SetGeometryBases(bufferReadRef(m_vertexStream.GetBuffer()), bufferReadRef(m_rtIndexStream.GetBuffer()), bufferReadRef(m_colorStream.GetBuffer()));
 
         if (m_gpuScene.UpdateDrawList(glm::vec3(uniformData.cameraWorldPos), m_drawList, m_drawBucketStarts))
             m_drawListStale.fill(true);
@@ -5915,20 +5991,20 @@ namespace Nox
                 m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(buffer) });
             }
 
-        uniformData.sceneInstancesReference = m_gpuScene.GetInstances().GetDeviceAddress();
-        uniformData.sceneTransformsReference = m_gpuScene.GetTransforms().GetDeviceAddress();
-        uniformData.sceneMaterialsReference = m_gpuScene.GetMaterials().GetDeviceAddress();
-        uniformData.sceneMeshesReference = m_gpuScene.GetMeshes().GetDeviceAddress();
-        uniformData.sceneRayTracingInstancesReference = m_gpuScene.GetRayTracingInstances().GetDeviceAddress();
+        uniformData.sceneInstancesReference = m_gpuScene.GetInstances().GetBuffer() ? bufferReadRef(*m_gpuScene.GetInstances().GetBuffer()) : 0ull;
+        uniformData.sceneTransformsReference = m_gpuScene.GetTransforms().GetBuffer() ? bufferReadRef(*m_gpuScene.GetTransforms().GetBuffer()) : 0ull;
+        uniformData.sceneMaterialsReference = m_gpuScene.GetMaterials().GetBuffer() ? bufferReadRef(*m_gpuScene.GetMaterials().GetBuffer()) : 0ull;
+        uniformData.sceneMeshesReference = m_gpuScene.GetMeshes().GetBuffer() ? bufferReadRef(*m_gpuScene.GetMeshes().GetBuffer()) : 0ull;
+        uniformData.sceneRayTracingInstancesReference = m_gpuScene.GetRayTracingInstances().GetBuffer() ? bufferReadRef(*m_gpuScene.GetRayTracingInstances().GetBuffer()) : 0ull;
 
-        uniformData.geometryVerticesReference = m_vertexStream.GetDeviceAddress();
-        uniformData.geometrySkinReference = m_skinStream.GetDeviceAddress();
-        uniformData.geometryColorsReference = m_colorStream.GetDeviceAddress();
-        uniformData.geometryMeshletDrawsReference = m_meshletDrawStream.GetDeviceAddress();
-        uniformData.geometryMeshletBoundsReference = m_meshletBoundsStream.GetDeviceAddress();
-        uniformData.geometryMeshletVerticesReference = m_meshletVertexStream.GetDeviceAddress();
-        uniformData.geometryMeshletTrianglesReference = m_meshletTriangleStream.GetDeviceAddress();
-        uniformData.geometryPagesReference = m_geometryPageStream.GetDeviceAddress();
+        uniformData.geometryVerticesReference = bufferReadRef(m_vertexStream.GetBuffer());
+        uniformData.geometrySkinReference = bufferReadRef(m_skinStream.GetBuffer());
+        uniformData.geometryColorsReference = bufferReadRef(m_colorStream.GetBuffer());
+        uniformData.geometryMeshletDrawsReference = bufferReadRef(m_meshletDrawStream.GetBuffer());
+        uniformData.geometryMeshletBoundsReference = bufferReadRef(m_meshletBoundsStream.GetBuffer());
+        uniformData.geometryMeshletVerticesReference = bufferReadRef(m_meshletVertexStream.GetBuffer());
+        uniformData.geometryMeshletTrianglesReference = bufferReadRef(m_meshletTriangleStream.GetBuffer());
+        uniformData.geometryPagesReference = bufferWriteRef(m_geometryPageStream.GetBuffer());
 
     }
 
@@ -6006,7 +6082,7 @@ namespace Nox
             memcpy(m_lightBuffersMapped[currentImage], m_lightBufferObjects.data(), requiredLightSize);
         }
 
-        uniformData.lightDataReference = m_lightBuffers[currentImage].getDeviceAddress();
+        uniformData.lightDataReference = bufferReadRef(m_lightBuffers[currentImage]);
         uniformData.lightCount = static_cast<uint32_t>(m_lightBufferObjects.size());
 
         // Emissive meshes as lights, for the path tracer and the screen-probe GI (they found them only by chance before: a lamp-lit
@@ -6040,14 +6116,14 @@ namespace Nox
                     for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; ++frame)
                     {
                         m_emissiveLightBuffers[frame] = m_device.createBuffer(nri::BufferDesc{ .size = m_emissiveLightBufferCapacity,
-                                                                                                .usage = NRI_BUFFER_USAGE_STORAGE });
+                                                                                                .usage = NRI_BUFFER_USAGE_UNIFORM });
                         m_emissiveLightBuffersMapped[frame] = m_emissiveLightBuffers[frame].map(0, m_emissiveLightBufferCapacity);
                     }
                 }
                 memcpy(m_emissiveLightBuffersMapped[currentImage], m_emissiveLights.data(), required);
                 uniformData.emissiveLightCount = static_cast<uint32_t>(m_emissiveLights.size());
                 uniformData.emissiveLightTotalWeight = total;
-                uniformData.emissiveLightsReference = m_emissiveLightBuffers[currentImage].getDeviceAddress();
+                uniformData.emissiveLightsReference = bufferReadRef(m_emissiveLightBuffers[currentImage]);
 
                 // The local grid around the camera, snapped to its cells (EmissiveLightGrid.slang builds it this frame), for the path
                 // tracer and the screen-probe GI alike.
@@ -6073,8 +6149,8 @@ namespace Nox
                         m_emissiveTriangleCdfBuffer = m_device.createBuffer(nri::BufferDesc{
                             .size = sizeof(float) * m_emissiveTriangleCapacity, .usage = NRI_BUFFER_USAGE_STORAGE });
                     }
-                    uniformData.emissiveTrianglesReference = m_emissiveTriangleBuffer.getDeviceAddress();
-                    uniformData.emissiveTriangleCdfReference = m_emissiveTriangleCdfBuffer.getDeviceAddress();
+                    uniformData.emissiveTrianglesReference = bufferReadRef(m_emissiveTriangleBuffer);
+                    uniformData.emissiveTriangleCdfReference = bufferReadRef(m_emissiveTriangleCdfBuffer);
                     uniformData.emissiveTriangleCount = triangleCount;
 
                     if (!m_emissiveGridBuffer)
@@ -6084,7 +6160,7 @@ namespace Nox
                             .usage = NRI_BUFFER_USAGE_STORAGE });
                     const float cellSize = shaderio::EmissiveGridCellMeters * uniformData.unitsPerMeter;
                     const glm::vec3 halfGrid = 0.5f * cellSize * glm::vec3(shaderio::EmissiveGridSizeX, shaderio::EmissiveGridSizeY, shaderio::EmissiveGridSizeZ);
-                    uniformData.emissiveGridReference = m_emissiveGridBuffer.getDeviceAddress();
+                    uniformData.emissiveGridReference = bufferReadRef(m_emissiveGridBuffer);
                     uniformData.emissiveGridOrigin = glm::floor((glm::vec3(uniformData.cameraWorldPos) - halfGrid) / cellSize) * cellSize;
                     uniformData.emissiveGridCellSize = cellSize;
                 }
@@ -6118,6 +6194,11 @@ namespace Nox
         // asset references are released when `due` goes out of scope.
         for (DeferredRelease& release : due)
         {
+            if (const nri::Buffer* buf = std::get_if<nri::Buffer>(&release.payload))
+            {
+                releaseBufferRefs(buf->handle());
+                continue;
+            }
             if (const DeferredTextureSlot* texSlot = std::get_if<DeferredTextureSlot>(&release.payload))
             {
                 if (texSlot->slot != ~0u && m_resourceHeap)
@@ -6559,7 +6640,7 @@ namespace Nox
         }
 
         // 4. Update UBO flags (ready for updateUniformBuffer!)
-        uniformData.tlasDeviceAddress = m_sceneTLAS ? m_sceneTLAS.getDeviceAddress() : 0;
+        uniformData.tlasDeviceAddress = tlasRef();
         uniformData.tlasHeapIndex = m_tlasHeapIndex;
         uniformData.enableRTShadows = getRayTracedShadowsActive() ? 1 : 0;
         uniformData.enableRTReflections = (m_rayTracingEnabled && m_rayTracingReflections) ? 1 : 0;
@@ -7057,6 +7138,8 @@ namespace Nox
         info.colorFormat = NRI_FORMAT_SURFACE;
         info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
         info.linearColorOutput = true;
+        if (const char* basePath = SDL_GetBasePath())
+            info.shaderPath = (std::filesystem::path(basePath) / "shader_cache_noxui" / "noxui_primitives_builtin.slang").string();
         info.viewportManager = viewportManager;
         m_noxUIInitialized = NoxUI_ImplNoxRHI_Init(info);
     }
@@ -7628,7 +7711,7 @@ namespace Nox
                 view.UniformBuffers.push_back(std::move(uniforms));
                 view.CullViewBuffers.push_back(m_device.createBuffer(nri::BufferDesc{
                     .size = sizeof(shaderio::CullView),
-                    .usage = NRI_BUFFER_USAGE_STORAGE
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
                 }));
             }
         }

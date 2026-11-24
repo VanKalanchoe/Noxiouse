@@ -45,7 +45,7 @@ uint2 ddgi_irradiance_border_texel(uint index)
 void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint threadIndex : SV_GroupIndex,
                  uniform PushConstantDDGIBlend pushConstant)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     const uint probeIndex = group.x;
     if (probeIndex >= pushConstant.probeCountTotal)
         return;
@@ -61,7 +61,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     const bool entered = ddgi_probe_entered(ubo, probeIndex);
     if (!updates && hasPrevious)
     {
-        Texture2D keptAtlas = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        Texture2D keptAtlas = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
         for (uint texel = threadIndex; texel < totalSide * totalSide; texel += threadCount)
         {
             const uint2 pixel = origin + uint2(texel % totalSide, texel / totalSide);
@@ -71,7 +71,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     }
 
     // The probe's rays, once: their directions (DDGIRadiance.slang's) and what they brought back.
-    Texture2D rayDataTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
+    Texture2D rayDataTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
     const uint rayCount = min(pushConstant.raysPerProbe, DDGI_MAX_RAYS);
     float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
     float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
@@ -115,7 +115,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     float4 result = float4(currentIrradiance, active);
     if (hasPrevious && !entered)
     {
-        Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
+        Texture2D prevAtlasTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.prevAtlasTextureIndex, 0));
         const float4 previous = prevAtlasTex.Load(int3(pixel, 0));
         result = float4(lerp(currentIrradiance, previous.rgb, pushConstant.hysteresis), lerp(active, previous.a, pushConstant.hysteresis));
     }

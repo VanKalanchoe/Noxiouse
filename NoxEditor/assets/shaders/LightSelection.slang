@@ -30,7 +30,7 @@ float light_selection_random(inout uint state)
 // minDistance: point / spot lights give at most what they give at this distance (world units; 0 = their source radius only).
 // The GI rays use ~10 cm: a ray that grazes a lamp's own fixture right next to the bulb would otherwise be a firefly the probes
 // cannot average away.
-LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 normal, float minDistance, inout uint rng)
+LightSelection select_lights(UniformBufferObject ubo, float3 position, float3 normal, float minDistance, inout uint rng)
 {
     LightSelection selection;
     selection.count = 0;
@@ -52,8 +52,8 @@ LightSelection select_lights(UniformBufferObject* ubo, float3 position, float3 n
     float restDistance = 0.0;
     const float3 luma = float3(0.2126, 0.7152, 0.0722);
 
-    LightData* lights = (LightData*)ubo->lightDataReference;
-    for (uint i = 0; i < ubo->lightCount; ++i)
+    BufferRef<LightData> lights = BufferRef<LightData>(ubo.lightDataReference);
+    for (uint i = 0; i < ubo.lightCount; ++i)
     {
         const LightData light = lights[i];
         const uint type = (uint)light.position.w;

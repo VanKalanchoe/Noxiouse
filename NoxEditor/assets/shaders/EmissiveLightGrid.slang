@@ -25,15 +25,15 @@ static float hash11(uint x)
 [numthreads(64, 1, 1)]
 void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissiveGrid pc)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pc.matrixReference;
+    UniformBufferObject ubo = loadUbo(pc.matrixReference);
     const uint triangle = tid.x;
-    if (triangle >= ubo->emissiveTriangleCount)
+    if (triangle >= ubo.emissiveTriangleCount)
         return;
 
     // The instance: the last list entry starting at or before this triangle.
-    EmissiveLightInstance* lights = (EmissiveLightInstance*)ubo->emissiveLightsReference;
+    BufferRef<EmissiveLightInstance> lights = BufferRef<EmissiveLightInstance>(ubo.emissiveLightsReference);
     uint low = 0;
-    uint high = ubo->emissiveLightCount - 1;
+    uint high = ubo.emissiveLightCount - 1;
     while (low < high)
     {
         const uint middle = (low + high + 1) / 2;
@@ -55,9 +55,9 @@ void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissive
 
     if (primitive < light.triangleCount)
     {
-        GpuRayTracingInstance instance = ((GpuRayTracingInstance*)ubo->sceneRayTracingInstancesReference)[light.instanceSlot];
-        const float4x4 world = ((GpuTransform*)ubo->sceneTransformsReference)[light.instanceSlot].world;
-        uint3 index = instance.indexBufferAddress != 0 ? ((uint3*)instance.indexBufferAddress)[primitive]
+        GpuRayTracingInstance instance = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[light.instanceSlot];
+        const float4x4 world = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[light.instanceSlot].world;
+        uint3 index = instance.indexBufferAddress != 0 ? BufferRef<uint3>(instance.indexBufferAddress)[primitive]
                                                        : uint3(primitive * 3 + 0, primitive * 3 + 1, primitive * 3 + 2);
         const Vertex v0 = LoadRayTracingVertex(instance, index.x);
         const Vertex v1 = LoadRayTracingVertex(instance, index.y);
@@ -74,7 +74,7 @@ void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissive
             uint width, height, levels;
             MaterialTextureSize(ubo, instance.emissiveTextureIndex, width, height, levels);
             // Through the emissive texture's UV channel (KHR_texture_transform), as it is read.
-            GpuMaterial* material = &((GpuMaterial*)ubo->sceneMaterialsReference)[instance.materialIndex];
+            GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
             const int set = material.emissiveTextureSet;
             const float2 e1 = material_texture_uv_delta(material, set, v1.uv0 - v0.uv0, v1.uv1 - v0.uv1);
             const float2 e2 = material_texture_uv_delta(material, set, v2.uv0 - v0.uv0, v2.uv1 - v0.uv1);
@@ -87,7 +87,7 @@ void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissive
         const float power = dot(max(emission, float3(0.0)), float3(0.2126, 0.7152, 0.0722)) * record.area;
         record.power = isfinite(power) ? power : 0.0;
     }
-    ((EmissiveTriangle*)ubo->emissiveTrianglesReference)[triangle] = record;
+    RWBufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference).Store(triangle, record);
 }
 
 groupshared float gScan[EmissiveScanGroupSize];
@@ -96,10 +96,10 @@ groupshared float gScan[EmissiveScanGroupSize];
 [numthreads(EmissiveScanGroupSize, 1, 1)]
 void scanMain(uint3 tid : SV_GroupThreadID, uniform PushConstantEmissiveGrid pc)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pc.matrixReference;
-    EmissiveTriangle* triangles = (EmissiveTriangle*)ubo->emissiveTrianglesReference;
-    float* cdf = (float*)ubo->emissiveTriangleCdfReference;
-    const uint count = ubo->emissiveTriangleCount;
+    UniformBufferObject ubo = loadUbo(pc.matrixReference);
+    BufferRef<EmissiveTriangle> triangles = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference);
+    RWBufferRef<float> cdf = RWBufferRef<float>(ubo.emissiveTriangleCdfReference);
+    const uint count = ubo.emissiveTriangleCount;
     const uint thread = tid.x;
 
     float running = 0.0;
@@ -117,7 +117,7 @@ void scanMain(uint3 tid : SV_GroupThreadID, uniform PushConstantEmissiveGrid pc)
             GroupMemoryBarrierWithGroupSync();
         }
         if (i < count)
-            cdf[i] = running + gScan[thread];
+            cdf.Store(i, running + gScan[thread]);
         running += gScan[EmissiveScanGroupSize - 1];
         GroupMemoryBarrierWithGroupSync();
     }
@@ -132,23 +132,23 @@ void buildMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissiveGrid
     if (cell >= cellCount)
         return;
 
-    UniformBufferObject* ubo = (UniformBufferObject*)pc.matrixReference;
-    uint* entries = (uint*)ubo->emissiveGridReference;
+    UniformBufferObject ubo = loadUbo(pc.matrixReference);
+    RWBufferRef<uint> entries = RWBufferRef<uint>(ubo.emissiveGridReference);
     const uint first = cell * EmissiveGridEntries;
-    const uint count = ubo->emissiveTriangleCount;
-    EmissiveTriangle* triangles = (EmissiveTriangle*)ubo->emissiveTrianglesReference;
-    float* cdf = (float*)ubo->emissiveTriangleCdfReference;
+    const uint count = ubo.emissiveTriangleCount;
+    BufferRef<EmissiveTriangle> triangles = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference);
+    BufferRef<float> cdf = BufferRef<float>(ubo.emissiveTriangleCdfReference);
     const float total = count > 0 ? cdf[count - 1] : 0.0;
     if (!(total > 0.0) || !isfinite(total))
     {
         for (uint k = 0; k < EmissiveGridEntries; ++k)
-            entries[first + k] = 0xFFFFFFFF;
+            entries.Store(first + k, 0xFFFFFFFF);
         return;
     }
 
     const uint3 coord = uint3(cell % EmissiveGridSizeX, (cell / EmissiveGridSizeX) % EmissiveGridSizeY, cell / (EmissiveGridSizeX * EmissiveGridSizeY));
-    const float cellSize = ubo->emissiveGridCellSize;
-    const float3 center = ubo->emissiveGridOrigin + (float3(coord) + 0.5) * cellSize;
+    const float cellSize = ubo.emissiveGridCellSize;
+    const float3 center = ubo.emissiveGridOrigin + (float3(coord) + 0.5) * cellSize;
     const float minDistanceSq = (0.866 * cellSize) * (0.866 * cellSize); // half the cell's diagonal
 
     // Candidates by power (stratified over the running sum); each weighs its light at the cell over its power -- the resampling
@@ -185,10 +185,10 @@ void buildMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissiveGrid
         running += weights[m];
         while (kept < EmissiveGridEntries && (float(kept) + keepOffset) / float(EmissiveGridEntries) * weightSum < running)
         {
-            entries[first + kept] = candidates[m];
+            entries.Store(first + kept, candidates[m]);
             ++kept;
         }
     }
     for (; kept < EmissiveGridEntries; ++kept) // rounding at the end of the sum
-        entries[first + kept] = candidates[EmissiveGridCandidates - 1];
+        entries.Store(first + kept, candidates[EmissiveGridCandidates - 1]);
 }

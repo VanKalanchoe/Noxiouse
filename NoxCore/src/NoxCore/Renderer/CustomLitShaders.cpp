@@ -222,9 +222,9 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                     "    MaterialGraphInputs i = (MaterialGraphInputs)0;\n"
                     "    i.uv0 = s.uv;\n    i.uv0Dx = float2(s.uvFootprint, 0.0);\n    i.uv0Dy = float2(0.0, s.uvFootprint);\n"
                     "    i.uv1 = s.uv;\n    i.uv1Dx = i.uv0Dx;\n    i.uv1Dy = i.uv0Dy;\n"
-                    "    i.position = s.position + s.ubo->renderOrigin;\n"
+                    "    i.position = s.position + s.ubo.renderOrigin;\n"
                     "    i.normal = s.normal;\n    i.vertexColor = float4(1.0);\n    i.view = s.view;\n    i.screenUV = s.screenUV;\n"
-                    "    i.time = s.time;\n    i.cameraPosition = s.ubo->cameraWorldPos.xyz + s.ubo->renderOrigin;\n"
+                    "    i.time = s.time;\n    i.cameraPosition = s.ubo.cameraWorldPos.xyz + s.ubo.renderOrigin;\n"
                     "    i.material = s.material;\n    i.mipFeedback = false;\n    i.ubo = s.ubo;\n    return i;\n}\n\n";
         std::vector<bool> present(paths.size(), false);
         for (size_t slot = 0; slot < paths.size(); ++slot)

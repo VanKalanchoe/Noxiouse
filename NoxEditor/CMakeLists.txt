@@ -75,11 +75,13 @@ if(WIN32)
     endif()
 
     # -------------------------------------------------------------------------
-    # 2. Copy dynamic libraries (slang.dll) next to NoxEditor.exe
+    # 2. Copy dynamic libraries (slang*.dll, dxcompiler/dxil) next to NoxEditor.exe
     # -------------------------------------------------------------------------
+    file(GLOB NOX_SLANG_DLLS "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang*.dll")
+    list(FILTER NOX_SLANG_DLLS EXCLUDE REGEX "slang-llvm\\.dll$")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang.dll"
+            ${NOX_SLANG_DLLS}
             $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates"
@@ -92,6 +94,26 @@ if(WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/Templates/Blank.png"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/Templates"
     )
+    file(GLOB NOX_SLANG_STD_MODULES LIST_DIRECTORIES true "${CMAKE_SOURCE_DIR}/NoxCore/vendors/slang/bin/slang-standard-module-*")
+    foreach(SLANG_MOD_DIR ${NOX_SLANG_STD_MODULES})
+        get_filename_component(SLANG_MOD_NAME "${SLANG_MOD_DIR}" NAME)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+                "${SLANG_MOD_DIR}"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${SLANG_MOD_NAME}"
+        )
+    endforeach()
+    if(DEFINED CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION)
+        set(NOX_WINSDK_X64_BIN "C:/Program Files (x86)/Windows Kits/10/bin/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/x64")
+        if(EXISTS "${NOX_WINSDK_X64_BIN}/dxcompiler.dll" AND EXISTS "${NOX_WINSDK_X64_BIN}/dxil.dll")
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${NOX_WINSDK_X64_BIN}/dxcompiler.dll"
+                    "${NOX_WINSDK_X64_BIN}/dxil.dll"
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            )
+        endif()
+    endif()
 
     # -------------------------------------------------------------------------
     # 3. Copy assets/ directory to the build output folder
@@ -120,10 +142,16 @@ if(WIN32)
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     )
 
-    # Copy NRD runtime binaries next to the editor executable
+    # Copy NRD + D3D12 Agility SDK 1.619 runtime binaries next to the editor executable
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-        "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/Lib/$<IF:$<CONFIG:Debug>,Debug,Release>"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/Lib/$<IF:$<CONFIG:Debug>,Debug,Release>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/AgilitySDK"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/AgilitySDK/D3D12Core.dll"
+            "${CMAKE_SOURCE_DIR}/NoxCore/vendors/NRD/AgilitySDK/d3d12SDKLayers.dll"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/AgilitySDK"
     )
 endif()

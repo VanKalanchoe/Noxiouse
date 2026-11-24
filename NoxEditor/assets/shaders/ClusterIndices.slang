@@ -8,12 +8,12 @@
 [numthreads(64, 1, 1)]
 void computeMain(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID, uniform PushConstantClusterIndices pc)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pc.matrixReference;
-    ClusterIndexJob* jobs = (ClusterIndexJob*)pc.jobsReference;
-    uint32_t* indices = (uint32_t*)pc.indicesReference;
-    MeshletDraw* draws = (MeshletDraw*)ubo->geometryMeshletDrawsReference;
-    uint32_t* meshletVertices = (uint32_t*)ubo->geometryMeshletVerticesReference;
-    uint8_t* meshletTriangles = (uint8_t*)ubo->geometryMeshletTrianglesReference;
+    UniformBufferObject ubo = loadUbo(pc.matrixReference);
+    BufferRef<ClusterIndexJob> jobs = BufferRef<ClusterIndexJob>(pc.jobsReference);
+    RWBufferRef<uint32_t> indices = RWBufferRef<uint32_t>(pc.indicesReference);
+    BufferRef<MeshletDraw> draws = BufferRef<MeshletDraw>(ubo.geometryMeshletDrawsReference);
+    BufferRef<uint32_t> meshletVertices = BufferRef<uint32_t>(ubo.geometryMeshletVerticesReference);
+    BufferRef<uint> meshletTriangles = BufferRef<uint>(ubo.geometryMeshletTrianglesReference);
 
     for (uint jobIndex = gid.x; jobIndex < pc.jobCount; jobIndex += pc.groupCount)
     {
@@ -21,8 +21,8 @@ void computeMain(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID, uniform 
         const MeshletDraw draw = draws[job.draw];
         for (uint corner = gtid.x; corner < draw.triangleCount * 3; corner += 64)
         {
-            const uint local = meshletTriangles[draw.triangleOffset + corner];
-            indices[job.firstIndex + corner] = draw.globalVertexOffset + meshletVertices[draw.vertexOffset + local];
+            const uint local = LoadByte(meshletTriangles, draw.triangleOffset + corner);
+            indices.Store(job.firstIndex + corner, draw.globalVertexOffset + meshletVertices[draw.vertexOffset + local]);
         }
     }
 }

@@ -131,7 +131,7 @@ namespace Nox
                 [this, draws, uniformBuffer, skyboxSun, preview = view.Preview, flags, unlit](RGPassContext& context)
                 {
                     nri::CommandBuffer& cmd = context.Cmd();
-                    const uint64_t uniforms = uniformBuffer->getDeviceAddress();
+                    const uint64_t uniforms = bufferReadRef(*uniformBuffer);
                     const bool hasDraws = draws.Commands.IsValid();
                     MeshletDrawCursor cursor = hasDraws ? beginMeshletDraws(context, draws) : MeshletDrawCursor{};
                     cursor.references.matrixReference = uniforms;
@@ -274,8 +274,8 @@ namespace Nox
                         {
                             cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
                             shaderio::PushConstantParticles push{};
-                            push.matrixReference = uniformBuffer->getDeviceAddress();
-                            push.particlesReference = m_particleBuffers[frameIndex].getDeviceAddress();
+                            push.matrixReference = bufferReadRef(*uniformBuffer);
+                            push.particlesReference = bufferReadRef(m_particleBuffers[frameIndex]);
                             push.firstParticle = batch.First;
                             push.particleCount = batch.Count;
                             push.textureIndex = batch.Settings.TextureSlot;
@@ -314,7 +314,7 @@ namespace Nox
                     cmd.setColorWriteMask(0, nri::ColorComponent::All);
 
                     shaderio::PushConstantPostProcess postPush{};
-                    postPush.matrixReference = uniformBuffer->getDeviceAddress();
+                    postPush.matrixReference = bufferReadRef(*uniformBuffer);
                     postPush.hdrTextureIndex = context.Slot(hdr);
                     postPush.autoExposureTextureIndex = autoExposure ? context.Slot(exposureTexture) : 0xFFFFFFFF;
                     postPush.debugMode = 0;
@@ -357,8 +357,8 @@ namespace Nox
                         cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_outlinePipeline);
 
                         shaderio::PushConstantOutline references{};
-                        references.matrixReference = uniformBuffer->getDeviceAddress();
-                        references.selectedEntityIDsReference = m_selectedEntityIDBuffers[frameIndex].getDeviceAddress();
+                        references.matrixReference = bufferReadRef(*uniformBuffer);
+                        references.selectedEntityIDsReference = bufferReadRef(m_selectedEntityIDBuffers[frameIndex]);
                         references.selectedEntityCount = static_cast<uint32_t>(m_SelectedEntityIDs.size());
                         references.selectionMaskTextureIndex = 0xFFFFFFFF;
                         references.entityTextureIndex = context.Slot(entity);

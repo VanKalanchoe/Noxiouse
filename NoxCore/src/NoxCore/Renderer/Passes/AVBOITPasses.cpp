@@ -143,15 +143,15 @@ namespace Nox
         uniformData.avboitDistance = WorldUnits::FromMeters(m_avboitDistanceMeters);
         uniformData.avboitLinearDistance = WorldUnits::FromMeters(m_avboitLinearMeters);
         uniformData.avboitTransmittanceTextureIndex = m_avboitTransmittance->GetDescriptorIndexSlot();
-        uniformData.avboitOccupancyReference = m_avboitOccupancy.getDeviceAddress();
-        uniformData.avboitLutReference = m_avboitDepthWarp.getDeviceAddress();
-        uniformData.avboitExtinctionReference = m_avboitExtinction.getDeviceAddress();
-        uniformData.avboitOverflowReference = m_avboitOverflow.getDeviceAddress();
+        uniformData.avboitOccupancyReference = bufferWriteRef(m_avboitOccupancy);
+        uniformData.avboitLutReference = bufferWriteRef(m_avboitDepthWarp);
+        uniformData.avboitExtinctionReference = bufferWriteRef(m_avboitExtinction);
+        uniformData.avboitOverflowReference = bufferWriteRef(m_avboitOverflow);
         // (avboitDepthTextureIndex: the depth's slot once the graph is compiled, resolveFrameUniforms)
 
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
-        const uint64_t uniforms = m_uniformBuffers[frameIndex].getDeviceAddress();
-        const uint64_t particles = particleBuffer ? m_particleBuffers[frameIndex].getDeviceAddress() : 0;
+        const uint64_t uniforms = bufferReadRef(m_uniformBuffers[frameIndex]);
+        const uint64_t particles = particleBuffer ? bufferReadRef(m_particleBuffers[frameIndex]) : 0;
         const uint64_t columns = static_cast<uint64_t>(grid.x) * grid.y;
         nri::Buffer* occupancy = &m_avboitOccupancy;
         nri::Buffer* extinction = &m_avboitExtinction;

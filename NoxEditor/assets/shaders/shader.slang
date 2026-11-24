@@ -7,27 +7,25 @@ struct InstanceBuffer
 
 struct PushConstant 
 {
-    UniformBufferObject* uboBuffer;
-    Vertex* vertexBuffer;
-    InstanceBuffer* instanceBuffer;
+    uint64_t uboBuffer;
+    uint64_t vertexBuffer;
+    uint64_t instanceBuffer;
 };
-[[vk::push_constant]]
-ConstantBuffer<PushConstant> pushConst;
 
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float3 color;
-    float2 fragTexCoord;
+    float3 color : TEXCOORD0;
+    float2 fragTexCoord : TEXCOORD1;
 };
 
 [shader("vertex")]
-VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) 
+VSOutput vertMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, uniform PushConstant pushConst) 
 {
     VSOutput output;
-    UniformBufferObject ubo = *pushConst.uboBuffer;
-    Vertex vertex = pushConst.vertexBuffer[vertexID];
-    InstanceBuffer instance = pushConst.instanceBuffer[instanceID];
+    UniformBufferObject ubo = loadUbo(pushConst.uboBuffer);
+    Vertex vertex = BufferRef<Vertex>(pushConst.vertexBuffer)[vertexID];
+    InstanceBuffer instance = BufferRef<InstanceBuffer>(pushConst.instanceBuffer)[instanceID];
     output.pos = mul(ubo.proj, mul(ubo.view, mul(instance.model, float4(vertex.pos, 1.0))));
     output.color = float3(1.0, 1.0, 1.0); // Set the color to white
     output.fragTexCoord = vertex.texCoord;
@@ -41,11 +39,11 @@ struct FSOutput
 };
 
 [shader("fragment")]
-FSOutput fragMain(VSOutput vertIn) : SV_TARGET 
+FSOutput fragMain(VSOutput vertIn, uniform PushConstant pushConst) : SV_TARGET 
 {
     FSOutput output;
     
-    UniformBufferObject ubo = *pushConst.uboBuffer;
+    UniformBufferObject ubo = loadUbo(pushConst.uboBuffer);
    
     Texture2D texHandle = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + 0, 0));
     SamplerState sampHandle = SamplerState.Handle(uint2(0, 0));

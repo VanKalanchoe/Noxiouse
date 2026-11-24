@@ -35,7 +35,7 @@ float3 outline_world(float4x4 invViewProj, float2 pixel, float2 size, float dept
 [shader("fragment")]
 float4 fragMain(VSOutput input, uniform PushConstantSceneOutline pushConstant) : SV_Target0
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(pushConstant.depthIndex, 0));
     Texture2D normalTex = Texture2D.Handle(uint2(pushConstant.normalIndex, 0));
     Texture2D materialTex = Texture2D.Handle(uint2(pushConstant.materialIndex, 0));
@@ -48,14 +48,14 @@ float4 fragMain(VSOutput input, uniform PushConstantSceneOutline pushConstant) :
     if (pushConstant.toonOnly != 0u && !gbuffer_toon(materialTex.Load(int3(pixel, 0)).b))
         discard;
 
-    const float3 camera = ubo->cameraWorldPos.xyz;
-    const float centerDistance = distance(outline_world(ubo->invViewProj, float2(pixel) + 0.5, float2(size), centerDepth), camera);
+    const float3 camera = ubo.cameraWorldPos.xyz;
+    const float centerDistance = distance(outline_world(ubo.invViewProj, float2(pixel) + 0.5, float2(size), centerDepth), camera);
     const float3 centerNormal = normalize(normalTex.Load(int3(pixel, 0)).rgb);
 
     // Depth steps relative to the distance (a step at 10 m is ten times one at 1 m); an orthographic view's "camera" is far back
     // along parallel rays, so there the reference is 10 m.
-    const bool orthographic = ubo->nonJitteredProj[3][3] > 0.5;
-    const float reference = orthographic ? 10.0 * ubo->unitsPerMeter : max(centerDistance, 1e-4);
+    const bool orthographic = ubo.nonJitteredProj[3][3] > 0.5;
+    const float reference = orthographic ? 10.0 * ubo.unitsPerMeter : max(centerDistance, 1e-4);
     const float thickness = max(pushConstant.params.x, 0.5);
     const float depthThreshold = pushConstant.params.y;
     const float normalThreshold = pushConstant.params.z;
@@ -74,7 +74,7 @@ float4 fragMain(VSOutput input, uniform PushConstantSceneOutline pushConstant) :
             edge = depthThreshold > 0.0 ? 1.0 : edge;
             continue;
         }
-        const float neighbourDistance = distance(outline_world(ubo->invViewProj, float2(neighbour) + 0.5, float2(size), neighbourDepth), camera);
+        const float neighbourDistance = distance(outline_world(ubo.invViewProj, float2(neighbour) + 0.5, float2(size), neighbourDepth), camera);
         const float farther = (neighbourDistance - centerDistance) / reference;
         if (depthThreshold > 0.0)
             edge = max(edge, smoothstep(depthThreshold, depthThreshold * 1.5, farther));

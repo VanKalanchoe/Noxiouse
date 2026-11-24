@@ -19,22 +19,22 @@ float pageBoundsError(float3 center, float radius, float error, float3 cameraPos
 [numthreads(64, 1, 1)]
 void computeMain(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID, uniform PushConstantGeometryFeedback pc)
 {
-    UniformBufferObject* ubo = (UniformBufferObject*)pc.matrixReference;
-    uint32_t* drawList = (uint32_t*)pc.drawListReference;
-    GeometryStreamingFeedback* feedback = (GeometryStreamingFeedback*)pc.feedbackReference;
-    GpuGeometryPage* pages = (GpuGeometryPage*)ubo->geometryPagesReference;
-    GpuInstance* instances = (GpuInstance*)ubo->sceneInstancesReference;
-    GpuTransform* transforms = (GpuTransform*)ubo->sceneTransformsReference;
-    GpuMesh* meshes = (GpuMesh*)ubo->sceneMeshesReference;
+    UniformBufferObject ubo = loadUbo(pc.matrixReference);
+    BufferRef<uint32_t> drawList = BufferRef<uint32_t>(pc.drawListReference);
+    RWBufferRef<GpuGeometryPage> pages = RWBufferRef<GpuGeometryPage>(ubo.geometryPagesReference);
+    RWBufferRef<uint> pageWords = RWBufferRef<uint>(ubo.geometryPagesReference);
+    BufferRef<GpuInstance> instances = BufferRef<GpuInstance>(ubo.sceneInstancesReference);
+    BufferRef<GpuTransform> transforms = BufferRef<GpuTransform>(ubo.sceneTransformsReference);
+    BufferRef<GpuMesh> meshes = BufferRef<GpuMesh>(ubo.sceneMeshesReference);
 
-    const float3 cameraPosition = ubo->frozenCameraWorldPos.xyz;
-    const float cameraProj = ubo->frozenProj[1][1];
-    const float threshold = max(ubo->lodErrorThreshold, 1e-6);
+    const float3 cameraPosition = ubo.frozenCameraWorldPos.xyz;
+    const float cameraProj = ubo.frozenProj[1][1];
+    const float threshold = max(ubo.lodErrorThreshold, 1e-6);
 
     for (uint entry = gid.x; entry < pc.drawCount; entry += pc.groupCount)
     {
         const uint slot = drawList[entry];
-        GpuMesh* mesh = &meshes[instances[slot].meshIndex];
+        const GpuMesh mesh = meshes[instances[slot].meshIndex];
         const uint pageOffset = mesh.pageOffset;
         if (pageOffset == NoGeometryRange)
             continue;
@@ -45,14 +45,14 @@ void computeMain(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID, uniform 
         for (uint local = gtid.x; local < pageCount; local += 64)
         {
             const uint index = pageOffset + local;
-            GpuGeometryPage* page = &pages[index];
+            const GpuGeometryPage page = pages[index];
             const float lodError = page.lodError;
             if (lodError >= ClusterTerminalError)
                 continue; // a root page
 
             // Full detail (or an orthographic view, which the cut does not measure): every page, nearest first.
             float priority;
-            if (ubo->lodFullDetail != 0)
+            if (ubo.lodFullDetail != 0)
             {
                 const float3 center = mul(world, float4(page.lodCenter, 1.0)).xyz;
                 priority = 1.0 / max(length(center - cameraPosition), 1e-3);
@@ -60,28 +60,26 @@ void computeMain(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID, uniform 
             else
             {
                 const float3 center = mul(world, float4(page.lodCenter, 1.0)).xyz;
-                const float error = pageBoundsError(center, page.lodRadius * maxScale, lodError * maxScale, cameraPosition, cameraProj, ubo->lodCameraNear);
-                if (!(error > ubo->lodErrorThreshold * GeometryPrefetchFactor))
+                const float error = pageBoundsError(center, page.lodRadius * maxScale, lodError * maxScale, cameraPosition, cameraProj, ubo.lodCameraNear);
+                if (!(error > ubo.lodErrorThreshold * GeometryPrefetchFactor))
                     continue;
                 priority = error / threshold;
             }
 
-            uint previous;
-            InterlockedExchange(page.requestFrame, pc.frame, previous);
+            const uint previous = AtomicExchange(pageWords, index * 8u + 6u, pc.frame);
             if (previous == pc.frame)
                 continue; // another instance reported it this frame
             const bool resident = page.resident != 0;
             if (resident && previous != 0xFFFFFFFF && previous / GeometryTouchInterval == pc.frame / GeometryTouchInterval)
                 continue; // reported in use this interval already
 
-            uint request;
-            InterlockedAdd(feedback.count, 1, request);
+            const uint request = AtomicAddRaw(pc.feedbackReference, 0u, 1u);
             if (request < GeometryRequestCapacity)
             {
                 GeometryPageRequest record;
                 record.page = index | (resident ? GeometryRequestResident : 0u);
                 record.priority = priority;
-                feedback.requests[request] = record;
+                StoreRWRaw<GeometryPageRequest>(pc.feedbackReference, 16u + request * 8u, record);
             }
         }
     }

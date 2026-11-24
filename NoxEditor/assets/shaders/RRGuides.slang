@@ -43,16 +43,16 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
         return;
 
     int2 pixel = int2(dispatchThreadID.xy);
-    UniformBufferObject* ubo = (UniformBufferObject*)pushConstant.matrixReference;
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     RWTexture2D<float4> diffuseOut = RWTexture2D<float4>.Handle(uint2(pushConstant.diffuseAlbedoStorageIndex, 0));
     RWTexture2D<float4> specularOut = RWTexture2D<float4>.Handle(uint2(pushConstant.specularAlbedoStorageIndex, 0));
     // The specular motion vectors: the surface's own where nothing better is known (RTXPT's default).
-    Texture2D<float2> velocityTex = Texture2D<float2>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.velocityTextureIndex, 0));
+    Texture2D<float2> velocityTex = Texture2D<float2>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.velocityTextureIndex, 0));
     RWTexture2D<float2> specularMotionOut = RWTexture2D<float2>.Handle(uint2(pushConstant.specularMotionStorageIndex, 0));
     specularMotionOut[pixel] = velocityTex.Load(int3(pixel, 0));
 
     // Background (reverse-Z: nothing drawn at depth 0): no reflectance, as the G-buffer clears it.
-    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
     float depth = depthTex.Load(int3(pixel, 0));
     if (depth <= 0.0)
     {
@@ -61,9 +61,9 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
         return;
     }
 
-    Texture2D albedoTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
-    Texture2D normalTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
-    Texture2D materialTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
+    Texture2D albedoTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferAlbedoIndex, 0));
+    Texture2D normalTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferNormalIndex, 0));
+    Texture2D materialTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.gbufferMaterialIndex, 0));
     float3 baseColor = albedoTex.Load(int3(pixel, 0)).rgb;
     float3 normalSample = normalTex.Load(int3(pixel, 0)).rgb;
     float4 materialSample = materialTex.Load(int3(pixel, 0));
@@ -85,11 +85,11 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
 
     // N.V from the pixel's world position (the jittered projection its depth was rasterized with).
     float2 uv = (float2(pixel) + 0.5) / float2(pushConstant.width, pushConstant.height);
-    float4 worldPosH = mul(ubo->invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
+    float4 worldPosH = mul(ubo.invViewProj, float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0));
     float3 worldPos = worldPosH.xyz / worldPosH.w;
     float lenSqN = dot(normalSample, normalSample);
     float3 n = lenSqN > 1e-6 ? normalSample * rsqrt(lenSqN) : float3(0.0, 1.0, 0.0);
-    const float3 toCamera = normalize(ubo->cameraWorldPos.xyz - worldPos);
+    const float3 toCamera = normalize(ubo.cameraWorldPos.xyz - worldPos);
     float NoV = dot(n, toCamera);
 
     // Under a clear coat what the base reflects is what the coat lets through, plus the coat's own reflection (lobe_ambient's
@@ -113,14 +113,14 @@ void guidesMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConsta
     // reflection ray went (a miss: the sky, far away) -- moves as the camera does; its motion is the reflection's.
     if (pushConstant.rawReflectionIndex != 0xFFFFFFFF && roughness < 0.25)
     {
-        Texture2D reflectionTex = Texture2D.Handle(uint2(ubo->imageHeapIndexOffset + pushConstant.rawReflectionIndex, 0));
+        Texture2D reflectionTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rawReflectionIndex, 0));
         // A ray that missed: Reflection.slang wrote reflection_miss_distance (shaderIO.h) in its alpha.
         const float hitDistance = min(reflectionTex.Load(int3(pixel, 0)).a, reflection_miss_distance(ubo));
-        if (hitDistance > 1e-3 * ubo->unitsPerMeter)
+        if (hitDistance > 1e-3 * ubo.unitsPerMeter)
         {
-            const float3 image = worldPos + normalize(worldPos - ubo->cameraWorldPos.xyz) * hitDistance;
-            const float4 currClip = mul(ubo->nonJitteredProj, mul(ubo->view, float4(image, 1.0)));
-            const float4 prevClip = mul(ubo->prevProj, mul(ubo->prevView, float4(image, 1.0)));
+            const float3 image = worldPos + normalize(worldPos - ubo.cameraWorldPos.xyz) * hitDistance;
+            const float4 currClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(image, 1.0)));
+            const float4 prevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(image, 1.0)));
             if (currClip.w > 1e-6 && prevClip.w > 1e-6)
                 specularMotionOut[pixel] = (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5); // as the G-buffer's
         }

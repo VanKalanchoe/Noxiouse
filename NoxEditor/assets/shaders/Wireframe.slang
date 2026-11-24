@@ -5,13 +5,14 @@
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float3 worldPos;
-    float3 normal;
-    float2 uv0;
-    float2 uv1;
-    float4 color;
-    nointerpolation uint drawID;
-    nointerpolation int entityID;
+    float3 worldPos : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+    float2 uv0 : TEXCOORD2;
+    float2 uv1 : TEXCOORD3;
+    float4 color : TEXCOORD4;
+    nointerpolation uint drawID : TEXCOORD5;
+    nointerpolation int entityID : TEXCOORD6;
+    float4 tangent : TEXCOORD7;
 };
 
 struct FSOutput
