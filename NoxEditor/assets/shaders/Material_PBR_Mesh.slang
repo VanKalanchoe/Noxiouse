@@ -14,6 +14,12 @@ struct VSOutput
     float4 tangent : TEXCOORD7; // world tangent, w the bitangent handedness (normal_from_map)
     float3 localPos : TEXCOORD8; // the vertex before skinning and morphs, in the mesh's space (a material graph's Local Position; last: a fragment stage
                                  // without it reads the same locations)
+#ifdef NOX_MATERIAL_GRAPH
+    float4 vertexInterp0 : TEXCOORD9;
+    float4 vertexInterp1 : TEXCOORD10;
+    float4 vertexInterp2 : TEXCOORD11;
+    float4 vertexInterp3 : TEXCOORD12;
+#endif
 };
 
 [shader("mesh")]
@@ -85,11 +91,23 @@ void meshMain
 
         float4 worldPos = mul(modelMatrix, localPos);
         float3 worldNormal = normalize(mul(float3x3(instance.normalMatrix), localNormal));
+        float4 vertColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors);
+        const float4 worldTangent = float4(mul((float3x3)modelMatrix, localTangent), v.tangent.w);
 #ifdef NOX_MATERIAL_GRAPH
+        const GpuMaterial graphMat = instances.material(sharedPayload.drawID);
         // The forward variant's mesh stage (ForwardMeshMaterialGraph.slang): a graph's World Position Offset for translucent surfaces.
-        worldPos.xyz += material_graph_offset(instances.material(sharedPayload.drawID), worldPos.xyz, worldNormal, v.uv0, v.uv1,
-                                              loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors), ubo.timeSeconds, ubo,
-                                              v.pos, float4(mul((float3x3)modelMatrix, localTangent), v.tangent.w));
+        worldPos.xyz += material_graph_offset(graphMat, worldPos.xyz, worldNormal, v.uv0, v.uv1,
+                                              vertColor, ubo.timeSeconds, ubo,
+                                              v.pos, worldTangent,
+                                              modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
+        MaterialGraphVertexOutputs graphVO = material_graph_eval_vertex(graphMat, worldPos.xyz, worldNormal, v.uv0, v.uv1,
+                                                                        vertColor, ubo.timeSeconds, ubo,
+                                                                        v.pos, worldTangent,
+                                                                        modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
+        if ((graphMat.graphOutputs & MaterialGraphOutputVertexNormal) != 0u)
+            worldNormal = graphVO.normal;
+        if ((graphMat.graphOutputs & MaterialGraphOutputVertexColor) != 0u)
+            vertColor = graphVO.color;
 #endif
         float4 clipPos = depth_bias_clip(mul(viewProj, worldPos), worldPos.xyz, ubo.cameraWorldPos.xyz, instance.depthBias); // as the visibility pass
 
@@ -98,12 +116,18 @@ void meshMain
         vertices[i].normal = worldNormal;
         vertices[i].uv0 = v.uv0;
         vertices[i].uv1 = v.uv1;
-        vertices[i].color = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + localVertexIndex, instance.vertexColors); // glTF COLOR_0
+        vertices[i].color = vertColor; // glTF COLOR_0 (or graph Vertex Color override)
         vertices[i].entityID = instance.entityID;
         vertices[i].drawID = sharedPayload.drawID;
         // Along the surface: with the model matrix itself, not the normal matrix (as GBufferMaterial.slang).
-        vertices[i].tangent = float4(mul((float3x3)modelMatrix, localTangent), v.tangent.w);
+        vertices[i].tangent = worldTangent;
         vertices[i].localPos = v.pos;
+#ifdef NOX_MATERIAL_GRAPH
+        vertices[i].vertexInterp0 = graphVO.interp[0];
+        vertices[i].vertexInterp1 = graphVO.interp[1];
+        vertices[i].vertexInterp2 = graphVO.interp[2];
+        vertices[i].vertexInterp3 = graphVO.interp[3];
+#endif
     }
 
     // Process triangles

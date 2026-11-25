@@ -235,7 +235,11 @@ float3 shadeRayHit(UniformBufferObject ubo, uint instanceSlot, uint primitive, f
     float3 specularF90 = float3(1.0);
     bool hasLobes = false;
     LobeShading lobeShading = (LobeShading)0;
-    if (hitLut.lobes != 0u && hitLut.workflow != 1.0)
+    if ((hitLut.lobes != 0u
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+         || (graphOutputs & MaterialGraphOutputAllLobes) != 0u
+#endif
+        ) && hitLut.workflow != 1.0)
     {
         GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[hitLut.materialIndex];
         MaterialSampleCoords coords;
@@ -251,9 +255,16 @@ float3 shadeRayHit(UniformBufferObject ubo, uint instanceSlot, uint primitive, f
         const float3x3 world = (float3x3)BufferRef<GpuTransform>(ubo.sceneTransformsReference)[instanceSlot].world;
         float3 hitTangent = mul(world, w0 * vertex0.tangent.xyz + w1 * vertex1.tangent.xyz + w2 * vertex2.tangent.xyz);
         const bool backFace = hitLut.doubleSided != 0 && dot(mul((float3x3)hitLut.normalMatrix, w0 * vertex0.normal + w1 * vertex1.normal + w2 * vertex2.normal), -R) < 0.0;
-        float3 anisotropicT;
-        GBufferLobes lobes = evaluate_material_lobes(ubo, material, coords, textureSampler, backFace ? -hitNormal : hitNormal, hitTangent,
-                                                     vertex0.tangent.w < 0.0 ? -1.0 : 1.0, backFace, anisotropicT);
+        float3 anisotropicT = float3(0.0);
+        GBufferLobes lobes = hitLut.lobes != 0u
+            ? evaluate_material_lobes(ubo, material, coords, textureSampler, backFace ? -hitNormal : hitNormal, hitTangent,
+                                      vertex0.tangent.w < 0.0 ? -1.0 : 1.0, backFace, anisotropicT)
+            : gbuffer_default_lobes();
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+        float hitDiffuseTrans = material.diffuseTransmission;
+        material_graph_apply_lobes(graphOutputs, graphSurface, material, backFace ? -hitNormal : hitNormal, hitTangent,
+                                   vertex0.tangent.w < 0.0 ? -1.0 : 1.0, backFace, -R, lobes, anisotropicT, hitDiffuseTrans);
+#endif
         if (lobes.coat > 0.0)
             lobes.coatNormal = lobe_facing_normal(lobes.coatNormal, -R);
         hasLobes = lobes.flags != 0u;

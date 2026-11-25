@@ -465,10 +465,11 @@ namespace Nox
         // the last image drawn completely (after a resize the old one, until the new size has been drawn once; null before the first).
         // grid: the view's world grid (Renderer2D::MakeGrid), or null.
         // Slots 0-3 are the editor's viewports; the asset previews use their own (preview: no shadow rays, no DDGI, fixed exposure).
-        static constexpr uint32_t MaxExtraViews = 7;
+        static constexpr uint32_t LivePreviewCount = 4;
         static constexpr uint32_t ThumbnailView = 4;
         static constexpr uint32_t LivePreviewView = 5;
-        static constexpr uint32_t AnimationPreviewView = 6;
+        static constexpr uint32_t AnimationPreviewView = LivePreviewView + LivePreviewCount;
+        static constexpr uint32_t MaxExtraViews = AnimationPreviewView + 1;
         // Show flags of an editor viewport drawn as an extra view (its View menu): base colors without lighting, the triangles' edges
         // over the image, no sky, no particles, the selection's outline.
         enum ExtraViewFlags : uint32_t
@@ -1521,6 +1522,7 @@ namespace Nox
         // Raster glass's screen-space reflections (SSRCommon.slang): a copy of the opaque depth the transparent passes read while they
         // draw into it, and the SSR settings in the uniforms -- with the refraction source (what the rays hit), where SSR stands in for
         // the RT reflections.
+        void addTransparentSceneDepthCopy();
         void addTransparentReflectionInputs();
         void createAVBOITPipelines(bool forceCompile = false);
         void declareAVBOITPrepassInputs(RGBuilder& builder);

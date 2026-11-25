@@ -203,7 +203,7 @@ namespace Nox
                 continue;
             if (graph.Program.Valid)
             {
-                graphSources.push_back({ graph.Path, graph.Program.Code, graph.Program.MaskCode, graph.Program.SurfaceCode });
+                graphSources.push_back({ graph.Path, graph.Program.Code, graph.Program.MaskCode, graph.Program.SurfaceCode, graph.Program.VertexCode });
                 programs.emplace(graph.Path, graph.Program);
             }
             else

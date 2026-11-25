@@ -243,12 +243,13 @@ namespace Nox
     {
         if ((e.Modifiers & NoxUI::UIMod::Ctrl) == 0)
             return false;
-        if (e.KeyCode == SDL_SCANCODE_Z)
+        const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
+        if (key == NoxUI::UIKey::Z)
         {
             (e.Modifiers & NoxUI::UIMod::Shift) ? Redo() : Undo();
             return true;
         }
-        if (e.KeyCode == SDL_SCANCODE_Y)
+        if (key == NoxUI::UIKey::Y)
         {
             Redo();
             return true;

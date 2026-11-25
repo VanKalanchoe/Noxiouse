@@ -447,12 +447,13 @@ namespace Nox
     {
         if (!m_Machine)
             return false;
-        if (e.KeyCode == SDL_SCANCODE_F)
+        const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
+        if (key == NoxUI::UIKey::F)
         {
             FrameAll();
             return true;
         }
-        if (e.KeyCode == SDL_SCANCODE_DELETE || e.KeyCode == SDL_SCANCODE_BACKSPACE)
+        if (key == NoxUI::UIKey::Delete || key == NoxUI::UIKey::Backspace)
         {
             if (SelectedTransition >= 0 && SelectedTransition < static_cast<int>(m_Machine->Transitions.size()))
             {

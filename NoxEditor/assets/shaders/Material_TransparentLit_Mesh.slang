@@ -52,6 +52,10 @@ struct VSOutput
     float4 tangent : TEXCOORD7; // world tangent, w the bitangent handedness (Material_PBR_Mesh.slang)
 #ifdef NOX_MATERIAL_GRAPH
     float3 localPos : TEXCOORD8; // the vertex before skinning and morphs (a graph's Local Position; Material_PBR_Mesh.slang writes it last)
+    float4 vertexInterp0 : TEXCOORD9;
+    float4 vertexInterp1 : TEXCOORD10;
+    float4 vertexInterp2 : TEXCOORD11;
+    float4 vertexInterp3 : TEXCOORD12;
 #endif
 };
 
@@ -377,9 +381,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // A Custom Lit surface's UV footprint (CustomLitSurface::uvFootprint), here while every pixel of the quad is still running.
     const float customUVFootprint = max(length(ddx(vertIn.uv0)), length(ddy(vertIn.uv0)));
 #endif
+    const float3 materialNormalRaw = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : normalize(vertIn.normal);
 #ifdef NOX_MATERIAL_GRAPH
     // A material graph's inputs (MaterialGraph.slang) with their screen derivatives, here while every pixel of the quad is still running.
-    MaterialGraphInputs graphIn;
+    MaterialGraphInputs graphIn = (MaterialGraphInputs)0;
     {
         graphIn.uv0 = vertIn.uv0;
         graphIn.uv0Dx = ddx(vertIn.uv0);
@@ -392,16 +397,47 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         graphIn.positionDy = ddy(vertIn.worldPos);
         const float3 vertexNormal = normalize(vertIn.normal);
         graphIn.normal = instance.doubleSided != 0 && !isFrontFace ? -vertexNormal : vertexNormal;
+        graphIn.pixelNormal = instance.doubleSided != 0 && !isFrontFace ? -materialNormalRaw : materialNormalRaw;
         graphIn.localPosition = vertIn.localPos;
         graphIn.localPositionDx = ddx(vertIn.localPos);
         graphIn.localPositionDy = ddy(vertIn.localPos);
         graphIn.tangent = vertIn.tangent;
+        graphIn.objectToWorld = instance.modelMatrix;
+        graphIn.objectNormalMatrix = instance.normalMatrix;
+        graphIn.objectBoundsMin = instance.boundsMin;
+        graphIn.objectBoundsMax = instance.boundsMax;
+        graphIn.vertexInterp[0] = vertIn.vertexInterp0;
+        graphIn.vertexInterp[1] = vertIn.vertexInterp1;
+        graphIn.vertexInterp[2] = vertIn.vertexInterp2;
+        graphIn.vertexInterp[3] = vertIn.vertexInterp3;
+        graphIn.vertexInterpDx[0] = ddx(vertIn.vertexInterp0);
+        graphIn.vertexInterpDx[1] = ddx(vertIn.vertexInterp1);
+        graphIn.vertexInterpDx[2] = ddx(vertIn.vertexInterp2);
+        graphIn.vertexInterpDx[3] = ddx(vertIn.vertexInterp3);
+        graphIn.vertexInterpDy[0] = ddy(vertIn.vertexInterp0);
+        graphIn.vertexInterpDy[1] = ddy(vertIn.vertexInterp1);
+        graphIn.vertexInterpDy[2] = ddy(vertIn.vertexInterp2);
+        graphIn.vertexInterpDy[3] = ddy(vertIn.vertexInterp3);
         graphIn.vertexColor = vertIn.color;
         graphIn.view = normalize(ubo.cameraWorldPos.xyz - vertIn.worldPos);
         const float4 graphClip = mul(ubo.proj, mul(ubo.view, float4(vertIn.worldPos, 1.0)));
         graphIn.screenUV = graphClip.w > 1e-6 ? float2(graphClip.x / graphClip.w * 0.5 + 0.5, 0.5 - graphClip.y / graphClip.w * 0.5) : float2(0.5);
         graphIn.screenUVDx = ddx(graphIn.screenUV);
         graphIn.screenUVDy = ddy(graphIn.screenUV);
+        graphIn.pixelDepth = abs(mul(ubo.view, float4(vertIn.worldPos, 1.0)).z);
+        if (ubo.transparentSceneDepthTextureIndex != 0xFFFFFFFF)
+        {
+            Texture2D<float> sceneDepthTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.transparentSceneDepthTextureIndex, 0));
+            uint depthW = 1u, depthH = 1u;
+            sceneDepthTex.GetDimensions(depthW, depthH);
+            const int2 depthCoord = clamp(int2(graphIn.screenUV * float2(depthW, depthH)), int2(0, 0), int2(int(depthW) - 1, int(depthH) - 1));
+            const float rawSceneDepth = sceneDepthTex.Load(int3(depthCoord, 0)).r;
+            graphIn.sceneDepth = material_graph_linear_depth(ubo, graphIn.screenUV, rawSceneDepth);
+        }
+        else
+        {
+            graphIn.sceneDepth = 1e6 * ubo.unitsPerMeter;
+        }
         graphIn.time = ubo.timeSeconds;
         graphIn.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
         graphIn.material = instances.material(vertIn.drawID);
@@ -519,7 +555,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     // A material graph: the Material Output pins it connects replace the material's values (normal, emissive and occlusion below,
     // where this shader reads them); Opacity is a blended surface's alpha.
     const uint graphOutputs = graphIn.material.graphSlot != 0xFFFFFFFFu ? graphIn.material.graphOutputs : 0u;
-    MaterialGraphOutputs graphOut;
+    MaterialGraphOutputs graphOut = (MaterialGraphOutputs)0;
     graphOut.baseColor = baseColor.rgb;
     graphOut.metallic = metallic;
     graphOut.roughness = perceptualRoughness;
@@ -527,6 +563,12 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     graphOut.emissive = float3(0.0);
     graphOut.occlusion = 1.0;
     graphOut.opacity = baseColor.a;
+    graphOut.specular = 1.0;
+    graphOut.specularColor = float3(1.0);
+    graphOut.clearCoatNormal = float3(0.0, 0.0, 1.0);
+    graphOut.anisotropyDirection = float2(1.0, 0.0);
+    graphOut.ior = graphIn.material.ior > 0.0 ? graphIn.material.ior : 1.5;
+    graphOut.attenuationColor = float3(1.0);
     if (graphOutputs != 0u)
     {
         material_graph_surface(graphIn.material.graphSlot, graphIn, graphOut);
@@ -546,6 +588,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     {
         transmission *= SampleMaterialTextureBias(ubo, instance.transmissionTextureIndex, sampLinearHandle, instance_texture_uv(instance, instance.transmissionTextureSet, vertIn.uv0, vertIn.uv1), ubo.textureLodBias).r;
     }
+#ifdef NOX_MATERIAL_GRAPH
+    if ((graphOutputs & MaterialGraphOutputTransmission) != 0u)
+        transmission = saturate(graphOut.transmission);
+#endif
     // Opaque and masked surfaces drawn with this shader (the editor's extra views have no G-buffer, Renderer::addExtraViewPasses):
     // nothing shows through, whatever the base color's alpha or the transmission says.
     if ((pushConstant.meshletCulling & MESHLET_SHADE_OPAQUE) != 0)
@@ -580,6 +626,15 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
         lobes = evaluate_material_lobes(ubo, gpuMaterial, coords, sampLinearHandle, normalize(vertIn.normal), vertIn.tangent.xyz, vertIn.tangent.w,
                                         instance.doubleSided != 0 && !isFrontFace, anisotropicT);
     }
+#ifdef NOX_MATERIAL_GRAPH
+    float graphDiffuseTransmission = instance.diffuseTransmission;
+    if (graphOutputs != 0u && instance.shadingModel == ShadingModelDefaultLit && instance.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS)
+    {
+        const float3 graphViewDir = normalize(ubo.cameraWorldPos.xyz - vertIn.worldPos);
+        material_graph_apply_lobes(graphOutputs, graphOut, gpuMaterial, normalize(vertIn.normal), vertIn.tangent.xyz, vertIn.tangent.w,
+                                   instance.doubleSided != 0 && !isFrontFace, graphViewDir, lobes, anisotropicT, graphDiffuseTransmission);
+    }
+#endif
     const bool hasLobes = lobes.flags != 0u;
     // KHR_materials_specular: the dielectric F0 tinted (the IOR's already in it) and weighted, F90 the weight.
     if ((lobes.flags & MaterialLobeSpecular) != 0u)
@@ -593,7 +648,7 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     float3 specularEnvironmentR90 = (lobes.flags & MaterialLobeSpecular) != 0u ? float3(lerp(lobes.specularWeight, 1.0, metallic))
                                                                                 : clamp(float3(reflectance * 25.0), 0.0, 1.0);
 
-    float3 n = (instance.normalTextureIndex != 0xFFFFFFFF) ? getNormal(ubo, instance, vertIn, sampLinearHandle) : normalize(vertIn.normal);
+    float3 n = materialNormalRaw;
 #ifdef NOX_MATERIAL_GRAPH
     if ((graphOutputs & MaterialGraphOutputNormal) != 0u)
         n = material_graph_world_normal(graphOut.normal, normalize(vertIn.normal), vertIn.tangent.xyz, vertIn.tangent.w);

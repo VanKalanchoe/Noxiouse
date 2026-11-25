@@ -456,6 +456,36 @@ static void TestMaterialGraph()
     const MaterialGraphProgram localLitProgram = CompileMaterialGraph(localLit);
     CHECK(!localLitProgram.Valid && localLitProgram.Error.find("Local Position cannot feed Custom Light") != std::string::npos,
           "Local Position into Custom Light is refused (the lighting runs from the G-buffer): '{}'", localLitProgram.Error);
+    // Vertex-stage inputs (step 4e part 2): Object Position, Object Bounds (Center / Extent / Radius), Transform (Local/World/View/Clip),
+    // and Matrix (Model / View / Projection + inverses).
+    NodeGraph objGraph = CreateEmptyMaterialGraph();
+    const uint32_t objPos = node(objGraph, "Object Position");
+    const uint32_t objBounds = node(objGraph, "Object Bounds");
+    const uint32_t xform = node(objGraph, "Transform", { { "From", int32_t(1) }, { "To", int32_t(2) }, { "Kind", int32_t(0) } }); // World -> View Direction
+    const uint32_t matNode = node(objGraph, "Matrix", { { "Matrix", int32_t(2) } }); // View matrix
+    link(objGraph, node(objGraph, "Vertex Normal"), 0, xform, 0);
+    link(objGraph, xform, 0, objGraph.OutputNode, 0);   // Base Color
+    link(objGraph, objBounds, 2, objGraph.OutputNode, 2); // Roughness <- Radius
+    link(objGraph, objPos, 0, objGraph.OutputNode, 4);    // Emissive <- Object Position
+    link(objGraph, matNode, 0, objGraph.OutputNode, 8);   // WPO <- View Row 0
+    const MaterialGraphProgram objProgram = CompileMaterialGraph(objGraph);
+    CHECK(objProgram.Valid &&
+              objProgram.SurfaceCode.find("material_graph_object_position(i)") != std::string::npos &&
+              objProgram.SurfaceCode.find("material_graph_object_bounds_extent(i)") != std::string::npos &&
+              objProgram.SurfaceCode.find("material_graph_transform(i,") != std::string::npos &&
+              objProgram.Code.find("material_graph_matrix(i, 2u)") != std::string::npos,
+          "Step 4e part 2 nodes compile into surface and WPO: '{}'", objProgram.Error);
+    NodeGraph objLitRefused = CreateEmptyMaterialGraph();
+    link(objLitRefused, node(objLitRefused, "Object Position"), 0, objLitRefused.OutputNode, 9);
+    CHECK(!CompileMaterialGraph(objLitRefused).Valid, "Object Position into Custom Light is refused");
+    NodeGraph localXformLit = CreateEmptyMaterialGraph();
+    const uint32_t localXform = node(localXformLit, "Transform", { { "From", int32_t(0) }, { "To", int32_t(1) }, { "Kind", int32_t(0) } });
+    link(localXformLit, localXform, 0, localXformLit.OutputNode, 9);
+    CHECK(!CompileMaterialGraph(localXformLit).Valid, "Transform using Local space into Custom Light is refused");
+    NodeGraph worldViewXformLit = CreateEmptyMaterialGraph();
+    const uint32_t wvXform = node(worldViewXformLit, "Transform", { { "From", int32_t(1) }, { "To", int32_t(2) }, { "Kind", int32_t(0) } });
+    link(worldViewXformLit, wvXform, 0, worldViewXformLit.OutputNode, 9);
+    CHECK(CompileMaterialGraph(worldViewXformLit).Valid, "Transform World -> View works in Custom Light");
     // The stage of every Material Output pin in its tooltip (step 4d).
     const NodeTypeDesc* stageOutput = NodeTypeRegistry::Find(kMaterialGraphDomain, "Material Output");
     CHECK(stageOutput && stageOutput->Inputs[0].Tooltip.starts_with("Per pixel") && stageOutput->Inputs[8].Tooltip.starts_with("Per vertex") &&
@@ -480,9 +510,96 @@ static void TestMaterialGraph()
     link(screenSurface, node(screenSurface, "Screen Position"), 0, screenSurface.OutputNode, 4);
     CHECK(CompileMaterialGraph(screenSurface).Valid, "Screen Position still feeds the surface pins");
     const NodeTypeDesc* outputType = NodeTypeRegistry::Find(kMaterialGraphDomain, "Material Output");
-    CHECK(outputType && outputType->Inputs.size() == 11 && outputType->Inputs[7].Name == "Opacity Mask" && outputType->Inputs[8].Name == "World Position Offset" &&
-              outputType->Inputs[9].Name == "Custom Light" && outputType->Inputs[10].Name == "Custom Ambient",
-          "the Material Output's pins: Opacity Mask stays pin 7, World Position Offset pin 8, Custom Light / Custom Ambient appended as 9 / 10 (saved links keep their pins)");
+    CHECK(outputType && outputType->Inputs.size() == 31 && outputType->Inputs[7].Name == "Opacity Mask" && outputType->Inputs[8].Name == "World Position Offset" &&
+              outputType->Inputs[9].Name == "Custom Light" && outputType->Inputs[10].Name == "Custom Ambient" &&
+              outputType->Inputs[11].Name == "Vertex Normal" && outputType->Inputs[12].Name == "Vertex Color" &&
+              outputType->Inputs[13].Name == "Specular" && outputType->Inputs[15].Name == "Clear Coat" &&
+              outputType->Inputs[22].Name == "Transmission" && outputType->Inputs[28].Name == "Iridescence" &&
+              outputType->Inputs[30].Name == "Dispersion",
+          "the Material Output's pins: core 0..12 kept at their indices, lobe pins 13..30 appended (step 4g)");
+    // Pixel-stage lobe outputs (step 4g): Clear Coat, Sheen, Iridescence, Anisotropy, Transmission, IOR, Dispersion.
+    NodeGraph lobeGraph = CreateEmptyMaterialGraph();
+    const uint32_t coatVal = node(lobeGraph, "Constant", { { "Value", 0.85f } });
+    const uint32_t iorVal = node(lobeGraph, "Constant", { { "Value", 1.7f } });
+    const uint32_t iridThick = node(lobeGraph, "Constant", { { "Value", 420.0f } });
+    const uint32_t sheenCol = node(lobeGraph, "Color", { { "Value", glm::vec4(0.9f, 0.2f, 0.5f, 1.0f) } });
+    link(lobeGraph, coatVal, 0, lobeGraph.OutputNode, 15);    // Clear Coat
+    link(lobeGraph, sheenCol, 0, lobeGraph.OutputNode, 18);   // Sheen Color
+    link(lobeGraph, iorVal, 0, lobeGraph.OutputNode, 23);     // IOR
+    link(lobeGraph, coatVal, 0, lobeGraph.OutputNode, 28);    // Iridescence
+    link(lobeGraph, iridThick, 0, lobeGraph.OutputNode, 29);  // Iridescence Thickness
+    link(lobeGraph, coatVal, 0, lobeGraph.OutputNode, 30);    // Dispersion
+    const MaterialGraphProgram lobeProgram = CompileMaterialGraph(lobeGraph);
+    CHECK(lobeProgram.Valid &&
+              (lobeProgram.Outputs & MaterialGraphOutputClearCoat) != 0 &&
+              (lobeProgram.Outputs & MaterialGraphOutputSheenColor) != 0 &&
+              (lobeProgram.Outputs & MaterialGraphOutputIOR) != 0 &&
+              (lobeProgram.Outputs & MaterialGraphOutputIridescence) != 0 &&
+              (lobeProgram.Outputs & MaterialGraphOutputIridescenceThickness) != 0 &&
+              (lobeProgram.Outputs & MaterialGraphOutputDispersion) != 0 &&
+              lobeProgram.SurfaceCode.find("o.clearCoat =") != std::string::npos &&
+              lobeProgram.SurfaceCode.find("o.sheenColor =") != std::string::npos &&
+              lobeProgram.SurfaceCode.find("o.ior =") != std::string::npos &&
+              lobeProgram.SurfaceCode.find("o.iridescenceThickness =") != std::string::npos &&
+              lobeProgram.SurfaceCode.find("o.dispersion =") != std::string::npos,
+          "Step 4g lobe outputs compile cleanly into SurfaceCode: '{}'", lobeProgram.Error);
+    // Vertex-stage outputs (step 4f): Vertex Interpolator (up to 4 slots), Vertex Normal override, Vertex Color override.
+    NodeGraph interpGraph = CreateEmptyMaterialGraph();
+    const uint32_t interp = node(interpGraph, "Vertex Interpolator");
+    const uint32_t uvMul = node(interpGraph, "Multiply", { { "B", 2.0f } });
+    link(interpGraph, node(interpGraph, "Texture Coordinate"), 0, uvMul, 0);
+    link(interpGraph, uvMul, 0, interp, 0);
+    link(interpGraph, interp, 0, interpGraph.OutputNode, 0);                        // Base Color <- interpolated float2
+    link(interpGraph, node(interpGraph, "Vertex Normal"), 0, interpGraph.OutputNode, 11); // Vertex Normal override
+    link(interpGraph, node(interpGraph, "Color"), 1, interpGraph.OutputNode, 12);         // Vertex Color override
+    const MaterialGraphProgram interpProgram = CompileMaterialGraph(interpGraph);
+    CHECK(interpProgram.Valid &&
+              (interpProgram.Outputs & MaterialGraphOutputVertexInterpolators) != 0 &&
+              (interpProgram.Outputs & MaterialGraphOutputVertexNormal) != 0 &&
+              (interpProgram.Outputs & MaterialGraphOutputVertexColor) != 0 &&
+              interpProgram.VertexCode.find("vo.interp[0u]") != std::string::npos &&
+              interpProgram.VertexCode.find("vo.normal =") != std::string::npos &&
+              interpProgram.VertexCode.find("vo.color =") != std::string::npos &&
+              interpProgram.SurfaceCode.find("i.vertexInterp[0u].xy") != std::string::npos,
+          "Step 4f Vertex Interpolator + Vertex Normal / Color overrides compile cleanly: '{}'", interpProgram.Error);
+    NodeGraph interpScreen = CreateEmptyMaterialGraph();
+    const uint32_t interpBad = node(interpScreen, "Vertex Interpolator");
+    link(interpScreen, node(interpScreen, "Screen Position"), 0, interpBad, 0);
+    link(interpScreen, interpBad, 0, interpScreen.OutputNode, 0);
+    CHECK(!CompileMaterialGraph(interpScreen).Valid, "Screen Position feeding Vertex Interpolator is refused (runs per vertex)");
+    NodeGraph interpLight = CreateEmptyMaterialGraph();
+    const uint32_t interpToLight = node(interpLight, "Vertex Interpolator");
+    link(interpLight, interpToLight, 0, interpLight.OutputNode, 9);
+    CHECK(!CompileMaterialGraph(interpLight).Valid, "Vertex Interpolator feeding Custom Light is refused");
+
+    // Pixel-stage inputs (step 4h): Pixel Normal (after Normal pin), Scene Depth, Pixel Depth, Depth Fade.
+    NodeGraph pixelInputsGraph = CreateEmptyMaterialGraph();
+    const uint32_t normalTex = node(pixelInputsGraph, "Texture Sample", { { "Normal Map", true } });
+    const uint32_t pixNorm = node(pixelInputsGraph, "Pixel Normal");
+    const uint32_t fresnel = node(pixelInputsGraph, "Fresnel");
+    const uint32_t depthFade = node(pixelInputsGraph, "Depth Fade", { { "Fade Distance", 50.0f } });
+    const uint32_t sceneDepth = node(pixelInputsGraph, "Scene Depth");
+    const uint32_t pixelDepth = node(pixelInputsGraph, "Pixel Depth");
+    const uint32_t depthSub = node(pixelInputsGraph, "Subtract");
+    link(pixelInputsGraph, normalTex, 0, pixelInputsGraph.OutputNode, 3);    // Normal
+    link(pixelInputsGraph, pixNorm, 0, fresnel, 2);                          // Fresnel.Normal <- Pixel Normal
+    link(pixelInputsGraph, fresnel, 0, pixelInputsGraph.OutputNode, 4);      // Emissive
+    link(pixelInputsGraph, depthFade, 0, pixelInputsGraph.OutputNode, 6);    // Opacity
+    link(pixelInputsGraph, sceneDepth, 0, depthSub, 0);
+    link(pixelInputsGraph, pixelDepth, 0, depthSub, 1);
+    link(pixelInputsGraph, depthSub, 0, pixelInputsGraph.OutputNode, 2);     // Roughness
+    const MaterialGraphProgram pixelInputsProgram = CompileMaterialGraph(pixelInputsGraph);
+    CHECK(pixelInputsProgram.Valid &&
+              pixelInputsProgram.SurfaceCode.find("const float3 _pixelNormal = material_graph_world_normal(") != std::string::npos &&
+              pixelInputsProgram.SurfaceCode.find("i.sceneDepth") != std::string::npos &&
+              pixelInputsProgram.SurfaceCode.find("i.pixelDepth") != std::string::npos,
+          "Step 4h Pixel Normal (post-Normal pin), Scene Depth, Pixel Depth & Depth Fade compile cleanly: '{}'", pixelInputsProgram.Error);
+    NodeGraph pixelNormCycle = CreateEmptyMaterialGraph();
+    link(pixelNormCycle, node(pixelNormCycle, "Pixel Normal"), 0, pixelNormCycle.OutputNode, 3);
+    CHECK(!CompileMaterialGraph(pixelNormCycle).Valid, "Pixel Normal feeding Normal pin is refused");
+    NodeGraph depthInWpo = CreateEmptyMaterialGraph();
+    link(depthInWpo, node(depthInWpo, "Scene Depth"), 0, depthInWpo.OutputNode, 8);
+    CHECK(!CompileMaterialGraph(depthInWpo).Valid, "Scene Depth feeding World Position Offset is refused");
 
     // Every node is offered in the node graph editor's Add menu: a "Parameter" property marks a node reading a graph variable, which the
     // menu lists only as "Get <variable>" -- Texture Sample had one and was missing from the menu (the user's test).

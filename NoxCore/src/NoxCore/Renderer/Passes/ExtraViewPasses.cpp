@@ -15,16 +15,66 @@ namespace Nox
     namespace
     {
         // Graph names must outlive the graph: a literal per view.
-        constexpr const char* kCullNames[Renderer::MaxExtraViews] = { "Viewport 1 Culling", "Viewport 2 Culling", "Viewport 3 Culling", "Viewport 4 Culling", "Thumbnail Culling", "Material Preview Culling", "Animation Preview Culling" };
-        constexpr const char* kParticleNames[Renderer::MaxExtraViews] = { "Viewport 1 Particles", "Viewport 2 Particles", "Viewport 3 Particles", "Viewport 4 Particles", "Thumbnail Particles", "Material Preview Particles", "Animation Preview Particles" };
-        constexpr const char* kForwardNames[Renderer::MaxExtraViews] = { "Viewport 1 Forward", "Viewport 2 Forward", "Viewport 3 Forward", "Viewport 4 Forward", "Thumbnail Forward", "Material Preview Forward", "Animation Preview Forward" };
-        constexpr const char* kPostNames[Renderer::MaxExtraViews] = { "Viewport 1 Post Process", "Viewport 2 Post Process", "Viewport 3 Post Process", "Viewport 4 Post Process", "Thumbnail Post Process", "Material Preview Post Process", "Animation Preview Post Process" };
-        constexpr const char* kOverlayNames[Renderer::MaxExtraViews] = { "Viewport 1 2D Overlay", "Viewport 2 2D Overlay", "Viewport 3 2D Overlay", "Viewport 4 2D Overlay", "Thumbnail 2D Overlay", "Material Preview 2D Overlay", "Animation Preview 2D Overlay" };
-        constexpr const char* kOutputNames[Renderer::MaxExtraViews] = { "Viewport 1 Image", "Viewport 2 Image", "Viewport 3 Image", "Viewport 4 Image", "Thumbnail Image", "Material Preview Image", "Animation Preview Image" };
-        constexpr const char* kHdrNames[Renderer::MaxExtraViews] = { "Viewport 1 HDR", "Viewport 2 HDR", "Viewport 3 HDR", "Viewport 4 HDR", "Thumbnail HDR", "Material Preview HDR", "Animation Preview HDR" };
-        constexpr const char* kEntityNames[Renderer::MaxExtraViews] = { "Viewport 1 Entity IDs", "Viewport 2 Entity IDs", "Viewport 3 Entity IDs", "Viewport 4 Entity IDs", "Thumbnail Entity IDs", "Material Preview Entity IDs", "Animation Preview Entity IDs" };
-        constexpr const char* kOutlineNames[Renderer::MaxExtraViews] = { "Viewport 1 Outline", "Viewport 2 Outline", "Viewport 3 Outline", "Viewport 4 Outline", "Thumbnail Outline", "Material Preview Outline", "Animation Preview Outline" };
-        constexpr const char* kDepthNames[Renderer::MaxExtraViews] = { "Viewport 1 Depth", "Viewport 2 Depth", "Viewport 3 Depth", "Viewport 4 Depth", "Thumbnail Depth", "Material Preview Depth", "Animation Preview Depth" };
+        constexpr const char* kCullNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Culling", "Viewport 2 Culling", "Viewport 3 Culling", "Viewport 4 Culling",
+            "Thumbnail Culling",
+            "Material Preview 1 Culling", "Material Preview 2 Culling", "Material Preview 3 Culling", "Material Preview 4 Culling",
+            "Animation Preview Culling"
+        };
+        constexpr const char* kParticleNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Particles", "Viewport 2 Particles", "Viewport 3 Particles", "Viewport 4 Particles",
+            "Thumbnail Particles",
+            "Material Preview 1 Particles", "Material Preview 2 Particles", "Material Preview 3 Particles", "Material Preview 4 Particles",
+            "Animation Preview Particles"
+        };
+        constexpr const char* kForwardNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Forward", "Viewport 2 Forward", "Viewport 3 Forward", "Viewport 4 Forward",
+            "Thumbnail Forward",
+            "Material Preview 1 Forward", "Material Preview 2 Forward", "Material Preview 3 Forward", "Material Preview 4 Forward",
+            "Animation Preview Forward"
+        };
+        constexpr const char* kPostNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Post Process", "Viewport 2 Post Process", "Viewport 3 Post Process", "Viewport 4 Post Process",
+            "Thumbnail Post Process",
+            "Material Preview 1 Post Process", "Material Preview 2 Post Process", "Material Preview 3 Post Process", "Material Preview 4 Post Process",
+            "Animation Preview Post Process"
+        };
+        constexpr const char* kOverlayNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 2D Overlay", "Viewport 2 2D Overlay", "Viewport 3 2D Overlay", "Viewport 4 2D Overlay",
+            "Thumbnail 2D Overlay",
+            "Material Preview 1 2D Overlay", "Material Preview 2 2D Overlay", "Material Preview 3 2D Overlay", "Material Preview 4 2D Overlay",
+            "Animation Preview 2D Overlay"
+        };
+        constexpr const char* kOutputNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Image", "Viewport 2 Image", "Viewport 3 Image", "Viewport 4 Image",
+            "Thumbnail Image",
+            "Material Preview 1 Image", "Material Preview 2 Image", "Material Preview 3 Image", "Material Preview 4 Image",
+            "Animation Preview Image"
+        };
+        constexpr const char* kHdrNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 HDR", "Viewport 2 HDR", "Viewport 3 HDR", "Viewport 4 HDR",
+            "Thumbnail HDR",
+            "Material Preview 1 HDR", "Material Preview 2 HDR", "Material Preview 3 HDR", "Material Preview 4 HDR",
+            "Animation Preview HDR"
+        };
+        constexpr const char* kEntityNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Entity IDs", "Viewport 2 Entity IDs", "Viewport 3 Entity IDs", "Viewport 4 Entity IDs",
+            "Thumbnail Entity IDs",
+            "Material Preview 1 Entity IDs", "Material Preview 2 Entity IDs", "Material Preview 3 Entity IDs", "Material Preview 4 Entity IDs",
+            "Animation Preview Entity IDs"
+        };
+        constexpr const char* kOutlineNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Outline", "Viewport 2 Outline", "Viewport 3 Outline", "Viewport 4 Outline",
+            "Thumbnail Outline",
+            "Material Preview 1 Outline", "Material Preview 2 Outline", "Material Preview 3 Outline", "Material Preview 4 Outline",
+            "Animation Preview Outline"
+        };
+        constexpr const char* kDepthNames[Renderer::MaxExtraViews] = {
+            "Viewport 1 Depth", "Viewport 2 Depth", "Viewport 3 Depth", "Viewport 4 Depth",
+            "Thumbnail Depth",
+            "Material Preview 1 Depth", "Material Preview 2 Depth", "Material Preview 3 Depth", "Material Preview 4 Depth",
+            "Animation Preview Depth"
+        };
     }
 
     void Renderer::addExtraViewPasses()

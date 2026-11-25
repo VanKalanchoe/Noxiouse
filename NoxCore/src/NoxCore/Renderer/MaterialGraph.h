@@ -24,6 +24,7 @@ namespace Nox
     inline constexpr const char* kMaterialGraphDomain = "MaterialGraph";
     inline constexpr uint32_t MaterialGraphMaxParameters = 16; // float4 slots (a scalar parameter takes one, in x)
     inline constexpr uint32_t MaterialGraphMaxTextures = 8;
+    inline constexpr uint32_t MaterialGraphMaxInterpolators = 4; // float4 Vertex Interpolator slots (step 4f)
 
     // Which Material Output pins the graph connects (the others keep the material's values).
     enum MaterialGraphOutput : uint32_t
@@ -47,6 +48,30 @@ namespace Nox
         // and the forward shader through the Material Shaders' dispatcher (the graph takes a slot there: MaterialGraphProgram::LightCode).
         MaterialGraphOutputCustomLight = 1u << 9,
         MaterialGraphOutputCustomAmbient = 1u << 10,
+        // Vertex-stage outputs (material graph step 4f): per-vertex normal / colour overrides and up to 4 Vertex Interpolator slots
+        // evaluated once per vertex (or per triangle corner in G-buffer resolve / ray hits) and interpolated across the triangle.
+        MaterialGraphOutputVertexNormal = 1u << 11,
+        MaterialGraphOutputVertexColor = 1u << 12,
+        MaterialGraphOutputVertexInterpolators = 1u << 13,
+        // Pixel-stage lobe outputs (material graph step 4g): written over the material's own lobe values.
+        MaterialGraphOutputSpecular = 1u << 14,
+        MaterialGraphOutputSpecularColor = 1u << 15,
+        MaterialGraphOutputClearCoat = 1u << 16,
+        MaterialGraphOutputClearCoatRoughness = 1u << 17,
+        MaterialGraphOutputClearCoatNormal = 1u << 18,
+        MaterialGraphOutputSheenColor = 1u << 19,
+        MaterialGraphOutputSheenRoughness = 1u << 20,
+        MaterialGraphOutputAnisotropy = 1u << 21,
+        MaterialGraphOutputAnisotropyDirection = 1u << 22,
+        MaterialGraphOutputTransmission = 1u << 23,
+        MaterialGraphOutputIOR = 1u << 24,
+        MaterialGraphOutputThickness = 1u << 25,
+        MaterialGraphOutputAttenuationColor = 1u << 26,
+        MaterialGraphOutputAttenuationDistance = 1u << 27,
+        MaterialGraphOutputDiffuseTransmission = 1u << 28,
+        MaterialGraphOutputIridescence = 1u << 29,
+        MaterialGraphOutputIridescenceThickness = 1u << 30,
+        MaterialGraphOutputDispersion = 1u << 31,
     };
 
     // A value a material (.nmat) may override: a Scalar / Vector Parameter node's, or a Texture Sample's with a parameter name. Texture
@@ -76,6 +101,9 @@ namespace Nox
         // the path tracer, the GI passes) get the graphs' surfaces from MaterialGraphSurfaces.slang -- no World Position Offset, so an offset
         // edit leaves them alone.
         std::string SurfaceCode;
+        // `void vertex_outputs(MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)` alone (step 4f): shared with
+        // MaterialGraphSurfaces.slang and MaterialGraphMasks.slang when a graph uses Vertex Interpolators or per-vertex overrides.
+        std::string VertexCode;
         // `float3 light(CustomLitSurface s, CustomLitLight l)` and `float3 ambient(CustomLitSurface s, CustomLitAmbient a)` from Custom Light
         // and Custom Ambient (an unconnected one lights as Default Lit's diffuse would); empty when the graph connects neither.
         std::string LightCode;

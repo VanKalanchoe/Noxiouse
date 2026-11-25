@@ -223,7 +223,9 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                     "    i.uv0 = s.uv;\n    i.uv0Dx = float2(s.uvFootprint, 0.0);\n    i.uv0Dy = float2(0.0, s.uvFootprint);\n"
                     "    i.uv1 = s.uv;\n    i.uv1Dx = i.uv0Dx;\n    i.uv1Dy = i.uv0Dy;\n"
                     "    i.position = s.position + s.ubo.renderOrigin;\n"
-                    "    i.normal = s.normal;\n    i.vertexColor = float4(1.0);\n    i.view = s.view;\n    i.screenUV = s.screenUV;\n"
+                    "    i.normal = s.normal;\n    i.pixelNormal = s.normal;\n"
+                    "    i.pixelDepth = abs(mul(s.ubo.view, float4(s.position, 1.0)).z);\n    i.sceneDepth = i.pixelDepth;\n"
+                    "    i.vertexColor = float4(1.0);\n    i.view = s.view;\n    i.screenUV = s.screenUV;\n"
                     "    i.time = s.time;\n    i.cameraPosition = s.ubo.cameraWorldPos.xyz + s.ubo.renderOrigin;\n"
                     "    i.material = s.material;\n    i.mipFeedback = false;\n    i.ubo = s.ubo;\n    return i;\n}\n\n";
         std::vector<bool> present(paths.size(), false);
@@ -311,7 +313,16 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             if (graphPresent[slot])
                 text += "    case " + std::to_string(slot) + "u: return MaterialGraph" + std::to_string(slot) + "::world_position_offset(i);\n";
         }
-        text += "    default: return float3(0.0);\n    }\n}\n";
+        text += "    default: return float3(0.0);\n    }\n}\n\n";
+        // Per-vertex outputs (step 4f: Vertex Normal, Vertex Color, Vertex Interpolators).
+        text += "#ifndef NOX_MATERIAL_GRAPH_VERTEX_DEFINED\n#define NOX_MATERIAL_GRAPH_VERTEX_DEFINED 1\n"
+                "void material_graph_vertex_outputs(uint slot, MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)\n{\n    switch (slot)\n    {\n";
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (graphPresent[slot])
+                text += "    case " + std::to_string(slot) + "u: MaterialGraph" + std::to_string(slot) + "::vertex_outputs(i, vo); break;\n";
+        }
+        text += "    default: break;\n    }\n}\n#endif\n";
         return text;
     }
 
@@ -348,7 +359,30 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             if (present[slot])
                 text += "    case " + std::to_string(slot) + "u: return MaterialGraph" + std::to_string(slot) + "::opacity_mask(i);\n";
         }
-        text += "    default: return 1.0;\n    }\n}\n";
+        text += "    default: return 1.0;\n    }\n}\n\n";
+        text += "#ifndef NOX_MATERIAL_GRAPH_VERTEX_DEFINED\n#define NOX_MATERIAL_GRAPH_VERTEX_DEFINED 1\n";
+        std::vector<bool> vertexPresent(graphPaths.size(), false);
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (graphPaths[slot].empty())
+                continue;
+            const auto graph = std::find_if(graphs.begin(), graphs.end(), [&](const MaterialGraphSource& g) { return g.Path == graphPaths[slot]; });
+            if (graph == graphs.end() || graph->VertexCode.empty())
+                continue;
+            vertexPresent[slot] = true;
+            text += "namespace MaterialGraphVertex" + std::to_string(slot) + "\n{\n";
+            text += graph->VertexCode;
+            if (graph->VertexCode.back() != '\n')
+                text += '\n';
+            text += "}\n";
+        }
+        text += "void material_graph_vertex_outputs(uint slot, MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)\n{\n    switch (slot)\n    {\n";
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (vertexPresent[slot])
+                text += "    case " + std::to_string(slot) + "u: MaterialGraphVertex" + std::to_string(slot) + "::vertex_outputs(i, vo); break;\n";
+        }
+        text += "    default: break;\n    }\n}\n#endif\n";
         return text;
     }
 
@@ -386,7 +420,30 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             if (present[slot])
                 text += "    case " + std::to_string(slot) + "u: MaterialGraphSurface" + std::to_string(slot) + "::surface(i, o); return;\n";
         }
-        text += "    default: return;\n    }\n}\n";
+        text += "    default: return;\n    }\n}\n\n";
+        text += "#ifndef NOX_MATERIAL_GRAPH_VERTEX_DEFINED\n#define NOX_MATERIAL_GRAPH_VERTEX_DEFINED 1\n";
+        std::vector<bool> vertexPresent(graphPaths.size(), false);
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (graphPaths[slot].empty())
+                continue;
+            const auto graph = std::find_if(graphs.begin(), graphs.end(), [&](const MaterialGraphSource& g) { return g.Path == graphPaths[slot]; });
+            if (graph == graphs.end() || graph->VertexCode.empty())
+                continue;
+            vertexPresent[slot] = true;
+            text += "namespace MaterialGraphVertex" + std::to_string(slot) + "\n{\n";
+            text += graph->VertexCode;
+            if (graph->VertexCode.back() != '\n')
+                text += '\n';
+            text += "}\n";
+        }
+        text += "void material_graph_vertex_outputs(uint slot, MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)\n{\n    switch (slot)\n    {\n";
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (vertexPresent[slot])
+                text += "    case " + std::to_string(slot) + "u: MaterialGraphVertex" + std::to_string(slot) + "::vertex_outputs(i, vo); break;\n";
+        }
+        text += "    default: break;\n    }\n}\n#endif\n";
         return text;
     }
 
@@ -458,9 +515,11 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                                   "    const CustomLitAmbient a = custom_lit_make_ambient(float3(1.0), float3(1.0));\n"
                                   "    MaterialGraphInputs gi = (MaterialGraphInputs)0; // (compiled only, never run)\n"
                                   "    MaterialGraphOutputs go = (MaterialGraphOutputs)0;\n"
+                                  "    MaterialGraphVertexOutputs vo = (MaterialGraphVertexOutputs)0;\n"
+                                  "    material_graph_vertex_outputs(id.x, gi, vo);\n"
                                   "    material_graph_surface(id.x, gi, go);\n"
                                   "    go.opacity *= material_graph_opacity_mask(id.x, gi);\n"
-                                  "    go.emissive += material_graph_world_position_offset(id.x, gi);\n"
+                                  "    go.emissive += material_graph_world_position_offset(id.x, gi) + vo.normal + vo.interp[0].xyz;\n"
                                   "    customLitCheckOutput[id.x] = float4(custom_lit_light(id.x, s, l) + custom_lit_ambient(id.x, s, a) + go.baseColor + go.emissive, go.opacity);\n}\n",
                                   failed);
         std::string manifest;

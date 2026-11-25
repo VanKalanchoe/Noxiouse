@@ -257,6 +257,37 @@ STATIC_CONST uint32_t MaterialGraphOutputOcclusion = 1u << 5;
 STATIC_CONST uint32_t MaterialGraphOutputOpacity = 1u << 6;
 STATIC_CONST uint32_t MaterialGraphOutputOpacityMask = 1u << 7; // its own function (material_graph_opacity_mask): a Masked material's alpha test
 STATIC_CONST uint32_t MaterialGraphOutputWorldPositionOffset = 1u << 8; // its own function (material_graph_world_position_offset): per vertex
+STATIC_CONST uint32_t MaterialGraphOutputVertexNormal = 1u << 11; // per-vertex normal override (step 4f)
+STATIC_CONST uint32_t MaterialGraphOutputVertexColor = 1u << 12; // per-vertex colour override (step 4f)
+STATIC_CONST uint32_t MaterialGraphOutputVertexInterpolators = 1u << 13; // Vertex Interpolator slots 0..3 (step 4f)
+STATIC_CONST uint32_t MaterialGraphOutputSpecular = 1u << 14;
+STATIC_CONST uint32_t MaterialGraphOutputSpecularColor = 1u << 15;
+STATIC_CONST uint32_t MaterialGraphOutputClearCoat = 1u << 16;
+STATIC_CONST uint32_t MaterialGraphOutputClearCoatRoughness = 1u << 17;
+STATIC_CONST uint32_t MaterialGraphOutputClearCoatNormal = 1u << 18;
+STATIC_CONST uint32_t MaterialGraphOutputSheenColor = 1u << 19;
+STATIC_CONST uint32_t MaterialGraphOutputSheenRoughness = 1u << 20;
+STATIC_CONST uint32_t MaterialGraphOutputAnisotropy = 1u << 21;
+STATIC_CONST uint32_t MaterialGraphOutputAnisotropyDirection = 1u << 22;
+STATIC_CONST uint32_t MaterialGraphOutputTransmission = 1u << 23;
+STATIC_CONST uint32_t MaterialGraphOutputIOR = 1u << 24;
+STATIC_CONST uint32_t MaterialGraphOutputThickness = 1u << 25;
+STATIC_CONST uint32_t MaterialGraphOutputAttenuationColor = 1u << 26;
+STATIC_CONST uint32_t MaterialGraphOutputAttenuationDistance = 1u << 27;
+STATIC_CONST uint32_t MaterialGraphOutputDiffuseTransmission = 1u << 28;
+STATIC_CONST uint32_t MaterialGraphOutputIridescence = 1u << 29;
+STATIC_CONST uint32_t MaterialGraphOutputIridescenceThickness = 1u << 30;
+STATIC_CONST uint32_t MaterialGraphOutputDispersion = 1u << 31;
+STATIC_CONST uint32_t MaterialGraphOutputAllLobes =
+    MaterialGraphOutputSpecular | MaterialGraphOutputSpecularColor |
+    MaterialGraphOutputClearCoat | MaterialGraphOutputClearCoatRoughness | MaterialGraphOutputClearCoatNormal |
+    MaterialGraphOutputSheenColor | MaterialGraphOutputSheenRoughness |
+    MaterialGraphOutputAnisotropy | MaterialGraphOutputAnisotropyDirection |
+    MaterialGraphOutputTransmission | MaterialGraphOutputIOR | MaterialGraphOutputThickness |
+    MaterialGraphOutputAttenuationColor | MaterialGraphOutputAttenuationDistance |
+    MaterialGraphOutputDiffuseTransmission |
+    MaterialGraphOutputIridescence | MaterialGraphOutputIridescenceThickness |
+    MaterialGraphOutputDispersion;
 
 // GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
 STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;
@@ -626,6 +657,8 @@ struct UniformBufferObject
     float ssrMaxDistance;   // world units
     float ssrThickness;     // world units
     float ssrMaxRoughness;
+    // Opaque scene depth copy readable by transparent material graphs (Scene Depth / Depth Fade, step 4h); 0xFFFFFFFF when unavailable.
+    uint32_t transparentSceneDepthTextureIndex;
 
     // Seconds since the renderer started, wrapped every hour (float precision stays sub-millisecond): what animated Custom Lit shaders
     // read (CustomLitSurface::time).

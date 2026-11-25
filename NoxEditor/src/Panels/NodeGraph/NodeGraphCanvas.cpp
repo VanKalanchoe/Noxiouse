@@ -892,7 +892,12 @@ namespace Nox
                     if (m_HoveredPin.Pin < pins.size())
                     {
                         const NodePinDesc& pin = pins[m_HoveredPin.Pin];
-                        Tooltip = pin.Tooltip.empty() ? pin.Type : (pin.Tooltip + "\n(" + pin.Type + ")");
+                        if (pin.Tooltip.empty())
+                            Tooltip = pin.Type;
+                        else if (pin.Type == "Value")
+                            Tooltip = pin.Tooltip;
+                        else
+                            Tooltip = pin.Tooltip + "\n(" + pin.Type + ")";
                     }
                 }
             }
@@ -925,6 +930,8 @@ namespace Nox
             {
                 if (const uint32_t node = NodeAt(e.Position); node != 0)
                     OpenNodeMenu(e.Position, node);
+                else if (const int link = LinkAt(e.Position); link >= 0)
+                    OpenLinkMenu(e.Position, link);
                 else
                     OpenNodeList(e.Position, {});
             }
@@ -980,10 +987,11 @@ namespace Nox
             return false;
         const NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         const UIVec2 pointer = ctx ? ctx->GetLastMousePos() : GetBounds().Center();
-        switch (e.KeyCode)
+        const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
+        switch (key)
         {
-        case SDL_SCANCODE_DELETE:
-        case SDL_SCANCODE_BACKSPACE:
+        case NoxUI::UIKey::Delete:
+        case NoxUI::UIKey::Backspace:
             if (m_SelectedLink >= 0 && m_SelectedLink < static_cast<int>(m_Graph->Links.size()))
             {
                 m_Graph->Links.erase(m_Graph->Links.begin() + m_SelectedLink);
@@ -995,16 +1003,16 @@ namespace Nox
                 DeleteNodes(m_Selected);
             }
             return true;
-        case SDL_SCANCODE_D:
+        case NoxUI::UIKey::D:
             if (Ctrl()) { Duplicate(); return true; }
             return false;
-        case SDL_SCANCODE_C:
+        case NoxUI::UIKey::C:
             if (Ctrl()) { Copy(); return true; }
             return false;
-        case SDL_SCANCODE_V:
+        case NoxUI::UIKey::V:
             if (Ctrl()) { Paste(pointer); return true; }
             return false;
-        case SDL_SCANCODE_A:
+        case NoxUI::UIKey::A:
             if (Ctrl())
             {
                 std::vector<uint32_t> all;
@@ -1014,15 +1022,15 @@ namespace Nox
                 return true;
             }
             return false;
-        case SDL_SCANCODE_F:
+        case NoxUI::UIKey::F:
             FrameSelection();
             return true;
-        case SDL_SCANCODE_HOME:
+        case NoxUI::UIKey::Home:
         {
             m_View.ResetZoom(GetBounds());
             return true;
         }
-        case SDL_SCANCODE_ESCAPE:
+        case NoxUI::UIKey::Escape:
             SetSelection({});
             return true;
         default:
@@ -1093,29 +1101,34 @@ namespace Nox
             return a.Category != b.Category ? a.Category < b.Category : a.Label < b.Label;
         });
 
-        Ref<NoxUI::UIStackBox> content(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
+        Ref<NoxUI::UIStackBox> content(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 8.0f));
         content->StyleClass = "MenuPopup";
         content->DrawBackground = true;
-        content->Padding = NoxUI::UIThickness::All(8.0f);
+        content->Padding = NoxUI::UIThickness::All(10.0f);
         content->WidthMode = NoxUI::UISizeMode::Fixed;
-        content->FixedSize = { 300.0f, 0.0f };
-        Ref<NoxUI::UILabel> heading(new NoxUI::UILabel(fromPin.Valid() ? "Nodes for a " + (wireType.empty() ? std::string("wire") : wireType + " wire") : "Add Node", 13.0f));
+        content->FixedSize = { 330.0f, 0.0f };
+        Ref<NoxUI::UILabel> heading(new NoxUI::UILabel(fromPin.Valid() ? "Nodes for a " + (wireType.empty() ? std::string("wire") : wireType + " wire") : "Add Node", 15.0f));
         heading->UseColorOverride = true;
-        heading->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
+        heading->ColorOverride = NoxUI::ThemeColor("Text", { 0.90f, 0.93f, 0.98f, 1.0f });
         content->AddChild(heading);
         Ref<NoxUI::UITextInput> search(new NoxUI::UITextInput("", "Search nodes..."));
         search->WidthMode = NoxUI::UISizeMode::Fill;
+        search->HeightMode = NoxUI::UISizeMode::Fixed;
+        search->FixedSize = { 0.0f, 30.0f };
         content->AddChild(search);
         Ref<NoxUI::UIScrollView> list(new NoxUI::UIScrollView());
         list->WidthMode = NoxUI::UISizeMode::Fill;
         list->HeightMode = NoxUI::UISizeMode::Auto;
-        list->MaxSize.y = 380.0f;
-        list->ChildSpacing = 1.0f;
+        list->MaxSize.y = 400.0f;
+        list->ChildSpacing = 2.0f;
         content->AddChild(list);
 
         const UIVec2 graphPoint = ScreenToGraph(screen);
         auto entriesRef = std::make_shared<std::vector<Entry>>(std::move(entries));
+        auto expandedRef = std::make_shared<std::unordered_set<std::string>>();
+        auto currentQueryRef = std::make_shared<std::string>();
         auto first = std::make_shared<std::function<void()>>();
+        auto rebuildRef = std::make_shared<std::function<void(const std::string&)>>();
         NoxUI::UIScrollView* listRaw = list.get();
         auto pick = [this, graphPoint, fromPin, ctx](const Entry& entry)
         {
@@ -1147,45 +1160,77 @@ namespace Nox
                 Edited(true);
             }
         };
-        auto rebuild = [listRaw, entriesRef, first, pick](const std::string& query)
+        *rebuildRef = [listRaw, entriesRef, expandedRef, currentQueryRef, first, pick, rebuildRef](const std::string& query)
         {
+            *currentQueryRef = query;
             listRaw->ClearChildren();
             *first = {};
             std::string lowered = query;
             std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            std::string category;
+            const bool searching = !lowered.empty();
+
+            // Group matching entries by category so categories collapse cleanly like Unreal / ImGui trees (and auto-expand while searching).
+            std::vector<std::string> categoryOrder;
+            std::unordered_map<std::string, std::vector<const Entry*>> grouped;
             for (const Entry& entry : *entriesRef)
             {
                 std::string label = entry.Label + " " + entry.Category;
                 std::transform(label.begin(), label.end(), label.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (!lowered.empty() && label.find(lowered) == std::string::npos)
+                if (searching && label.find(lowered) == std::string::npos)
                     continue;
-                if (entry.Category != category)
+                if (!grouped.contains(entry.Category))
+                    categoryOrder.push_back(entry.Category);
+                grouped[entry.Category].push_back(&entry);
+            }
+
+            for (const std::string& category : categoryOrder)
+            {
+                const auto& items = grouped[category];
+                const bool isOpen = searching || expandedRef->contains(category);
+                const std::string headerLabel = std::string(isOpen ? "v  " : ">  ") + category + " (" + std::to_string(items.size()) + ")";
+                Ref<NoxUI::UIButton> headerBtn(new NoxUI::UIButton(headerLabel, [expandedRef, category, currentQueryRef, rebuildRef]()
                 {
-                    category = entry.Category;
-                    Ref<NoxUI::UILabel> header(new NoxUI::UILabel(category, 12.0f));
-                    header->UseColorOverride = true;
-                    header->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
-                    header->Margin = NoxUI::UIThickness{ 4.0f, 6.0f, 0.0f, 2.0f };
-                    listRaw->AddChild(header);
+                    if (expandedRef->contains(category))
+                        expandedRef->erase(category);
+                    else
+                        expandedRef->insert(category);
+                    (*rebuildRef)(*currentQueryRef);
+                }));
+                headerBtn->StyleClass = "SectionHeader";
+                headerBtn->WidthMode = NoxUI::UISizeMode::Fill;
+                headerBtn->HeightMode = NoxUI::UISizeMode::Fixed;
+                headerBtn->FixedSize = { 0.0f, 28.0f };
+                headerBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                listRaw->AddChild(headerBtn);
+
+                if (isOpen)
+                {
+                    for (const Entry* entry : items)
+                    {
+                        const Entry item = *entry;
+                        Ref<NoxUI::UIButton> button(new NoxUI::UIButton(item.Label, [pick, item]() { pick(item); }));
+                        button->StyleClass = "MenuItem";
+                        button->WidthMode = NoxUI::UISizeMode::Fill;
+                        button->HeightMode = NoxUI::UISizeMode::Fixed;
+                        button->FixedSize = { 0.0f, 28.0f };
+                        button->Padding = NoxUI::UIThickness{ 22.0f, 4.0f, 10.0f, 4.0f };
+                        listRaw->AddChild(button);
+                        if (!*first)
+                            *first = [pick, item]() { pick(item); };
+                    }
                 }
-                Ref<NoxUI::UIButton> button(new NoxUI::UIButton(entry.Label, [pick, entry]() { pick(entry); }));
-                button->StyleClass = "MenuItem";
-                button->WidthMode = NoxUI::UISizeMode::Fill;
-                listRaw->AddChild(button);
-                if (!*first)
-                    *first = [pick, entry]() { pick(entry); };
             }
             if (listRaw->GetChildren().empty())
             {
-                Ref<NoxUI::UILabel> none(new NoxUI::UILabel("No node matches", 13.0f));
+                Ref<NoxUI::UILabel> none(new NoxUI::UILabel("No node matches", 14.0f));
                 none->UseColorOverride = true;
-                none->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.55f, 0.60f, 0.70f, 1.0f });
+                none->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.62f, 0.67f, 0.76f, 1.0f });
+                none->Margin = NoxUI::UIThickness::All(6.0f);
                 listRaw->AddChild(none);
             }
         };
-        rebuild("");
-        search->OnChanged = [rebuild](const std::string& text) { rebuild(text); };
+        (*rebuildRef)("");
+        search->OnChanged = [rebuildRef](const std::string& text) { (*rebuildRef)(text); };
         search->OnSubmit = [first](const std::string&) { if (*first) (*first)(); };
         NoxUI::UIPopup::Show(*ctx, { screen, screen + UIVec2{ 1.0f } }, content);
         ctx->SetFocus(search.get());
@@ -1218,6 +1263,28 @@ namespace Nox
         items.push_back({ "", "", {}, true });
         items.push_back({ "Delete", "Del", [this]() { DeleteNodes(m_Selected); }, false, !isOutput || m_Selected.size() > 1, false, false,
                           isOutput ? "The graph's output stays: without it the graph computes nothing." : "" });
+        NoxUI::UIMenuPopup::ShowContextMenu(*ctx, screen, std::move(items));
+    }
+
+    void NodeGraphCanvas::OpenLinkMenu(const UIVec2& screen, int linkIndex)
+    {
+        NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
+        if (!ctx || !m_Graph || linkIndex < 0 || linkIndex >= static_cast<int>(m_Graph->Links.size()))
+            return;
+        m_Selected.clear();
+        m_SelectedLink = linkIndex;
+        if (OnSelectionChanged)
+            OnSelectionChanged();
+        std::vector<NoxUI::UIMenuItem> items;
+        items.push_back({ "Insert Reroute", "Double-click", [this, linkIndex, screen]() { InsertReroute(linkIndex, screen); } });
+        items.push_back({ "Delete Link", "Del", [this, linkIndex]()
+        {
+            if (!m_Graph || linkIndex < 0 || linkIndex >= static_cast<int>(m_Graph->Links.size()))
+                return;
+            m_Graph->Links.erase(m_Graph->Links.begin() + linkIndex);
+            m_SelectedLink = -1;
+            Edited(true);
+        } });
         NoxUI::UIMenuPopup::ShowContextMenu(*ctx, screen, std::move(items));
     }
 

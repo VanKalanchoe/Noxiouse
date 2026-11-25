@@ -300,10 +300,17 @@ namespace Bridge
         // The material's graph (material graph step 4c): the pins it connects replace the values above, as the G-buffer resolve does.
         MaterialGraphOutputs graphSurface = material_graph_ray_defaults(baseColor.rgb, saturate(metallic), saturate(roughness), float3(0.0));
         const uint graphOutputs = material_graph_ray_surface(ubo, lut, primitiveIndex, barycentrics, graphSurface);
-        if ((graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic)) != 0u)
+        if ((graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic | MaterialGraphOutputIOR)) != 0u)
         {
-            baseColor.rgb = graphSurface.baseColor;
-            metallic = graphSurface.metallic;
+            if ((graphOutputs & MaterialGraphOutputBaseColor) != 0u)
+                baseColor.rgb = graphSurface.baseColor;
+            if ((graphOutputs & MaterialGraphOutputMetallic) != 0u)
+                metallic = graphSurface.metallic;
+            if ((graphOutputs & MaterialGraphOutputIOR) != 0u)
+            {
+                ior = max(graphSurface.ior, 1.0);
+                dielectricF0 = pow((ior - 1.0) / (ior + 1.0), 2.0);
+            }
             diffuseAlbedo = baseColor.rgb * (1.0 - metallic);
             specularF0 = lerp(float3(dielectricF0), baseColor.rgb, metallic);
         }
@@ -351,13 +358,29 @@ namespace Bridge
             transmission *= SampleMaterialTextureLevel(ubo, lut.transmissionTextureIndex, textureSampler, material_texture_uv(material, material.transmissionTextureSet, meshUV0, meshUV1),
                 textureLod(ubo, lut.transmissionTextureIndex, rayConeWidth, uvPerWorld * material_texture_uv_scale(material, material.transmissionTextureSet), ubo.pathTracerTexLodBias)).r;
         }
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+        if ((graphOutputs & MaterialGraphOutputTransmission) != 0u)
+            transmission = saturate(graphSurface.transmission);
+        if ((graphOutputs & (MaterialGraphOutputTransmission | MaterialGraphOutputThickness)) != 0u)
+        {
+            const float effThickness = (graphOutputs & MaterialGraphOutputThickness) != 0u ? max(graphSurface.thickness, 0.0) : lut.thickness;
+            surface.shadingData.mtl.thinSurface = (lut.pathTracerFlags & PathTracerThinSet) != 0
+                ? ((lut.pathTracerFlags & PathTracerThin) != 0 || transmission <= 0.0)
+                : (transmission <= 0.0 || effThickness <= 0.0);
+        }
+#endif
 
         // 5b. The glTF lobes (MaterialLobes.slang, StandardBSDF.slang's BSDFLobes): evaluated as the raster passes do, each texture at
         // its ray cone mip. The anisotropy direction becomes the shading frame's T (the base's stretched GGX is along local x).
         BSDFLobes bsdfLobes = BSDFLobes::none();
         float guideAnisotropy = 0.0;
         surface.dispersionIors = float3(ior, ior, ior);
-        if (lut.lobes != 0u && lut.workflow != 1.0)
+        float rawDiffuseTransmission = lut.diffuseTransmission;
+        if ((lut.lobes != 0u
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+             || (graphOutputs & MaterialGraphOutputAllLobes) != 0u
+#endif
+            ) && lut.workflow != 1.0)
         {
             MaterialSampleCoords coords;
             coords.material = material;
@@ -368,10 +391,18 @@ namespace Bridge
             coords.footprint = max(rayConeWidth * uvPerWorld, 1e-20);
             coords.lodBias = ubo.pathTracerTexLodBias;
             const float3 tangentW = mul((float3x3)objToWorld, v0.tangent.xyz * bary.x + v1.tangent.xyz * bary.y + v2.tangent.xyz * bary.z);
-            float3 anisotropicT;
+            float3 anisotropicT = float3(0.0);
             // The geometric normal as the mesh has it (normalW is turned to the ray for a back face: the lobes turn theirs alike).
-            GBufferLobes lobes = evaluate_material_lobes(ubo, material, coords, textureSampler, frontFace ? normalW : -normalW, tangentW,
-                                                         v0.tangent.w < 0.0 ? -1.0 : 1.0, !frontFace, anisotropicT);
+            GBufferLobes lobes = lut.lobes != 0u
+                ? evaluate_material_lobes(ubo, material, coords, textureSampler, frontFace ? normalW : -normalW, tangentW,
+                                          v0.tangent.w < 0.0 ? -1.0 : 1.0, !frontFace, anisotropicT)
+                : gbuffer_default_lobes();
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+            material_graph_apply_lobes(graphOutputs, graphSurface, material, frontFace ? normalW : -normalW, tangentW,
+                                       v0.tangent.w < 0.0 ? -1.0 : 1.0, !frontFace, surface.shadingData.V, lobes, anisotropicT, rawDiffuseTransmission);
+            if ((graphOutputs & MaterialGraphOutputDispersion) != 0u)
+                lobes.flags |= MaterialLobeDispersion;
+#endif
             const float3 N = surface.shadingData.N;
             const float3 V = surface.shadingData.V;
             const float NdotV = saturate(dot(N, V));
@@ -422,7 +453,14 @@ namespace Bridge
             }
             // KHR_materials_dispersion: each color channel's IOR (PathTracerHit picks one per path at a dispersive refraction).
             if ((lobes.flags & MaterialLobeDispersion) != 0u)
-                surface.dispersionIors = dispersion_iors(ior, material.dispersion);
+            {
+                float disp = material.dispersion;
+#ifdef NOX_MATERIAL_GRAPH_SURFACE
+                if ((graphOutputs & MaterialGraphOutputDispersion) != 0u)
+                    disp = max(graphSurface.dispersion, 0.0);
+#endif
+                surface.dispersionIors = dispersion_iors(ior, disp);
+            }
         }
 
         // 6. Setup BSDF data
@@ -434,7 +472,7 @@ namespace Bridge
         // This is the exact factor used by RTXPT's PathTracerBridgeDonut.
         transmission *= 1.0 - saturate(metallic);
         // Diffuse transmission (leaves, cloth): RTXPT's diffuse transmission lobe, for the dielectric part like the specular one.
-        const float diffuseTransmission = saturate(lut.diffuseTransmission) * (1.0 - saturate(metallic));
+        const float diffuseTransmission = saturate(rawDiffuseTransmission) * (1.0 - saturate(metallic));
         StandardBSDFData bsdfData = StandardBSDFData::make(
             diffuseAlbedo,
             specularF0,

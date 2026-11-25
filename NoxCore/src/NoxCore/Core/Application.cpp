@@ -355,6 +355,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* currentEvent)
 
     switch (currentEvent->type)
     {
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        {
+            SDL_Window* mainWin = applicationState->app->getWindow() ? applicationState->app->getWindow()->getHandle() : nullptr;
+            if (!mainWin || currentEvent->window.windowID != SDL_GetWindowID(mainWin))
+                return SDL_APP_CONTINUE;
+            [[fallthrough]];
+        }
     case SDL_EVENT_QUIT:
         {
             // A quit from outside the program (close button, Alt+F4): the layers may keep it running (unsaved changes to ask about).

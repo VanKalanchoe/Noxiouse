@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -90,8 +91,17 @@ namespace Nox
             bool IsPlaced = false;
         };
 
+        struct LiveSlot
+        {
+            Placement Placed;
+            uint64_t RequestedFrame = 0;
+        };
+
+        static constexpr uint32_t MaxLiveSlots = 4;
+
         std::function<AssetHandle()> m_SphereProvider;
         std::unordered_map<AssetHandle, Ref<Texture2D>> m_Thumbnails;
+        std::unordered_set<AssetHandle> m_StaleThumbnails;       // invalidated: keep showing previous image while re-rendering
         std::unordered_map<AssetHandle, uint64_t> m_LastUsed;   // frame of the last request, for eviction
         std::unordered_map<AssetHandle, uint64_t> m_Requests;   // waiting thumbnails and the frame they were last asked for
         std::unordered_map<AssetHandle, bool> m_Failed;          // could not be drawn (no geometry, never loaded)
@@ -100,8 +110,7 @@ namespace Nox
         std::unordered_map<AssetHandle, uint32_t> m_Generations; // bumped by Invalidate: a readback of an older image is not saved
         std::optional<Job> m_Job;
 
-        Placement m_Live;
-        uint64_t m_LiveRequestedFrame = 0;
+        std::array<LiveSlot, MaxLiveSlots> m_LiveSlots;
         Placement m_Animated;
         std::vector<AssetHandle> m_AnimatedSources; // its skeleton and clip
         std::vector<glm::mat4> m_AnimatedBones;

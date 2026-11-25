@@ -86,8 +86,13 @@ namespace Nox
             // computed per vertex: no screen derivatives, nothing that needs the pixel on screen.
             // custom_light() / custom_ambient(): the Custom Light / Custom Ambient pins (the Lit Surface, Light and Ambient Light nodes
             // only there).
-            enum class Function { Surface, OpacityMask, WorldPositionOffset, CustomLight, CustomAmbient };
+            enum class Function { Surface, OpacityMask, WorldPositionOffset, VertexOutputs, CustomLight, CustomAmbient };
             Function Pass = Function::Surface;
+            // Vertex Interpolator slot assignment (step 4f): node Id -> slot 0..3 and component count 1..4.
+            std::unordered_map<uint32_t, uint32_t> InterpolatorSlots;
+            std::unordered_map<uint32_t, int> InterpolatorComponents;
+            // Expression read by Pixel Normal (step 4h): "_pixelNormal" when the graph also connects Material Output::Normal, else "i.pixelNormal".
+            std::string PixelNormalExpr = "i.pixelNormal";
 
             // A value into named locals (its derivatives too), so what reads it twice computes it once.
             Value Store(const Value& value)
@@ -209,7 +214,8 @@ namespace Nox
 
         void Register(const std::string& name, const std::string& category, std::vector<NodePinDesc> inputs, std::vector<NodePinDesc> outputs,
                       std::vector<std::pair<std::string, NodeGraphValue>> properties, EmitFn emit,
-                      std::unordered_map<std::string, std::string> assetHints = {})
+                      std::unordered_map<std::string, std::string> assetHints = {},
+                      std::unordered_map<std::string, std::vector<std::string>> propertyEnums = {})
         {
             NodeTypeDesc desc;
             desc.TypeName = name;
@@ -219,6 +225,7 @@ namespace Nox
             desc.Outputs = std::move(outputs);
             desc.DefaultProperties = std::move(properties);
             desc.PropertyAssetTypeHints = std::move(assetHints);
+            desc.PropertyEnums = std::move(propertyEnums);
             Emitters()[name] = std::move(emit);
             NodeTypeRegistry::Register(std::move(desc));
         }
@@ -547,16 +554,128 @@ namespace Nox
                          args.Out[0] = Constant("(dot(i.tangent.xyz, i.tangent.xyz) > 1e-12 ? normalize(cross(i.normal, i.tangent.xyz)) * (i.tangent.w < 0.0 ? -1.0 : 1.0) : float3(0.0))", 3);
                          return true;
                      });
-            Register("Screen Position", "Inputs", {}, { V("UV", "Where the pixel is on the screen, 0..1 (per pixel only: not in World Position Offset)") }, {},
+            // Step 4e part 2: Object Position, Object Bounds, Space Transform, and Model / View / Projection matrices.
+            Register("Object Position", "Inputs", {},
+                     { V("Position", "The object's pivot in world space (Float3). Per vertex / per pixel; not in Custom Light / Custom Ambient") }, {},
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         if (!meshDataOnly(args, "Object Position"))
+                             return false;
+                         args.Out[0] = Constant("material_graph_object_position(i)", 3);
+                         return true;
+                     });
+            Register("Object Bounds", "Inputs", {},
+                     { V("Center", "World-space centre of the object's bounding box (Float3). Not in Custom Light / Custom Ambient"),
+                       V("Extent", "World-space half-size of the object's bounding box (Float3). Not in Custom Light / Custom Ambient"),
+                       V("Radius", "World-space bounding sphere radius (Float). Not in Custom Light / Custom Ambient") }, {},
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         if (!meshDataOnly(args, "Object Bounds"))
+                             return false;
+                         args.Out[0] = Constant("material_graph_object_bounds_center(i)", 3);
+                         const Value extent = args.Ctx.Store(Constant("material_graph_object_bounds_extent(i)", 3));
+                         args.Out[1] = extent;
+                         args.Out[2] = Constant("length(" + extent.Code + ")", 1);
+                         return true;
+                     });
+            Register("Transform", "Vector",
+                     { V("Value", "Vector or position to transform (Float3)") },
+                     { V("Result", "Transformed vector or position in the target space (Float3)") },
+                     { { "From", int32_t(0) }, { "To", int32_t(1) }, { "Kind", int32_t(0) }, { "Value", glm::vec4(0.0f) } },
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         auto intProp = [&](const char* key, int32_t fallback) -> int32_t
+                         {
+                             if (const NodeGraphValue* v = Property(args.Node, key))
+                                 if (const int32_t* n = std::get_if<int32_t>(v))
+                                     return *n;
+                             return fallback;
+                         };
+                         const int32_t fromSpace = std::clamp(intProp("From", 0), 0, 3);
+                         const int32_t toSpace = std::clamp(intProp("To", 1), 0, 3);
+                         const int32_t kind = std::clamp(intProp("Kind", 0), 0, 1);
+                         if ((fromSpace == 0 || toSpace == 0) && !meshDataOnly(args, "Transform (Local space)"))
+                             return false;
+                         const Value v = Convert(args.In[0], 3);
+                         args.Out[0] = Constant(std::format("material_graph_transform(i, {}, {}u, {}u, {})",
+                                                            v.Code, static_cast<uint32_t>(fromSpace), static_cast<uint32_t>(toSpace),
+                                                            kind == 1 ? "true" : "false"), 3);
+                         return true;
+                     },
+                     {},
+                     { { "From", { "Local", "World", "View", "Clip" } },
+                       { "To", { "Local", "World", "View", "Clip" } },
+                       { "Kind", { "Direction", "Position" } } });
+            Register("Matrix", "Inputs", {},
+                     { V("Row 0", "First row of the 4x4 matrix (Float4)"),
+                       V("Row 1", "Second row of the 4x4 matrix (Float4)"),
+                       V("Row 2", "Third row of the 4x4 matrix (Float4)"),
+                       V("Row 3", "Fourth row of the 4x4 matrix (Float4)") },
+                     { { "Matrix", int32_t(0) } },
+                     [meshDataOnly](EmitArgs& args)
+                     {
+                         int32_t kind = 0;
+                         if (const NodeGraphValue* v = Property(args.Node, "Matrix"))
+                             if (const int32_t* n = std::get_if<int32_t>(v))
+                                 kind = std::clamp(*n, 0, 7);
+                         if ((kind == 0 || kind == 1) && !meshDataOnly(args, "Matrix (Model)"))
+                             return false;
+                         const std::string expr = std::format("material_graph_matrix(i, {}u)", static_cast<uint32_t>(kind));
+                         args.Out[0] = Constant("(" + expr + ")[0]", 4);
+                         args.Out[1] = Constant("(" + expr + ")[1]", 4);
+                         args.Out[2] = Constant("(" + expr + ")[2]", 4);
+                         args.Out[3] = Constant("(" + expr + ")[3]", 4);
+                         return true;
+                     },
+                     {},
+                     { { "Matrix", { "Model", "Inverse Model", "View", "Inverse View", "Projection", "Inverse Projection", "View Projection", "Inverse View Projection" } } });
+            Register("Screen Position", "Inputs", {}, { V("UV", "Where the pixel is on the screen, 0..1 (per pixel only: not in World Position Offset or Vertex Outputs)") }, {},
                      [](EmitArgs& args)
                      {
-                         if (args.Ctx.Pass == Context::Function::WorldPositionOffset)
+                         if (args.Ctx.Pass == Context::Function::WorldPositionOffset || args.Ctx.Pass == Context::Function::VertexOutputs)
                          {
-                             // (Unreal's rule too: World Position Offset runs per vertex, before the vertex has a place on the screen)
-                             args.Ctx.Error = "Screen Position cannot feed World Position Offset (the offset is computed per vertex, before it is on screen)";
+                             // (Unreal's rule too: vertex-stage outputs run per vertex, before the vertex has a place on the screen)
+                             args.Ctx.Error = "Screen Position cannot feed World Position Offset or vertex-stage outputs (computed per vertex, before it is on screen)";
                              return false;
                          }
                          args.Out[0] = Value{ "i.screenUV", "i.screenUVDx", "i.screenUVDy", 2 };
+                         return true;
+                     });
+            // Step 4h: Pixel-stage inputs -- Pixel Normal (after normal map / Normal pin), Scene Depth, Pixel Depth.
+            auto pixelStageOnly = [](EmitArgs& args, const char* node)
+            {
+                if (args.Ctx.Pass == Context::Function::WorldPositionOffset || args.Ctx.Pass == Context::Function::VertexOutputs)
+                {
+                    args.Ctx.Error = std::format("{} cannot feed World Position Offset or vertex-stage outputs (computed per pixel)", node);
+                    return false;
+                }
+                return true;
+            };
+            Register("Pixel Normal", "Inputs", {},
+                     { V("Normal", "The shading normal in world space after normal mapping or the Normal pin (Float3; per pixel only)") }, {},
+                     [pixelStageOnly](EmitArgs& args)
+                     {
+                         if (!pixelStageOnly(args, "Pixel Normal"))
+                             return false;
+                         args.Out[0] = Constant(args.Ctx.PixelNormalExpr, 3);
+                         return true;
+                     });
+            Register("Scene Depth", "Inputs", {},
+                     { V("Depth", "Linear distance from the camera to the opaque scene behind this pixel, in world units (Float; per pixel only)") }, {},
+                     [pixelStageOnly](EmitArgs& args)
+                     {
+                         if (!pixelStageOnly(args, "Scene Depth"))
+                             return false;
+                         args.Out[0] = Constant("i.sceneDepth", 1);
+                         return true;
+                     });
+            Register("Pixel Depth", "Inputs", {},
+                     { V("Depth", "Linear distance from the camera to this pixel, in world units (Float; per pixel only)") }, {},
+                     [pixelStageOnly](EmitArgs& args)
+                     {
+                         if (!pixelStageOnly(args, "Pixel Depth"))
+                             return false;
+                         args.Out[0] = Constant("i.pixelDepth", 1);
                          return true;
                      });
             auto simple = [](const char* name, const char* code, int components, const char* tooltip)
@@ -754,22 +873,104 @@ namespace Nox
                          args.Out[0] = Constant("material_graph_noise(" + position.Code + " * " + scale.Code + ")", 1);
                          return true;
                      });
+            // Depth Fade (step 4h): fades translucent opacity smoothly to 0 where the surface meets opaque geometry (Scene Depth - Pixel Depth).
+            Register("Depth Fade", "Utility",
+                     { V("Opacity", "Base opacity 0..1 (Float)"),
+                       V("Fade Distance", "Distance in world units over which the surface fades in where it meets opaque geometry (Float)") },
+                     { V("Result", "Opacity * saturate((Scene Depth - Pixel Depth) / Fade Distance) (Float; per pixel only)") },
+                     { { "Opacity", 1.0f }, { "Fade Distance", 1.0f } },
+                     [](EmitArgs& args)
+                     {
+                         if (args.Ctx.Pass == Context::Function::WorldPositionOffset || args.Ctx.Pass == Context::Function::VertexOutputs)
+                         {
+                             args.Ctx.Error = "Depth Fade cannot feed World Position Offset or vertex-stage outputs (computed per pixel)";
+                             return false;
+                         }
+                         const Value opacity = Convert(args.In[0], 1);
+                         const Value fadeDistance = Convert(args.In[1], 1);
+                         args.Out[0] = Constant("(" + opacity.Code + " * saturate((i.sceneDepth - i.pixelDepth) / max(" + fadeDistance.Code + ", 1e-5)))", 1);
+                         return true;
+                     });
+            // Vertex Interpolator (step 4f, Unreal's Vertex Interpolator / Customized UVs): evaluates its input once per vertex and
+            // interpolates the result across the triangle into the pixel stage (up to 4 float4 slots per graph).
+            Register("Vertex Interpolator", "Utility",
+                     { V("Value", "Per vertex: evaluated once per vertex and interpolated across the triangle (Float..Float4)") },
+                     { V("Result", "Per pixel: interpolated value from the vertex stage, with screen derivatives (Float..Float4)") },
+                     { { "Value", 0.0f } },
+                     [](EmitArgs& args)
+                     {
+                         if (args.Ctx.Pass == Context::Function::CustomLight || args.Ctx.Pass == Context::Function::CustomAmbient)
+                         {
+                             args.Ctx.Error = "Vertex Interpolator cannot feed Custom Light / Custom Ambient (the lighting pass runs from the G-buffer)";
+                             return false;
+                         }
+                         if (args.Ctx.Pass == Context::Function::WorldPositionOffset)
+                         {
+                             args.Out[0] = args.In[0];
+                             return true;
+                         }
+                         const auto slotIt = args.Ctx.InterpolatorSlots.find(args.NodeId);
+                         if (slotIt == args.Ctx.InterpolatorSlots.end())
+                         {
+                             args.Out[0] = args.In[0];
+                             return true;
+                         }
+                         const uint32_t slot = slotIt->second;
+                         if (args.Ctx.Pass == Context::Function::VertexOutputs)
+                         {
+                             args.Ctx.InterpolatorComponents[args.NodeId] = args.In[0].Components;
+                             const Value v4 = Convert(args.In[0], 4);
+                             args.Ctx.Body += std::format("    vo.interp[{}u] = {};\n", slot, v4.Code);
+                             args.Ctx.Outputs |= MaterialGraphOutputVertexInterpolators;
+                             args.Out[0] = args.In[0];
+                             return true;
+                         }
+                         // Surface / OpacityMask: read the interpolated slot with its screen derivatives.
+                         const int comps = args.Ctx.InterpolatorComponents.contains(args.NodeId)
+                             ? args.Ctx.InterpolatorComponents.at(args.NodeId) : 4;
+                         const std::string swizzle = comps == 1 ? ".x" : comps == 2 ? ".xy" : comps == 3 ? ".xyz" : "";
+                         const std::string base = std::format("i.vertexInterp[{}u]{}", slot, swizzle);
+                         const std::string dx = std::format("i.vertexInterpDx[{}u]{}", slot, swizzle);
+                         const std::string dy = std::format("i.vertexInterpDy[{}u]{}", slot, swizzle);
+                         args.Out[0] = Value{ base, dx, dy, comps };
+                         return true;
+                     });
         }
 
         void RegisterOutput()
         {
             Register("Material Output", "Output",
-                     { V("Base Color", "Per pixel: the surface's colour (metals: their reflection colour)"),
-                       V("Metallic", "Per pixel: 0 non-metal .. 1 metal"),
-                       V("Roughness", "Per pixel: 0 mirror .. 1 matte"),
-                       V("Normal", "Per pixel: the surface direction in tangent space (+Z out of the surface), e.g. from a normal map"),
-                       V("Emissive", "Per pixel: light the surface gives off itself"),
-                       V("Ambient Occlusion", "Per pixel: 1 open .. 0 enclosed (darkens the ambient light)"),
-                       V("Opacity", "Per pixel: Translucent materials only, 1 solid .. 0 clear"),
-                       V("Opacity Mask", "Per pixel: Masked materials only -- below the Opacity Mask Clip Value the pixel is cut away (shadows and ray tracing too)"),
-                       V("World Position Offset", "Per vertex: moves each vertex (world units), before the triangle is drawn -- every pass and the ray tracing scene"),
-                       V("Custom Light", "Per light (Custom Lit materials only): what one light adds to the pixel, summed over the lights"),
-                       V("Custom Ambient", "Per light pass, once (Custom Lit materials only): the light from all around -- sky, GI, reflections") }, {},
+                     { V("Base Color", "Per pixel: the surface's colour (metals: their reflection colour) (Float3)"),
+                       V("Metallic", "Per pixel: 0 non-metal .. 1 metal (Float)"),
+                       V("Roughness", "Per pixel: 0 mirror .. 1 matte (Float)"),
+                       V("Normal", "Per pixel: the surface direction in tangent space (+Z out of the surface), e.g. from a normal map (Float3)"),
+                       V("Emissive", "Per pixel: light the surface gives off itself (Float3)"),
+                       V("Ambient Occlusion", "Per pixel: 1 open .. 0 enclosed (darkens the ambient light) (Float)"),
+                       V("Opacity", "Per pixel: Translucent materials only, 1 solid .. 0 clear (Float)"),
+                       V("Opacity Mask", "Per pixel: Masked materials only -- below the Opacity Mask Clip Value the pixel is cut away (shadows and ray tracing too) (Float)"),
+                       V("World Position Offset", "Per vertex: moves each vertex (world units), before the triangle is drawn -- every pass and the ray tracing scene (Float3)"),
+                       V("Custom Light", "Per light (Custom Lit materials only): what one light adds to the pixel, summed over the lights (Float3)"),
+                       V("Custom Ambient", "Per light pass, once (Custom Lit materials only): the light from all around -- sky, GI, reflections (Float3)"),
+                       V("Vertex Normal", "Per vertex: replaces the mesh's world-space vertex normal before interpolation across the triangle (Float3)"),
+                       V("Vertex Color", "Per vertex: replaces the mesh's vertex colour before interpolation across the triangle (Float4)"),
+                       V("Specular", "Per pixel: dielectric specular weight 0..1 (Float)"),
+                       V("Specular Color", "Per pixel: dielectric specular tint colour (Float3)"),
+                       V("Clear Coat", "Per pixel: clear coat layer strength 0..1 (Float)"),
+                       V("Clear Coat Roughness", "Per pixel: clear coat roughness 0 mirror .. 1 matte (Float)"),
+                       V("Clear Coat Normal", "Per pixel: clear coat tangent-space normal (+Z out of the surface) (Float3)"),
+                       V("Sheen Color", "Per pixel: fabric/velvet grazing sheen colour (Float3)"),
+                       V("Sheen Roughness", "Per pixel: sheen roughness 0..1 (Float)"),
+                       V("Anisotropy", "Per pixel: brushed-metal highlight stretch 0..1 (Float)"),
+                       V("Anisotropy Direction", "Per pixel: tangent-space anisotropy direction (Float2)"),
+                       V("Transmission", "Per pixel: glass/liquid transmission 0..1 (Float)"),
+                       V("IOR", "Per pixel: index of refraction, >= 1.0 (default 1.5) (Float)"),
+                       V("Thickness", "Per pixel: volume thickness for refraction & absorption (Float)"),
+                       V("Attenuation Color", "Per pixel: volume absorption colour (Float3)"),
+                       V("Attenuation Distance", "Per pixel: distance at which light reaches Attenuation Color (Float)"),
+                       V("Diffuse Transmission", "Per pixel: thin-surface back-lit transmission 0..1 (Float)"),
+                       V("Iridescence", "Per pixel: thin-film iridescence strength 0..1 (Float)"),
+                       V("Iridescence Thickness", "Per pixel: thin-film thickness in nanometers, e.g. 100..800 (Float)"),
+                       V("Dispersion", "Per pixel: chromatic dispersion strength >= 0 (Float)") }, {},
                      // (appended after the pins: links name pins by index, so graphs saved before World Position Offset keep theirs)
                      { { "Max World Position Offset Displacement", 0.0f } },
                      [](EmitArgs& args)
@@ -778,6 +979,23 @@ namespace Nox
                          constexpr size_t offsetPin = 8;
                          constexpr size_t lightPin = 9;
                          constexpr size_t ambientPin = 10;
+                         constexpr size_t vertexNormalPin = 11;
+                         constexpr size_t vertexColorPin = 12;
+                         if (args.Ctx.Pass == Context::Function::VertexOutputs)
+                         {
+                             if (args.Connected.size() > vertexNormalPin && args.Connected[vertexNormalPin])
+                             {
+                                 const Value n = args.Ctx.Store(Convert(args.In[vertexNormalPin], 3));
+                                 args.Ctx.Body += "    vo.normal = dot(" + n.Code + ", " + n.Code + ") > 1e-12 ? normalize(" + n.Code + ") : vo.normal;\n";
+                                 args.Ctx.Outputs |= MaterialGraphOutputVertexNormal;
+                             }
+                             if (args.Connected.size() > vertexColorPin && args.Connected[vertexColorPin])
+                             {
+                                 args.Ctx.Body += "    vo.color = " + Convert(args.In[vertexColorPin], 4).Code + ";\n";
+                                 args.Ctx.Outputs |= MaterialGraphOutputVertexColor;
+                             }
+                             return true;
+                         }
                          if (args.Ctx.Pass == Context::Function::CustomLight)
                          {
                              if (args.Connected.size() > lightPin && args.Connected[lightPin])
@@ -815,30 +1033,48 @@ namespace Nox
                          {
                              if (args.Connected.size() > maskPin && args.Connected[maskPin])
                              {
-                                 args.Ctx.Body += "    return saturate(" + Convert(args.In[maskPin], 1).Code + ");\n";
+                                 args.Ctx.Body += "    return " + Convert(args.In[maskPin], 1).Code + ";\n";
                                  args.Ctx.Outputs |= MaterialGraphOutputOpacityMask;
                              }
                              else
                                  args.Ctx.Body += "    return 1.0;\n";
                              return true;
                          }
-                         struct Pin { const char* Field; int Components; uint32_t Bit; const char* Before; const char* After; };
+                         struct Pin { size_t Index; const char* Field; int Components; uint32_t Bit; const char* Before; const char* After; };
                          const Pin pins[] = {
-                             { "baseColor", 3, MaterialGraphOutputBaseColor, "max(", ", float3(0.0))" },
-                             { "metallic", 1, MaterialGraphOutputMetallic, "saturate(", ")" },
-                             { "roughness", 1, MaterialGraphOutputRoughness, "saturate(", ")" },
-                             { "normal", 3, MaterialGraphOutputNormal, "(", ")" }, // (tangent space: the caller normalizes and applies the frame)
-                             { "emissive", 3, MaterialGraphOutputEmissive, "max(", ", float3(0.0))" },
-                             { "occlusion", 1, MaterialGraphOutputOcclusion, "saturate(", ")" },
-                             { "opacity", 1, MaterialGraphOutputOpacity, "saturate(", ")" },
+                             { 0, "baseColor", 3, MaterialGraphOutputBaseColor, "max(", ", float3(0.0))" },
+                             { 1, "metallic", 1, MaterialGraphOutputMetallic, "saturate(", ")" },
+                             { 2, "roughness", 1, MaterialGraphOutputRoughness, "saturate(", ")" },
+                             { 3, "normal", 3, MaterialGraphOutputNormal, "(", ")" }, // (tangent space: the caller normalizes and applies the frame)
+                             { 4, "emissive", 3, MaterialGraphOutputEmissive, "max(", ", float3(0.0))" },
+                             { 5, "occlusion", 1, MaterialGraphOutputOcclusion, "saturate(", ")" },
+                             { 6, "opacity", 1, MaterialGraphOutputOpacity, "saturate(", ")" },
+                             { 13, "specular", 1, MaterialGraphOutputSpecular, "saturate(", ")" },
+                             { 14, "specularColor", 3, MaterialGraphOutputSpecularColor, "saturate(", ")" },
+                             { 15, "clearCoat", 1, MaterialGraphOutputClearCoat, "saturate(", ")" },
+                             { 16, "clearCoatRoughness", 1, MaterialGraphOutputClearCoatRoughness, "saturate(", ")" },
+                             { 17, "clearCoatNormal", 3, MaterialGraphOutputClearCoatNormal, "(", ")" },
+                             { 18, "sheenColor", 3, MaterialGraphOutputSheenColor, "saturate(", ")" },
+                             { 19, "sheenRoughness", 1, MaterialGraphOutputSheenRoughness, "saturate(", ")" },
+                             { 20, "anisotropy", 1, MaterialGraphOutputAnisotropy, "saturate(", ")" },
+                             { 21, "anisotropyDirection", 2, MaterialGraphOutputAnisotropyDirection, "(", ")" },
+                             { 22, "transmission", 1, MaterialGraphOutputTransmission, "saturate(", ")" },
+                             { 23, "ior", 1, MaterialGraphOutputIOR, "max(", ", 1.0)" },
+                             { 24, "thickness", 1, MaterialGraphOutputThickness, "max(", ", 0.0)" },
+                             { 25, "attenuationColor", 3, MaterialGraphOutputAttenuationColor, "saturate(", ")" },
+                             { 26, "attenuationDistance", 1, MaterialGraphOutputAttenuationDistance, "max(", ", 0.0)" },
+                             { 27, "diffuseTransmission", 1, MaterialGraphOutputDiffuseTransmission, "saturate(", ")" },
+                             { 28, "iridescence", 1, MaterialGraphOutputIridescence, "saturate(", ")" },
+                             { 29, "iridescenceThickness", 1, MaterialGraphOutputIridescenceThickness, "max(", ", 0.0)" },
+                             { 30, "dispersion", 1, MaterialGraphOutputDispersion, "max(", ", 0.0)" },
                          };
-                         for (size_t pin = 0; pin < std::size(pins); ++pin)
+                         for (const Pin& pin : pins)
                          {
-                             if (!args.Connected[pin])
+                             if (pin.Index >= args.Connected.size() || !args.Connected[pin.Index])
                                  continue; // (keeps the material's own value)
-                             const Value value = Convert(args.In[pin], pins[pin].Components);
-                             args.Ctx.Body += std::string("    o.") + pins[pin].Field + " = " + pins[pin].Before + value.Code + pins[pin].After + ";\n";
-                             args.Ctx.Outputs |= pins[pin].Bit;
+                             const Value value = Convert(args.In[pin.Index], pin.Components);
+                             args.Ctx.Body += std::string("    o.") + pin.Field + " = " + pin.Before + value.Code + pin.After + ";\n";
+                             args.Ctx.Outputs |= pin.Bit;
                          }
                          return true;
                      });
@@ -902,13 +1138,16 @@ namespace Nox
         constexpr uint32_t kOffsetPin = 8;
         constexpr uint32_t kLightPin = 9;
         constexpr uint32_t kAmbientPin = 10;
+        constexpr uint32_t kVertexNormalPin = 11;
+        constexpr uint32_t kVertexColorPin = 12;
         auto pinFunction = [&](uint32_t pin)
         {
             return pin == kMaskPin ? Context::Function::OpacityMask : pin == kOffsetPin ? Context::Function::WorldPositionOffset
                  : pin == kLightPin ? Context::Function::CustomLight : pin == kAmbientPin ? Context::Function::CustomAmbient
+                 : (pin == kVertexNormalPin || pin == kVertexColorPin) ? Context::Function::VertexOutputs
                  : Context::Function::Surface;
         };
-        auto neededFor = [&](Context::Function function)
+        auto neededFor = [&](Context::Function function, const std::vector<uint32_t>& extraRoots = {})
         {
             std::vector<bool> needed(compiled.Nodes.size(), false);
             std::vector<uint32_t> stack;
@@ -917,6 +1156,8 @@ namespace Nox
             for (uint32_t pin = 0; pin < outputPins.size(); ++pin)
                 if (pinFunction(pin) == function && outputPins[pin].Node != kInvalidGraphIndex)
                     stack.push_back(outputPins[pin].Node);
+            for (uint32_t root : extraRoots)
+                stack.push_back(root);
             while (!stack.empty())
             {
                 const uint32_t index = stack.back();
@@ -924,6 +1165,10 @@ namespace Nox
                 if (needed[index])
                     continue;
                 needed[index] = true;
+                // In Surface / OpacityMask, stop at Vertex Interpolator nodes (their inputs are evaluated in VertexOutputs instead).
+                if ((function == Context::Function::Surface || function == Context::Function::OpacityMask) &&
+                    compiled.Nodes[index].Type && compiled.Nodes[index].Type->TypeName == "Vertex Interpolator")
+                    continue;
                 for (const CompiledPin& pin : compiled.Nodes[index].Inputs)
                     if (pin.Node != kInvalidGraphIndex)
                         stack.push_back(pin.Node);
@@ -931,23 +1176,81 @@ namespace Nox
             return needed;
         };
 
+        const std::vector<bool> maskNeeded = neededFor(Context::Function::OpacityMask);
+        const std::vector<bool> surfaceNeeded = neededFor(Context::Function::Surface);
+        std::vector<uint32_t> interpolatorRoots;
+        std::unordered_map<uint32_t, uint32_t> interpolatorSlots;
+        for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
+        {
+            if ((!maskNeeded[index] && !surfaceNeeded[index]) || !compiled.Nodes[index].Type ||
+                compiled.Nodes[index].Type->TypeName != "Vertex Interpolator")
+                continue;
+            if (interpolatorSlots.size() >= MaterialGraphMaxInterpolators)
+            {
+                program.Error = std::format("at most {} Vertex Interpolator nodes per material graph", MaterialGraphMaxInterpolators);
+                return program;
+            }
+            interpolatorSlots[compiled.Nodes[index].SourceNodeId] = static_cast<uint32_t>(interpolatorSlots.size());
+            interpolatorRoots.push_back(index);
+        }
+        const std::vector<bool> vertexNeeded = neededFor(Context::Function::VertexOutputs, interpolatorRoots);
+
+        Context vertexContext;
+        vertexContext.Pass = Context::Function::VertexOutputs;
+        vertexContext.InterpolatorSlots = interpolatorSlots;
         Context context;
+        context.InterpolatorSlots = interpolatorSlots;
         Context maskContext;
         maskContext.Pass = Context::Function::OpacityMask;
+        maskContext.InterpolatorSlots = interpolatorSlots;
         Context offsetContext;
         offsetContext.Pass = Context::Function::WorldPositionOffset;
+        offsetContext.InterpolatorSlots = interpolatorSlots;
         Context lightContext;
         lightContext.Pass = Context::Function::CustomLight;
         Context ambientContext;
         ambientContext.Pass = Context::Function::CustomAmbient;
-        auto generate = [&](Context& ctx, const std::vector<bool>& needed) -> bool
+        // Step 4h: when a graph connects Material Output::Normal (pin 3) AND also reads Pixel Normal in surface(), emit the Normal
+        // pin's subgraph first so Pixel Normal sees the world-space normal after the graph's own Normal pin.
+        constexpr uint32_t kNormalPin = 3;
+        std::vector<bool> normalPrePass;
+        if (outputNode.Inputs.size() > kNormalPin && outputNode.Inputs[kNormalPin].Node != kInvalidGraphIndex)
+        {
+            bool usesPixelNormal = false;
+            for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
+                if (surfaceNeeded[index] && compiled.Nodes[index].Type && compiled.Nodes[index].Type->TypeName == "Pixel Normal")
+                    usesPixelNormal = true;
+            if (usesPixelNormal)
+            {
+                normalPrePass.assign(compiled.Nodes.size(), false);
+                std::vector<uint32_t> stack{ outputNode.Inputs[kNormalPin].Node };
+                while (!stack.empty())
+                {
+                    const uint32_t index = stack.back();
+                    stack.pop_back();
+                    if (normalPrePass[index])
+                        continue;
+                    normalPrePass[index] = true;
+                    if (compiled.Nodes[index].Type && compiled.Nodes[index].Type->TypeName == "Pixel Normal")
+                    {
+                        program.Error = "Pixel Normal cannot feed the Normal pin (it reads the normal after the Normal pin)";
+                        return program;
+                    }
+                    if (compiled.Nodes[index].Type && compiled.Nodes[index].Type->TypeName == "Vertex Interpolator")
+                        continue;
+                    for (const CompiledPin& pin : compiled.Nodes[index].Inputs)
+                        if (pin.Node != kInvalidGraphIndex)
+                            stack.push_back(pin.Node);
+                }
+            }
+        }
+
+        auto generate = [&](Context& ctx, const std::vector<bool>& needed, const std::vector<bool>* prePass = nullptr) -> bool
         {
         std::vector<std::vector<Value>> outputs(compiled.Nodes.size());
         Context& context = ctx;
-        for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
+        auto emitNode = [&](uint32_t index) -> bool
         {
-            if (!needed[index])
-                continue;
             const CompiledNode& node = compiled.Nodes[index];
             const auto emitter = Emitters().find(node.Type->TypeName);
             if (emitter == Emitters().end())
@@ -983,6 +1286,24 @@ namespace Nox
             for (Value& value : outputs[index])
                 if (!value.Code.empty() && value.Code.find_first_of("(+-*/") != std::string::npos)
                     value = context.Store(value);
+            return true;
+        };
+        if (prePass && !prePass->empty())
+        {
+            for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
+                if ((*prePass)[index] && !emitNode(index))
+                    return false;
+            const CompiledPin normalSrc = outputNode.Inputs[kNormalPin];
+            const Value normalVal = Convert(outputs[normalSrc.Node].at(normalSrc.OutputSlot), 3);
+            context.Body += "    const float3 _pixelNormal = material_graph_world_normal(" + normalVal.Code + ", i.normal, i.tangent.xyz, i.tangent.w);\n";
+            context.PixelNormalExpr = "_pixelNormal";
+        }
+        for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
+        {
+            if (!needed[index] || (prePass && !prePass->empty() && (*prePass)[index]))
+                continue;
+            if (!emitNode(index))
+                return false;
         }
         return true;
         };
@@ -995,11 +1316,16 @@ namespace Nox
             next.Parameters = previous.Parameters;
             next.ParameterSlots = previous.ParameterSlots;
             next.TextureSlots = previous.TextureSlots;
+            next.InterpolatorComponents = previous.InterpolatorComponents;
         };
-        if (!generate(maskContext, neededFor(Context::Function::OpacityMask)))
+        // VertexOutputs runs before Mask / Surface so Vertex Interpolator component counts are known when pixel passes read them.
+        if (!generate(vertexContext, vertexNeeded))
+            return program;
+        continueFrom(maskContext, vertexContext);
+        if (!generate(maskContext, maskNeeded))
             return program;
         continueFrom(context, maskContext);
-        if (!generate(context, neededFor(Context::Function::Surface)))
+        if (!generate(context, surfaceNeeded, normalPrePass.empty() ? nullptr : &normalPrePass))
             return program;
         continueFrom(offsetContext, context);
         if (!generate(offsetContext, neededFor(Context::Function::WorldPositionOffset)))
@@ -1023,18 +1349,21 @@ namespace Nox
         });
         program.ParameterSlots = lastContext.ParameterSlots;
         program.TextureSlots = lastContext.TextureSlots;
-        const uint32_t geometryOutputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs;
+        const uint32_t geometryOutputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs | vertexContext.Outputs;
         program.Outputs = geometryOutputs | lightContext.Outputs | ambientContext.Outputs;
         if (const NodeGraphValue* displacement = Property(outputNode, "Max World Position Offset Displacement"))
             if (const float* value = std::get_if<float>(displacement))
                 program.MaxDisplacement = std::max(*value, 0.0f);
         if ((maskContext.Outputs & MaterialGraphOutputOpacityMask) != 0)
             program.MaskCode = std::format("float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n", maskContext.Body);
+        if ((vertexContext.Outputs & (MaterialGraphOutputVertexNormal | MaterialGraphOutputVertexColor | MaterialGraphOutputVertexInterpolators)) != 0)
+            program.VertexCode = std::format("void vertex_outputs(MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)\n{{\n{}}}\n", vertexContext.Body);
         program.SurfaceCode = std::format("void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n", context.Body);
         program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n\n"
                                    "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n\n"
-                                   "float3 world_position_offset(MaterialGraphInputs i)\n{{\n{}}}\n",
-                                   geometryOutputs, context.Body, maskContext.Body, offsetContext.Body);
+                                   "float3 world_position_offset(MaterialGraphInputs i)\n{{\n{}}}\n\n"
+                                   "void vertex_outputs(MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)\n{{\n{}}}\n",
+                                   geometryOutputs, context.Body, maskContext.Body, offsetContext.Body, vertexContext.Body);
         // The graph's lighting for a Custom Lit material (Custom Light / Custom Ambient): its inputs from the Custom Lit surface
         // (material_graph_lit_inputs, generated into CustomLitShaders.slang with it), so the graph's other nodes read there too.
         if ((program.Outputs & (MaterialGraphOutputCustomLight | MaterialGraphOutputCustomAmbient)) != 0)

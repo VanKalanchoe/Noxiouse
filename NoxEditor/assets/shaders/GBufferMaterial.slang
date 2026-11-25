@@ -327,17 +327,17 @@
                 const float3 previousCorner1 = mul(instance.previousModelMatrix, previousLocalPos1).xyz;
                 const float3 previousCorner2 = mul(instance.previousModelMatrix, previousLocalPos2).xyz;
                 previousOffset0 = material_graph_offset(offsetMaterial, previousCorner0, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.previousTimeSeconds, ubo,
-                                                       v0.pos, offsetTangent0);
+                                                       v0.pos, offsetTangent0, instance.previousModelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
                 previousOffset1 = material_graph_offset(offsetMaterial, previousCorner1, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.previousTimeSeconds, ubo,
-                                                       v1.pos, offsetTangent1);
+                                                       v1.pos, offsetTangent1, instance.previousModelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
                 previousOffset2 = material_graph_offset(offsetMaterial, previousCorner2, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.previousTimeSeconds, ubo,
-                                                       v2.pos, offsetTangent2);
+                                                       v2.pos, offsetTangent2, instance.previousModelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
                 worldPos0.xyz += material_graph_offset(offsetMaterial, worldPos0.xyz, offsetNormal0, v0.uv0, v0.uv1, offsetColor0, ubo.timeSeconds, ubo,
-                                                       v0.pos, offsetTangent0);
+                                                       v0.pos, offsetTangent0, instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
                 worldPos1.xyz += material_graph_offset(offsetMaterial, worldPos1.xyz, offsetNormal1, v1.uv0, v1.uv1, offsetColor1, ubo.timeSeconds, ubo,
-                                                       v1.pos, offsetTangent1);
+                                                       v1.pos, offsetTangent1, instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
                 worldPos2.xyz += material_graph_offset(offsetMaterial, worldPos2.xyz, offsetNormal2, v2.uv0, v2.uv1, offsetColor2, ubo.timeSeconds, ubo,
-                                                       v2.pos, offsetTangent2);
+                                                       v2.pos, offsetTangent2, instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
             }
 #endif
 
@@ -639,6 +639,7 @@
 
         // 3b. THE LOBES past the core model (MaterialLobes.slang): clear coat, sheen, specular, iridescence, anisotropy.
         GpuMaterial gpuMaterial = instances.material(instanceSlot);
+        float diffuseTransmission = instance.diffuseTransmission;
         GBufferLobes lobes = gbuffer_default_lobes();
         float3 anisotropicT = float3(0.0);
         if (gpuMaterial.lobes != 0u && instance.shadingModel == ShadingModelDefaultLit) // (the lobes are Default Lit's)
@@ -700,7 +701,7 @@
         if (gpuMaterial.graphSlot != 0xFFFFFFFFu)
         {
             const float unbiased = exp2(-ubo.textureLodBias); // (the graph's Texture Samples apply the LOD bias themselves)
-            MaterialGraphInputs graphIn;
+            MaterialGraphInputs graphIn = (MaterialGraphInputs)0;
             graphIn.uv0 = uv0;
             graphIn.uv0Dx = ddx_uv0 * unbiased;
             graphIn.uv0Dy = ddy_uv0 * unbiased;
@@ -715,12 +716,58 @@
             graphIn.localPositionDx = v0.pos * dbary_dx.x + v1.pos * dbary_dx.y + v2.pos * dbary_dx.z;
             graphIn.localPositionDy = v0.pos * dbary_dy.x + v1.pos * dbary_dy.y + v2.pos * dbary_dy.z;
             graphIn.tangent = float4(rawGeomTangent, tangentHandedness);
+            graphIn.objectToWorld = instance.modelMatrix;
+            graphIn.objectNormalMatrix = instance.normalMatrix;
+            graphIn.objectBoundsMin = instance.boundsMin;
+            graphIn.objectBoundsMax = instance.boundsMax;
             graphIn.vertexColor = float4(1.0);
+            const float4 vc0 = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx0, instance.vertexColors);
+            const float4 vc1 = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx1, instance.vertexColors);
+            const float4 vc2 = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx2, instance.vertexColors);
             if (instance.vertexColors != 0)
-                graphIn.vertexColor = loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx0, 1u) * w0 +
-                                      loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx1, 1u) * w1 +
-                                      loadMeshVertexColor(ubo, meshlet.globalVertexOffset + vIdx2, 1u) * w2;
+                graphIn.vertexColor = vc0 * w0 + vc1 * w1 + vc2 * w2;
+            if (material_graph_has_vertex_outputs(gpuMaterial))
+            {
+                const float3 wn0 = mul((float3x3)instance.normalMatrix, localNorm0);
+                const float3 wn1 = mul((float3x3)instance.normalMatrix, localNorm1);
+                const float3 wn2 = mul((float3x3)instance.normalMatrix, localNorm2);
+                const float4 wt0 = float4(mul((float3x3)instance.modelMatrix, localTangent0.xyz), localTangent0.w);
+                const float4 wt1 = float4(mul((float3x3)instance.modelMatrix, localTangent1.xyz), localTangent1.w);
+                const float4 wt2 = float4(mul((float3x3)instance.modelMatrix, localTangent2.xyz), localTangent2.w);
+                const MaterialGraphVertexOutputs vo0 = material_graph_eval_vertex(gpuMaterial, worldPos0.xyz, wn0, v0.uv0, v0.uv1, vc0, ubo.timeSeconds, ubo, v0.pos, wt0, instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
+                const MaterialGraphVertexOutputs vo1 = material_graph_eval_vertex(gpuMaterial, worldPos1.xyz, wn1, v1.uv0, v1.uv1, vc1, ubo.timeSeconds, ubo, v1.pos, wt1, instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
+                const MaterialGraphVertexOutputs vo2 = material_graph_eval_vertex(gpuMaterial, worldPos2.xyz, wn2, v2.uv0, v2.uv1, vc2, ubo.timeSeconds, ubo, v2.pos, wt2, instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
+                if ((gpuMaterial.graphOutputs & MaterialGraphOutputVertexNormal) != 0u)
+                {
+                    const float3 vn = vo0.normal * w0 + vo1.normal * w1 + vo2.normal * w2;
+                    if (dot(vn, vn) > 1e-12)
+                    {
+                        geomNormal = normalize(vn);
+                        graphIn.normal = backFace ? -geomNormal : geomNormal;
+                        finalNormal = graphIn.normal;
+                    }
+                }
+                if ((gpuMaterial.graphOutputs & MaterialGraphOutputVertexColor) != 0u)
+                {
+                    graphIn.vertexColor = vo0.color * w0 + vo1.color * w1 + vo2.color * w2;
+                    if ((gpuMaterial.graphOutputs & MaterialGraphOutputBaseColor) == 0u)
+                        baseColor.rgb = saturate(baseColor.rgb * graphIn.vertexColor.rgb);
+                }
+                if ((gpuMaterial.graphOutputs & MaterialGraphOutputVertexInterpolators) != 0u)
+                {
+                    [unroll]
+                    for (uint k = 0u; k < 4u; ++k)
+                    {
+                        graphIn.vertexInterp[k] = vo0.interp[k] * w0 + vo1.interp[k] * w1 + vo2.interp[k] * w2;
+                        graphIn.vertexInterpDx[k] = (vo0.interp[k] * dbary_dx.x + vo1.interp[k] * dbary_dx.y + vo2.interp[k] * dbary_dx.z) * unbiased;
+                        graphIn.vertexInterpDy[k] = (vo0.interp[k] * dbary_dy.x + vo1.interp[k] * dbary_dy.y + vo2.interp[k] * dbary_dy.z) * unbiased;
+                    }
+                }
+            }
             graphIn.view = -viewDir;
+            graphIn.pixelNormal = finalNormal;
+            graphIn.pixelDepth = abs(mul(ubo.view, float4(worldPos, 1.0)).z);
+            graphIn.sceneDepth = graphIn.pixelDepth;
             graphIn.screenUV = uvScreen;
             graphIn.screenUVDx = float2(invViewport.x, 0.0);
             graphIn.screenUVDy = float2(0.0, invViewport.y);
@@ -729,7 +776,7 @@
             graphIn.material = gpuMaterial;
             graphIn.mipFeedback = ubo.mipFeedbackReference != 0 && isMipFeedbackPixel(pixelCoord, ubo.mipFeedbackFrame);
             graphIn.ubo = ubo;
-            MaterialGraphOutputs graphOut;
+            MaterialGraphOutputs graphOut = (MaterialGraphOutputs)0;
             graphOut.baseColor = baseColor.rgb;
             graphOut.metallic = metallic;
             graphOut.roughness = roughness;
@@ -737,6 +784,12 @@
             graphOut.emissive = emission;
             graphOut.occlusion = occlusion;
             graphOut.opacity = baseColor.a;
+            graphOut.specular = 1.0;
+            graphOut.specularColor = float3(1.0);
+            graphOut.clearCoatNormal = float3(0.0, 0.0, 1.0);
+            graphOut.anisotropyDirection = float2(1.0, 0.0);
+            graphOut.ior = gpuMaterial.ior > 0.0 ? gpuMaterial.ior : 1.5;
+            graphOut.attenuationColor = float3(1.0);
             material_graph_surface(gpuMaterial.graphSlot, graphIn, graphOut);
             const uint outputs = gpuMaterial.graphOutputs;
             if ((outputs & MaterialGraphOutputBaseColor) != 0u)
@@ -757,6 +810,9 @@
                 emission = max(graphOut.emissive, float3(0.0));
             if ((outputs & MaterialGraphOutputOcclusion) != 0u)
                 occlusion = saturate(graphOut.occlusion);
+            if (instance.shadingModel == ShadingModelDefaultLit)
+                material_graph_apply_lobes(outputs, graphOut, gpuMaterial, geomNormal, rawGeomTangent, tangentHandedness, backFace, -viewDir,
+                                           lobes, anisotropicT, diffuseTransmission);
         }
 #endif
 
@@ -798,7 +854,7 @@
 
         // The lobe bits and the shading model (gbuffer_unlit / gbuffer_toon): which lobe targets hold data for this pixel.
         output.material = float4(roughness, metallic, gbuffer_encode_flags(lobes.flags, instance.shadingModel),
-                                 gbuffer_encode_back_light(instance.doubleSided != 0, instance.diffuseTransmission));
+                                 gbuffer_encode_back_light(instance.doubleSided != 0, diffuseTransmission));
 
         // The coat is over the emission too: what it reflects of the view does not come from below (the spec's coated_emission).
         if (lobes.coat > 0.0)

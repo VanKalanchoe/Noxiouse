@@ -43,6 +43,7 @@ namespace Nox
         std::string Code;
         std::string MaskCode;    // MaterialGraphProgram::MaskCode (empty: no Opacity Mask)
         std::string SurfaceCode; // MaterialGraphProgram::SurfaceCode
+        std::string VertexCode;  // MaterialGraphProgram::VertexCode (empty: no vertex-stage outputs)
     };
 
     namespace CustomLitShaders

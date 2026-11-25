@@ -5742,6 +5742,9 @@ namespace Nox
         // The air's camera volume, for the forward passes' fog (deferred lighting gets it in its push constants).
         uniformData.aerialPerspectiveTextureIndex = resources.AerialPerspective.IsValid() ? graph.GetSlotOr(resources.AerialPerspective, NoTexture) : NoTexture;
         uniformData.aerialPerspectiveKmPerUnit = WorldUnits::ToMeters(1.0f) / 1000.0f * glm::max(m_proceduralSky.AerialPerspectiveScale, 0.0f);
+        // Opaque scene depth copy for transparent material graphs (Scene Depth / Depth Fade, step 4h).
+        uniformData.transparentSceneDepthTextureIndex = resources.TransparentSceneDepth.IsValid()
+                                                            ? graph.GetSlotOr(resources.TransparentSceneDepth, NoTexture) : NoTexture;
         // Raster glass's SSR (addTransparentReflectionInputs): the opaque depth copy and the normals it marches through.
         const bool transparentSSR = resources.TransparentReflectionDepth.IsValid();
         uniformData.transparentSSRDepthTextureIndex = transparentSSR ? graph.GetSlotOr(resources.TransparentReflectionDepth, NoTexture) : NoTexture;
@@ -7773,6 +7776,8 @@ namespace Nox
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
             uniforms.ssgiTextureIndex = 0xFFFFFFFF;
             uniforms.ssgiDepthTextureIndex = 0xFFFFFFFF;
+            uniforms.transparentSceneDepthTextureIndex = 0xFFFFFFFF;
+            uniforms.transparentSSRDepthTextureIndex = 0xFFFFFFFF;
             // So is the air's volume (built along the camera's rays): another view's forward fog is the height fog alone.
             uniforms.aerialPerspectiveTextureIndex = 0xFFFFFFFF;
             // An asset preview stands far below the scene: its shadow rays would hit the world above, its DDGI lookups the grid's edge.

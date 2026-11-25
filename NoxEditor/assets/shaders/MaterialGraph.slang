@@ -23,12 +23,22 @@ struct MaterialGraphInputs
     float3 positionDx;
     float3 positionDy;
     float3 normal;        // the vertex normal (world), facing the viewer's side
+    float3 pixelNormal;   // the shading normal (world, after normal map; step 4h)
+    float pixelDepth;     // linear view-space depth of this pixel in world units (step 4h)
+    float sceneDepth;     // linear view-space depth of the opaque scene behind this pixel in world units (step 4h)
     // The vertex in the mesh's own space before skinning and morph targets (Unreal's Pre-Skinned Local Position): a pattern on it stays on
     // an animated character. The mesh's units (its import scale applied).
     float3 localPosition;
     float3 localPositionDx;
     float3 localPositionDy;
     float4 tangent;       // the vertex tangent (world, skinned as the normal is; 0 where the mesh has none), w the bitangent's handedness
+    float4x4 objectToWorld;      // instance model matrix (render space; world pivot = column 3 + ubo.renderOrigin)
+    float4x4 objectNormalMatrix; // transpose(inverse(objectToWorld)); transpose((float3x3)) is inverse 3x3
+    float3 objectBoundsMin;      // mesh local-space AABB min
+    float3 objectBoundsMax;      // mesh local-space AABB max
+    float4 vertexInterp[4];      // Vertex Interpolator slots 0..3 (step 4f)
+    float4 vertexInterpDx[4];
+    float4 vertexInterpDy[4];
     float4 vertexColor;
     float3 view;          // towards the camera
     float2 screenUV;      // 0..1 across the view
@@ -41,6 +51,14 @@ struct MaterialGraphInputs
     UniformBufferObject ubo;
 };
 
+// What a graph writes per vertex (step 4f: Vertex Normal / Vertex Color overrides and up to 4 Vertex Interpolators).
+struct MaterialGraphVertexOutputs
+{
+    float3 normal;       // world space (initialized to the vertex's own normal)
+    float4 color;        // vertex colour (initialized to the vertex's own colour)
+    float4 interp[4];    // Vertex Interpolator slots 0..3
+};
+
 // What a graph writes: the Material Output pins it connects.
 struct MaterialGraphOutputs
 {
@@ -51,7 +69,142 @@ struct MaterialGraphOutputs
     float3 emissive;
     float occlusion;
     float opacity;
+    // Pixel-stage lobe outputs (step 4g): written over the material's own lobe values.
+    float specular;
+    float3 specularColor;
+    float clearCoat;
+    float clearCoatRoughness;
+    float3 clearCoatNormal; // tangent space (+z out of the surface)
+    float3 sheenColor;
+    float sheenRoughness;
+    float anisotropy;
+    float2 anisotropyDirection; // tangent space
+    float transmission;
+    float ior;
+    float thickness;
+    float3 attenuationColor;
+    float attenuationDistance;
+    float diffuseTransmission;
+    float iridescence;
+    float iridescenceThickness; // nanometers
+    float dispersion;
 };
+
+// Applies a material graph's connected lobe outputs (step 4g) over the evaluated GBufferLobes and diffuseTransmission.
+void material_graph_apply_lobes(uint outputs, MaterialGraphOutputs graphOut, GpuMaterial material,
+                                float3 geomNormal, float3 rawTangent, float tangentSign, bool backFace, float3 viewDir,
+                                inout GBufferLobes lobes, inout float3 anisotropicT, inout float diffuseTransmission)
+{
+    if ((outputs & MaterialGraphOutputAllLobes) == 0u)
+        return;
+
+    const float ior = (outputs & MaterialGraphOutputIOR) != 0u ? max(graphOut.ior, 1.0) : (material.ior > 0.0 ? material.ior : 1.5);
+    const float iorF0 = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
+    if ((outputs & (MaterialGraphOutputSpecular | MaterialGraphOutputSpecularColor | MaterialGraphOutputIOR)) != 0u)
+    {
+        if ((lobes.flags & MaterialLobeSpecular) == 0u)
+        {
+            lobes.dielectricF0 = min(iorF0 * material.specularColorFactor, float3(1.0));
+            lobes.specularWeight = material.specularStrength;
+        }
+        if ((outputs & MaterialGraphOutputSpecular) != 0u)
+            lobes.specularWeight = saturate(graphOut.specular);
+        if ((outputs & MaterialGraphOutputSpecularColor) != 0u)
+            lobes.dielectricF0 = min(iorF0 * saturate(graphOut.specularColor), float3(1.0));
+        else if ((outputs & MaterialGraphOutputIOR) != 0u)
+            lobes.dielectricF0 = min(iorF0 * material.specularColorFactor, float3(1.0));
+        lobes.flags |= MaterialLobeSpecular;
+    }
+
+    if ((outputs & (MaterialGraphOutputClearCoat | MaterialGraphOutputClearCoatRoughness | MaterialGraphOutputClearCoatNormal)) != 0u)
+    {
+        if ((lobes.flags & MaterialLobeClearcoat) == 0u)
+        {
+            lobes.coat = material.clearcoatFactor;
+            lobes.coatRoughness = material.clearcoatRoughnessFactor;
+            lobes.coatNormal = backFace ? -geomNormal : geomNormal;
+        }
+        if ((outputs & MaterialGraphOutputClearCoat) != 0u)
+            lobes.coat = saturate(graphOut.clearCoat);
+        if ((outputs & MaterialGraphOutputClearCoatRoughness) != 0u)
+            lobes.coatRoughness = saturate(graphOut.clearCoatRoughness);
+        if ((outputs & MaterialGraphOutputClearCoatNormal) != 0u)
+        {
+            float3 cn = material_graph_world_normal(graphOut.clearCoatNormal, geomNormal, rawTangent, tangentSign);
+            lobes.coatNormal = backFace ? -cn : cn;
+        }
+        if (lobes.coat > 0.0)
+        {
+            lobes.flags |= MaterialLobeClearcoat;
+            const float cnDotV = dot(lobes.coatNormal, viewDir);
+            if (cnDotV < 0.01)
+                lobes.coatNormal = normalize(lobes.coatNormal + viewDir * (0.01 - cnDotV));
+        }
+        else
+            lobes.flags &= ~MaterialLobeClearcoat;
+    }
+
+    if ((outputs & (MaterialGraphOutputSheenColor | MaterialGraphOutputSheenRoughness)) != 0u)
+    {
+        if ((lobes.flags & MaterialLobeSheen) == 0u)
+        {
+            lobes.sheenColor = material.sheenColorFactor;
+            lobes.sheenRoughness = material.sheenRoughnessFactor;
+        }
+        if ((outputs & MaterialGraphOutputSheenColor) != 0u)
+            lobes.sheenColor = saturate(graphOut.sheenColor);
+        if ((outputs & MaterialGraphOutputSheenRoughness) != 0u)
+            lobes.sheenRoughness = saturate(graphOut.sheenRoughness);
+        if (max(max(lobes.sheenColor.r, lobes.sheenColor.g), lobes.sheenColor.b) > 0.0)
+            lobes.flags |= MaterialLobeSheen;
+        else
+            lobes.flags &= ~MaterialLobeSheen;
+    }
+
+    if ((outputs & (MaterialGraphOutputIridescence | MaterialGraphOutputIridescenceThickness)) != 0u)
+    {
+        if ((lobes.flags & MaterialLobeIridescence) == 0u)
+        {
+            lobes.iridescence = material.iridescenceFactor;
+            lobes.iridescenceIor = material.iridescenceIor > 0.0 ? material.iridescenceIor : 1.3;
+            lobes.iridescenceThickness = material.iridescenceThicknessMaximum > 0.0 ? material.iridescenceThicknessMaximum : 400.0;
+        }
+        if ((outputs & MaterialGraphOutputIridescence) != 0u)
+            lobes.iridescence = saturate(graphOut.iridescence);
+        if ((outputs & MaterialGraphOutputIridescenceThickness) != 0u)
+            lobes.iridescenceThickness = max(graphOut.iridescenceThickness, 0.0);
+        if (lobes.iridescence > 0.0)
+            lobes.flags |= MaterialLobeIridescence;
+        else
+            lobes.flags &= ~MaterialLobeIridescence;
+    }
+
+    if ((outputs & (MaterialGraphOutputAnisotropy | MaterialGraphOutputAnisotropyDirection)) != 0u)
+    {
+        const bool hasTangents = dot(rawTangent, rawTangent) > 1e-12;
+        if ((outputs & MaterialGraphOutputAnisotropy) != 0u)
+            lobes.anisotropy = hasTangents ? saturate(graphOut.anisotropy) : 0.0;
+        else if ((lobes.flags & MaterialLobeAnisotropy) == 0u)
+            lobes.anisotropy = hasTangents ? material.anisotropyStrength : 0.0;
+        if (hasTangents && ((outputs & MaterialGraphOutputAnisotropyDirection) != 0u || (lobes.flags & MaterialLobeAnisotropy) == 0u))
+        {
+            const float2 rawDir = (outputs & MaterialGraphOutputAnisotropyDirection) != 0u ? graphOut.anisotropyDirection : material.anisotropyDirection;
+            const float2 dir = dot(rawDir, rawDir) > 1e-8 ? normalize(rawDir) : float2(1.0, 0.0);
+            const float3 T = normalize(rawTangent - geomNormal * dot(geomNormal, rawTangent));
+            const float3 B = cross(geomNormal, T) * (tangentSign < 0.0 ? -1.0 : 1.0);
+            anisotropicT = normalize(T * dir.x + B * dir.y);
+            if (backFace)
+                anisotropicT = -anisotropicT;
+        }
+        if (lobes.anisotropy > 0.0 && hasTangents)
+            lobes.flags |= MaterialLobeAnisotropy;
+        else
+            lobes.flags &= ~MaterialLobeAnisotropy;
+    }
+
+    if ((outputs & MaterialGraphOutputDiffuseTransmission) != 0u)
+        diffuseTransmission = saturate(graphOut.diffuseTransmission);
+}
 
 // A Texture Sample: the material's texture in slot `slot` at `uv`, its mip from the UV's derivatives (times the frame's texture LOD bias,
 // as every material texture; texture streaming told which mip it needs, as for the material's own textures). No texture: white -- for a
@@ -129,6 +282,48 @@ float4 material_graph_vertex_tangent(InstanceData instance, Vertex vert, uint lo
     return float4(mul((float3x3)instance.modelMatrix, localTangent), vert.tangent.w);
 }
 
+// Whether the material's graph has any per-vertex outputs (step 4f: Vertex Normal, Vertex Color, or Vertex Interpolators).
+bool material_graph_has_vertex_outputs(GpuMaterial material)
+{
+    return material.graphSlot != 0xFFFFFFFFu &&
+           (material.graphOutputs & (MaterialGraphOutputVertexNormal | MaterialGraphOutputVertexColor | MaterialGraphOutputVertexInterpolators)) != 0u;
+}
+
+// Evaluates per-vertex outputs (Vertex Normal, Vertex Color, Vertex Interpolators) at one vertex.
+MaterialGraphVertexOutputs material_graph_eval_vertex(
+    GpuMaterial material, float3 renderPos, float3 worldNormal, float2 uv0, float2 uv1, float4 vertexColor, float time,
+    UniformBufferObject ubo, float3 localPosition, float4 worldTangent,
+    float4x4 objectToWorld, float4x4 objectNormalMatrix, float3 objectBoundsMin, float3 objectBoundsMax)
+{
+    MaterialGraphVertexOutputs vo = (MaterialGraphVertexOutputs)0;
+    vo.normal = dot(worldNormal, worldNormal) > 1e-12 ? normalize(worldNormal) : float3(0.0, 0.0, 1.0);
+    vo.color = vertexColor;
+    if (!material_graph_has_vertex_outputs(material))
+        return vo;
+    MaterialGraphInputs i = (MaterialGraphInputs)0;
+    i.uv0 = uv0;
+    i.uv1 = uv1;
+    i.position = renderPos + ubo.renderOrigin;
+    i.normal = vo.normal;
+    i.localPosition = localPosition;
+    i.tangent = worldTangent;
+    i.objectToWorld = objectToWorld;
+    i.objectNormalMatrix = objectNormalMatrix;
+    i.objectBoundsMin = objectBoundsMin;
+    i.objectBoundsMax = objectBoundsMax;
+    i.vertexColor = vertexColor;
+    const float3 toCamera = ubo.cameraWorldPos.xyz - renderPos;
+    i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
+    i.screenUV = float2(0.5);
+    i.time = time;
+    i.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
+    i.material = material;
+    i.mipFeedback = false;
+    i.ubo = ubo;
+    material_graph_vertex_outputs(material.graphSlot, i, vo);
+    return vo;
+}
+
 // The raster passes' helpers (World Position Offset, the Opacity Mask's pixel test): not in the ray tracing variants, whose generated file
 // (MaterialGraphMasks.slang) has the graphs' masks alone (NOX_MATERIAL_GRAPH_MASK_ONLY).
 #ifndef NOX_MATERIAL_GRAPH_MASK_ONLY
@@ -148,7 +343,8 @@ bool material_graph_has_offset(GpuMaterial material)
 // samples level 0 in vertex shaders too); Camera Vector and Camera Position are the main camera's in every pass (the shadow views use
 // the same offset as the view). Clamped to the graph's Max World Position Offset Displacement when it has one (Unreal's).
 float3 material_graph_offset(GpuMaterial material, float3 renderPos, float3 worldNormal, float2 uv0, float2 uv1, float4 vertexColor, float time,
-                             UniformBufferObject ubo, float3 localPosition, float4 worldTangent)
+                             UniformBufferObject ubo, float3 localPosition, float4 worldTangent,
+                             float4x4 objectToWorld, float4x4 objectNormalMatrix, float3 objectBoundsMin, float3 objectBoundsMax)
 {
     if (!material_graph_has_offset(material))
         return float3(0.0);
@@ -159,6 +355,10 @@ float3 material_graph_offset(GpuMaterial material, float3 renderPos, float3 worl
     i.normal = dot(worldNormal, worldNormal) > 1e-12 ? normalize(worldNormal) : float3(0.0, 0.0, 1.0);
     i.localPosition = localPosition;
     i.tangent = worldTangent;
+    i.objectToWorld = objectToWorld;
+    i.objectNormalMatrix = objectNormalMatrix;
+    i.objectBoundsMin = objectBoundsMin;
+    i.objectBoundsMax = objectBoundsMax;
     i.vertexColor = vertexColor;
     const float3 toCamera = ubo.cameraWorldPos.xyz - renderPos;
     i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
@@ -187,7 +387,8 @@ float3 material_graph_vertex_offset(GpuMaterial material, InstanceData instance,
         return float3(0.0);
     return material_graph_offset(material, renderPos, material_graph_vertex_normal(instance, vert, localVertexIndex, pushConstant), vert.uv0, vert.uv1,
                                  loadMeshVertexColor(ubo, globalVertexIndex, instance.vertexColors), ubo.timeSeconds, ubo, vert.pos,
-                                 material_graph_vertex_tangent(instance, vert, localVertexIndex, pushConstant));
+                                 material_graph_vertex_tangent(instance, vert, localVertexIndex, pushConstant),
+                                 instance.modelMatrix, instance.normalMatrix, instance.boundsMin, instance.boundsMax);
 }
 
 // Whether a Masked material whose graph connects Opacity Mask has this pixel cut away (its mask below its Opacity Mask Clip Value);
@@ -215,6 +416,10 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
     i.localPositionDx = ddx(localPosition);
     i.localPositionDy = ddy(localPosition);
     i.tangent = tangent;
+    i.objectToWorld = instance.modelMatrix;
+    i.objectNormalMatrix = instance.normalMatrix;
+    i.objectBoundsMin = instance.boundsMin;
+    i.objectBoundsMax = instance.boundsMax;
     i.vertexColor = vertexColor;
     i.view = normalize(ubo.cameraWorldPos.xyz - worldPos);
     const float4 clip = mul(viewProj, float4(worldPos, 1.0));
@@ -270,8 +475,52 @@ MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject ubo, GpuRayTra
         localTangent = deformed[corners.x].tangent.xyz * w.x + deformed[corners.y].tangent.xyz * w.y + deformed[corners.z].tangent.xyz * w.z;
     }
     i.tangent = float4(mul((float3x3)world, localTangent), v0.tangent.w);
+    i.objectToWorld = world;
+    i.objectNormalMatrix = instance.normalMatrix;
+    const uint meshIndex = BufferRef<GpuInstance>(ubo.sceneInstancesReference)[instance.instanceSlot].meshIndex;
+    const GpuMesh gpuMesh = BufferRef<GpuMesh>(ubo.sceneMeshesReference)[meshIndex];
+    i.objectBoundsMin = gpuMesh.boundsMin;
+    i.objectBoundsMax = gpuMesh.boundsMax;
     i.vertexColor = RayTracingVertexColor(instance, corners, barycentrics);
+    if (material_graph_has_vertex_outputs(material))
+    {
+        const float3 p0 = mul(world, float4(v0.pos, 1.0)).xyz;
+        const float3 p1 = mul(world, float4(v1.pos, 1.0)).xyz;
+        const float3 p2 = mul(world, float4(v2.pos, 1.0)).xyz;
+        const float3 n0 = mul((float3x3)instance.normalMatrix, v0.normal);
+        const float3 n1 = mul((float3x3)instance.normalMatrix, v1.normal);
+        const float3 n2 = mul((float3x3)instance.normalMatrix, v2.normal);
+        const float4 t0 = float4(mul((float3x3)world, v0.tangent.xyz), v0.tangent.w);
+        const float4 t1 = float4(mul((float3x3)world, v1.tangent.xyz), v1.tangent.w);
+        const float4 t2 = float4(mul((float3x3)world, v2.tangent.xyz), v2.tangent.w);
+        const float3 lp0 = unpackVertex(meshVertices[corners.x]).pos;
+        const float3 lp1 = unpackVertex(meshVertices[corners.y]).pos;
+        const float3 lp2 = unpackVertex(meshVertices[corners.z]).pos;
+        const float4 c0 = RayTracingVertexColor(instance, uint3(corners.x, corners.x, corners.x), float2(0.0, 0.0));
+        const float4 c1 = RayTracingVertexColor(instance, uint3(corners.y, corners.y, corners.y), float2(0.0, 0.0));
+        const float4 c2 = RayTracingVertexColor(instance, uint3(corners.z, corners.z, corners.z), float2(0.0, 0.0));
+        const MaterialGraphVertexOutputs vo0 = material_graph_eval_vertex(material, p0, n0, v0.uv0, v0.uv1, c0, ubo.timeSeconds, ubo, lp0, t0, world, instance.normalMatrix, gpuMesh.boundsMin, gpuMesh.boundsMax);
+        const MaterialGraphVertexOutputs vo1 = material_graph_eval_vertex(material, p1, n1, v1.uv0, v1.uv1, c1, ubo.timeSeconds, ubo, lp1, t1, world, instance.normalMatrix, gpuMesh.boundsMin, gpuMesh.boundsMax);
+        const MaterialGraphVertexOutputs vo2 = material_graph_eval_vertex(material, p2, n2, v2.uv0, v2.uv1, c2, ubo.timeSeconds, ubo, lp2, t2, world, instance.normalMatrix, gpuMesh.boundsMin, gpuMesh.boundsMax);
+        if ((material.graphOutputs & MaterialGraphOutputVertexNormal) != 0u)
+        {
+            const float3 vn = vo0.normal * w.x + vo1.normal * w.y + vo2.normal * w.z;
+            if (dot(vn, vn) > 1e-12)
+                i.normal = normalize(vn);
+        }
+        if ((material.graphOutputs & MaterialGraphOutputVertexColor) != 0u)
+            i.vertexColor = vo0.color * w.x + vo1.color * w.y + vo2.color * w.z;
+        if ((material.graphOutputs & MaterialGraphOutputVertexInterpolators) != 0u)
+        {
+            [unroll]
+            for (uint k = 0u; k < 4u; ++k)
+                i.vertexInterp[k] = vo0.interp[k] * w.x + vo1.interp[k] * w.y + vo2.interp[k] * w.z;
+        }
+    }
     const float3 toCamera = ubo.cameraWorldPos.xyz - position;
+    i.pixelNormal = i.normal;
+    i.pixelDepth = abs(mul(ubo.view, float4(position, 1.0)).z);
+    i.sceneDepth = i.pixelDepth;
     i.view = dot(toCamera, toCamera) > 1e-12 ? normalize(toCamera) : float3(0.0, 0.0, 1.0);
     i.screenUV = float2(0.5);
     i.time = ubo.timeSeconds;
@@ -309,7 +558,8 @@ uint material_graph_ray_surface(UniformBufferObject ubo, GpuRayTracingInstance i
     if (material.graphSlot == 0xFFFFFFFFu)
         return 0u;
     const uint outputs = material.graphOutputs & (MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic | MaterialGraphOutputRoughness |
-                                                  MaterialGraphOutputNormal | MaterialGraphOutputEmissive | MaterialGraphOutputOcclusion);
+                                                  MaterialGraphOutputNormal | MaterialGraphOutputEmissive | MaterialGraphOutputOcclusion |
+                                                  MaterialGraphOutputAllLobes);
     if (outputs == 0u)
         return 0u;
     MaterialGraphOutputs graph = o;
@@ -326,13 +576,31 @@ uint material_graph_ray_surface(UniformBufferObject ubo, GpuRayTracingInstance i
         o.emissive = max(graph.emissive, float3(0.0));
     if ((outputs & MaterialGraphOutputOcclusion) != 0u)
         o.occlusion = saturate(graph.occlusion);
+    if ((outputs & MaterialGraphOutputSpecular) != 0u) o.specular = saturate(graph.specular);
+    if ((outputs & MaterialGraphOutputSpecularColor) != 0u) o.specularColor = saturate(graph.specularColor);
+    if ((outputs & MaterialGraphOutputClearCoat) != 0u) o.clearCoat = saturate(graph.clearCoat);
+    if ((outputs & MaterialGraphOutputClearCoatRoughness) != 0u) o.clearCoatRoughness = saturate(graph.clearCoatRoughness);
+    if ((outputs & MaterialGraphOutputClearCoatNormal) != 0u) o.clearCoatNormal = graph.clearCoatNormal;
+    if ((outputs & MaterialGraphOutputSheenColor) != 0u) o.sheenColor = saturate(graph.sheenColor);
+    if ((outputs & MaterialGraphOutputSheenRoughness) != 0u) o.sheenRoughness = saturate(graph.sheenRoughness);
+    if ((outputs & MaterialGraphOutputAnisotropy) != 0u) o.anisotropy = saturate(graph.anisotropy);
+    if ((outputs & MaterialGraphOutputAnisotropyDirection) != 0u) o.anisotropyDirection = graph.anisotropyDirection;
+    if ((outputs & MaterialGraphOutputTransmission) != 0u) o.transmission = saturate(graph.transmission);
+    if ((outputs & MaterialGraphOutputIOR) != 0u) o.ior = max(graph.ior, 1.0);
+    if ((outputs & MaterialGraphOutputThickness) != 0u) o.thickness = max(graph.thickness, 0.0);
+    if ((outputs & MaterialGraphOutputAttenuationColor) != 0u) o.attenuationColor = saturate(graph.attenuationColor);
+    if ((outputs & MaterialGraphOutputAttenuationDistance) != 0u) o.attenuationDistance = max(graph.attenuationDistance, 0.0);
+    if ((outputs & MaterialGraphOutputDiffuseTransmission) != 0u) o.diffuseTransmission = saturate(graph.diffuseTransmission);
+    if ((outputs & MaterialGraphOutputIridescence) != 0u) o.iridescence = saturate(graph.iridescence);
+    if ((outputs & MaterialGraphOutputIridescenceThickness) != 0u) o.iridescenceThickness = max(graph.iridescenceThickness, 0.0);
+    if ((outputs & MaterialGraphOutputDispersion) != 0u) o.dispersion = max(graph.dispersion, 0.0);
     return outputs;
 }
 
 // The hit's own values in, for material_graph_ray_surface.
 MaterialGraphOutputs material_graph_ray_defaults(float3 baseColor, float metallic, float roughness, float3 emissive)
 {
-    MaterialGraphOutputs o;
+    MaterialGraphOutputs o = (MaterialGraphOutputs)0;
     o.baseColor = baseColor;
     o.metallic = metallic;
     o.roughness = roughness;
@@ -340,9 +608,28 @@ MaterialGraphOutputs material_graph_ray_defaults(float3 baseColor, float metalli
     o.emissive = emissive;
     o.occlusion = 1.0;
     o.opacity = 1.0;
+    o.specular = 1.0;
+    o.specularColor = float3(1.0);
+    o.clearCoatNormal = float3(0.0, 0.0, 1.0);
+    o.anisotropyDirection = float2(1.0, 0.0);
+    o.ior = 1.5;
+    o.attenuationColor = float3(1.0);
     return o;
 }
 #endif
+
+// Linearizes a Reverse-Z depth buffer sample into view-space distance (world units) for Scene Depth / Depth Fade (step 4h).
+// Works for both perspective and orthographic projections; returns far sky distance when rawDepth <= 0.
+float material_graph_linear_depth(UniformBufferObject ubo, float2 screenUV, float rawDepth)
+{
+    if (rawDepth <= 0.0)
+        return 1e6 * ubo.unitsPerMeter;
+    const float2 ndc = float2(screenUV.x * 2.0 - 1.0, 1.0 - screenUV.y * 2.0);
+    const float4 worldH = mul(ubo.invViewProj, float4(ndc, rawDepth, 1.0));
+    const float3 worldPos = worldH.xyz / worldH.w;
+    const float3 viewPos = mul(ubo.view, float4(worldPos, 1.0)).xyz;
+    return abs(viewPos.z);
+}
 
 // Smooth value noise in [0, 1] (Noise node).
 float material_graph_hash(float3 p)
@@ -361,4 +648,121 @@ float material_graph_noise(float3 x)
                      lerp(material_graph_hash(cell + float3(0, 1, 0)), material_graph_hash(cell + float3(1, 1, 0)), u.x), u.y),
                 lerp(lerp(material_graph_hash(cell + float3(0, 0, 1)), material_graph_hash(cell + float3(1, 0, 1)), u.x),
                      lerp(material_graph_hash(cell + float3(0, 1, 1)), material_graph_hash(cell + float3(1, 1, 1)), u.x), u.y), u.z);
+}
+
+// --- Object Position, Object Bounds, Space Transform & Matrices (step 4e part 2) ---
+
+float3 material_graph_object_position(MaterialGraphInputs i)
+{
+    return mul(i.objectToWorld, float4(0.0, 0.0, 0.0, 1.0)).xyz + i.ubo.renderOrigin;
+}
+
+float3 material_graph_object_bounds_center(MaterialGraphInputs i)
+{
+    const float3 localCenter = 0.5 * (i.objectBoundsMin + i.objectBoundsMax);
+    return mul(i.objectToWorld, float4(localCenter, 1.0)).xyz + i.ubo.renderOrigin;
+}
+
+float3 material_graph_object_bounds_extent(MaterialGraphInputs i)
+{
+    const float3 localExtent = 0.5 * (i.objectBoundsMax - i.objectBoundsMin);
+    const float3x3 absM = float3x3(abs(i.objectToWorld[0].xyz), abs(i.objectToWorld[1].xyz), abs(i.objectToWorld[2].xyz));
+    return mul(absM, localExtent);
+}
+
+// Spaces: 0 = Local, 1 = World, 2 = View, 3 = Clip.
+float3 material_graph_transform(MaterialGraphInputs i, float3 v, uint fromSpace, uint toSpace, bool isPosition)
+{
+    if (fromSpace == toSpace)
+        return v;
+
+    // 1. Convert from `fromSpace` into render space.
+    float3 r = v;
+    if (fromSpace == 0u) // Local -> Render
+        r = isPosition ? mul(i.objectToWorld, float4(v, 1.0)).xyz : mul((float3x3)i.objectToWorld, v);
+    else if (fromSpace == 1u) // World -> Render
+        r = isPosition ? (v - i.ubo.renderOrigin) : v;
+    else if (fromSpace == 2u) // View -> Render
+    {
+        const float3x3 invView3 = transpose((float3x3)i.ubo.view);
+        r = isPosition ? (mul(invView3, v) + i.ubo.cameraWorldPos.xyz) : mul(invView3, v);
+    }
+    else if (fromSpace == 3u) // Clip -> Render
+    {
+        if (isPosition)
+        {
+            const float4 w = mul(i.ubo.invViewProj, float4(v, 1.0));
+            r = w.xyz / (abs(w.w) > 1e-6 ? w.w : 1.0);
+        }
+        else
+            r = mul((float3x3)i.ubo.invViewProj, v);
+    }
+
+    // 2. Convert from render space into `toSpace`.
+    if (toSpace == 0u) // Render -> Local
+    {
+        const float3x3 worldToLocal = transpose((float3x3)i.objectNormalMatrix);
+        if (isPosition)
+        {
+            const float3 objOrigin = mul(i.objectToWorld, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+            return mul(worldToLocal, r - objOrigin);
+        }
+        return mul(worldToLocal, r);
+    }
+    if (toSpace == 1u) // Render -> World
+        return isPosition ? (r + i.ubo.renderOrigin) : r;
+    if (toSpace == 2u) // Render -> View
+        return isPosition ? mul(i.ubo.view, float4(r, 1.0)).xyz : mul((float3x3)i.ubo.view, r);
+    if (toSpace == 3u) // Render -> Clip
+    {
+        const float4x4 vp = mul(i.ubo.proj, i.ubo.view);
+        if (isPosition)
+        {
+            const float4 c = mul(vp, float4(r, 1.0));
+            return c.xyz / (abs(c.w) > 1e-6 ? c.w : 1.0);
+        }
+        return mul((float3x3)vp, r);
+    }
+    return r;
+}
+
+// Matrix kinds:
+// 0 = Model (Local -> Render/World), 1 = Inverse Model, 2 = View, 3 = Inverse View,
+// 4 = Projection, 5 = Inverse Projection, 6 = View Projection, 7 = Inverse View Projection.
+float4x4 material_graph_matrix(MaterialGraphInputs i, uint kind)
+{
+    if (kind == 0u)
+        return i.objectToWorld;
+    if (kind == 1u)
+    {
+        const float3x3 inv3 = transpose((float3x3)i.objectNormalMatrix);
+        const float3 objOrigin = mul(i.objectToWorld, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+        const float3 invT = -mul(inv3, objOrigin);
+        return float4x4(
+            float4(inv3[0], invT.x),
+            float4(inv3[1], invT.y),
+            float4(inv3[2], invT.z),
+            float4(0.0, 0.0, 0.0, 1.0));
+    }
+    if (kind == 2u)
+        return i.ubo.view;
+    if (kind == 3u)
+    {
+        const float3x3 inv3 = transpose((float3x3)i.ubo.view);
+        const float3 cam = i.ubo.cameraWorldPos.xyz;
+        return float4x4(
+            float4(inv3[0], cam.x),
+            float4(inv3[1], cam.y),
+            float4(inv3[2], cam.z),
+            float4(0.0, 0.0, 0.0, 1.0));
+    }
+    if (kind == 4u)
+        return i.ubo.proj;
+    if (kind == 5u)
+        return mul(i.ubo.view, i.ubo.invViewProj);
+    if (kind == 6u)
+        return mul(i.ubo.proj, i.ubo.view);
+    if (kind == 7u)
+        return i.ubo.invViewProj;
+    return float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
 }

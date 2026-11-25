@@ -129,12 +129,18 @@ namespace Nox
         GraphNode* m_ShownMachine = nullptr;
         Ref<NoxUI::UIStackBox> m_Details;
         Ref<NoxUI::UIStackBox> m_Parameters;
+        Ref<NoxUI::UIElement> m_LeftPanel;
+        Ref<NoxUI::UIElement> m_RightPanel;
         Ref<NoxUI::UIButton> m_SaveButton;
         Ref<NoxUI::UIButton> m_UndoButton;
         Ref<NoxUI::UIButton> m_RedoButton;
         Ref<NoxUI::UILabel> m_Status;
-        Ref<NoxUI::UILabel> m_CompileStatus;    // a material graph's compile status under the toolbar
+        Ref<NoxUI::UIElement> m_CompileStatus;  // modern compile status pill in the toolbar (material graphs)
         bool m_CompileStatusDirty = true;
+        uint64_t m_LastGpuBuildVersion = UINT64_MAX;
+        bool m_LastGpuBuilding = false;
+        bool m_LastGpuGraphsLive = false;
+        bool m_LastCompileDirty = false;
         // An open popup's rows run while it is open (they point into the graph): dropped when it closes or the graph is replaced.
         std::shared_ptr<const bool> m_PopupOpen;                                    // our popup is the overlay (ClosePopup closes it)
         NoxUI::UIContext* m_PopupContext = nullptr;                                    // the context it is the overlay of

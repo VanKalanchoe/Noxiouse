@@ -126,6 +126,7 @@ namespace Nox
 
         void OpenNodeList(const NoxUI::UIVec2& screen, const PinRef& fromPin);
         void OpenNodeMenu(const NoxUI::UIVec2& screen, uint32_t nodeId);
+        void OpenLinkMenu(const NoxUI::UIVec2& screen, int linkIndex);
         void Edited(bool structural);
 
         NodeGraph* m_Graph = nullptr;

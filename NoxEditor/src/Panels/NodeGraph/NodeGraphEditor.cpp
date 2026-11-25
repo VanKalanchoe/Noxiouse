@@ -18,15 +18,18 @@
 #include "NoxCore/Animation/Skeleton.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Audio/AudioGraph.h"
+#include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
+#include "NoxCore/Renderer/Renderer.h"
 #include <NoxUI/Widgets/UICurveEditor.h>
 #include <NoxUI/Widgets/UILevelMeter.h>
 #include <NoxUI/Core/UIContext.h>
 #include <NoxUI/Layout/UILayout.h>
 #include <NoxUI/Rendering/UIDrawList.h>
+#include <NoxUI/Rendering/UIIcons.h>
 #include <NoxUI/Widgets/UIButton.h>
 #include <NoxUI/Widgets/UICheckBox.h>
 #include <NoxUI/Widgets/UIDragScalar.h>
@@ -67,6 +70,121 @@ namespace Nox
             label->WidthMode = NoxUI::UISizeMode::Fill;
             return label;
         }
+
+        // Modern rounded status pill in the toolbar (colored pulsing dot + concise status text, full info in Tooltip).
+        class CompileStatusPill final : public NoxUI::UIElement
+        {
+        public:
+            std::string Text;
+            NoxUI::UIColor Accent{ 0.55f, 0.82f, 0.60f, 1.0f };
+            bool Pulsing = false;
+
+            CompileStatusPill()
+            {
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                VAlign = NoxUI::UIAlignment::Center;
+                HeightMode = NoxUI::UISizeMode::Fixed;
+                FixedSize = { 0.0f, 24.0f };
+            }
+
+        protected:
+            NoxUI::UIVec2 ComputeDesiredSize() override
+            {
+                const float textW = NoxUI::UILabel::MeasureText(Text, nullptr, kFont).x;
+                return { std::clamp(textW + 34.0f, 96.0f, 440.0f), 24.0f };
+            }
+
+            void OnUpdate(float dt) override { m_Time += dt; }
+
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme&) override
+            {
+                const NoxUI::UIRect& b = GetBounds();
+                const float radius = b.Height() * 0.5f;
+                const NoxUI::UIColor fill{ Accent.r, Accent.g, Accent.b, 0.14f };
+                const NoxUI::UIColor border{ Accent.r, Accent.g, Accent.b, 0.45f };
+                d.AddRoundedRect(b.Min, b.Max, fill, glm::vec4(radius), 1.0f, border);
+
+                const NoxUI::UIVec2 dot{ b.Min.x + 12.0f, b.Center().y };
+                if (Pulsing)
+                {
+                    const float pulse = 0.5f + 0.5f * std::sin(m_Time * 5.0f);
+                    d.AddRoundedRect(dot - NoxUI::UIVec2{ 6.5f }, dot + NoxUI::UIVec2{ 6.5f },
+                                     { Accent.r, Accent.g, Accent.b, 0.28f * pulse }, glm::vec4(6.5f));
+                }
+                d.AddRoundedRect(dot - NoxUI::UIVec2{ 3.5f }, dot + NoxUI::UIVec2{ 3.5f }, Accent, glm::vec4(3.5f));
+
+                const std::string shown = NoxUI::UILabel::ElideText(Text, nullptr, kFont, std::max(0.0f, b.Width() - 32.0f));
+                const NoxUI::UIVec2 size = NoxUI::UILabel::MeasureText(shown, nullptr, kFont);
+                d.AddText(shown, nullptr, { b.Min.x + 22.0f, b.Center().y - size.y * 0.5f }, kFont, Accent);
+            }
+
+        private:
+            static constexpr float kFont = 12.5f;
+            float m_Time = 0.0f;
+        };
+
+        // Slim vertical edge rail with a centered pill-shaped chevron handle (< / >) to collapse or expand a side drawer.
+        class DrawerEdgeHandle final : public NoxUI::UIElement
+        {
+        public:
+            DrawerEdgeHandle(bool rightSide, std::function<bool()> isOpen, std::function<void()> onToggle, std::string tooltip)
+                : m_RightSide(rightSide), m_IsOpen(std::move(isOpen)), m_OnToggle(std::move(onToggle))
+            {
+                HitTestMode = NoxUI::UIHitTestMode::Self;
+                WidthMode = NoxUI::UISizeMode::Fixed;
+                HeightMode = NoxUI::UISizeMode::Fill;
+                FixedSize = { 14.0f, 0.0f };
+                Tooltip = std::move(tooltip);
+            }
+
+            bool OnPointerDown(const NoxUI::UIPointerEvent& e) override
+            {
+                if (e.Button != 1)
+                    return false;
+                if (m_OnToggle)
+                    m_OnToggle();
+                return true;
+            }
+            bool OnPointerEnter(const NoxUI::UIPointerEvent&) override { m_Hovered = true; return false; }
+            bool OnPointerLeave(const NoxUI::UIPointerEvent&) override { m_Hovered = false; return false; }
+
+        protected:
+            NoxUI::UIVec2 ComputeDesiredSize() override { return { 14.0f, 48.0f }; }
+
+            void OnPaint(NoxUI::UIDrawList& d, const NoxUI::UITheme& theme) override
+            {
+                const NoxUI::UIRect& b = GetBounds();
+                const NoxUI::UIColor bg = theme.GetToken("Background", { 0.063f, 0.075f, 0.106f, 1.0f });
+                const NoxUI::UIColor border = theme.GetToken("Border", { 0.20f, 0.235f, 0.32f, 1.0f });
+                const NoxUI::UIColor accent = theme.GetToken("Accent", { 0.259f, 0.529f, 0.961f, 1.0f });
+                const NoxUI::UIColor surface = theme.GetToken("Surface1", { 0.125f, 0.145f, 0.20f, 1.0f });
+                const NoxUI::UIColor muted = theme.GetToken("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
+
+                d.AddRoundedRect(b.Min, b.Max, bg);
+                const float lineX = m_RightSide ? (b.Max.x - 1.0f) : b.Min.x;
+                d.AddRoundedRect({ lineX, b.Min.y }, { lineX + 1.0f, b.Max.y }, border);
+
+                const float cy = b.Center().y;
+                const NoxUI::UIRect tab{ { b.Min.x + 1.0f, cy - 22.0f }, { b.Max.x - 1.0f, cy + 22.0f } };
+                const NoxUI::UIColor tabFill = m_Hovered ? NoxUI::UIColor{ accent.r, accent.g, accent.b, 0.24f } : surface;
+                const NoxUI::UIColor tabBorder = m_Hovered ? accent : border;
+                d.AddRoundedRect(tab.Min, tab.Max, tabFill, glm::vec4(6.0f), 1.0f, tabBorder);
+
+                const bool open = m_IsOpen && m_IsOpen();
+                const bool pointRight = m_RightSide ? open : !open;
+                const float cx = tab.Center().x;
+                const float dir = pointRight ? 2.2f : -2.2f;
+                const NoxUI::UIColor iconColor = m_Hovered ? theme.GetToken("Text", { 0.95f, 0.96f, 0.98f, 1.0f }) : muted;
+                NoxUI::Icons::DrawSegment(d, { cx - dir, cy - 4.0f }, { cx + dir, cy }, 1.6f, iconColor);
+                NoxUI::Icons::DrawSegment(d, { cx + dir, cy }, { cx - dir, cy + 4.0f }, 1.6f, iconColor);
+            }
+
+        private:
+            bool m_RightSide = true;
+            bool m_Hovered = false;
+            std::function<bool()> m_IsOpen;
+            std::function<void()> m_OnToggle;
+        };
     }
 
     NodeGraphEditor::NodeGraphEditor(AssetHandle graph)
@@ -115,9 +233,9 @@ namespace Nox
         auto button = [](const std::string& text, std::function<void()> onClick, const std::string& tooltip)
         {
             Ref<NoxUI::UIButton> b(new NoxUI::UIButton(text, std::move(onClick)));
-            b->Padding = NoxUI::UIThickness::Symmetric(10.0f, 2.0f);
+            b->Padding = NoxUI::UIThickness::Symmetric(12.0f, 3.0f);
             b->HeightMode = NoxUI::UISizeMode::Fixed;
-            b->FixedSize = { 0.0f, 26.0f };
+            b->FixedSize = { 0.0f, 28.0f };
             b->Tooltip = tooltip;
             b->VAlign = NoxUI::UIAlignment::Center;
             return b;
@@ -133,19 +251,21 @@ namespace Nox
         toolbar->AddChild(m_UndoButton);
         toolbar->AddChild(m_RedoButton);
         toolbar->AddChild(button("Frame", [this]() { if (m_Canvas) m_Canvas->FrameSelection(); }, "The selection, or the whole graph, in view (F)"));
+        const bool isMaterialGraph = m_Asset && m_Asset->Graph.Domain == kMaterialGraphDomain;
+        if (isMaterialGraph)
+        {
+            Ref<CompileStatusPill> pill(new CompileStatusPill());
+            pill->Margin = NoxUI::UIThickness{ 6.0f, 0.0f, 0.0f, 0.0f };
+            m_CompileStatus = pill;
+            toolbar->AddChild(pill);
+            m_CompileStatusDirty = true;
+        }
         m_Status = MutedLabel("", 13.0f);
         m_Status->WordWrap = false;
         m_Status->VAlign = NoxUI::UIAlignment::Center;
         m_Status->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
         toolbar->AddChild(m_Status);
         root->AddChild(toolbar);
-        if (m_Asset && m_Asset->Graph.Domain == kMaterialGraphDomain)
-        {
-            m_CompileStatus = MutedLabel("", 12.5f);
-            m_CompileStatus->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 8.0f, 4.0f };
-            root->AddChild(m_CompileStatus);
-            m_CompileStatusDirty = true;
-        }
 
         // Parameters | canvas | Details.
         auto column = [](float width)
@@ -162,6 +282,8 @@ namespace Nox
         m_Parameters->WidthMode = NoxUI::UISizeMode::Fill;
         m_Parameters->Padding = NoxUI::UIThickness::All(8.0f);
         left->AddChild(m_Parameters);
+        left->Visible = !isMaterialGraph;
+        m_LeftPanel = left;
 
         m_Canvas = Ref<NodeGraphCanvas>(new NodeGraphCanvas());
         m_Canvas->Parameters = m_Asset ? &m_Asset->Graph.Parameters : nullptr;
@@ -171,8 +293,8 @@ namespace Nox
         m_Canvas->OnEditValue = [this](uint32_t nodeId, const std::string& property, const NoxUI::UIRect& at) { ShowValuePopup(nodeId, property, at); };
         m_Canvas->SetGraph(m_Asset ? &m_Asset->Graph : nullptr);
 
-        Ref<NoxUI::UIScrollView> right = column(300.0f);
-        if (m_Asset && m_Asset->Graph.Domain != kMaterialGraphDomain)
+        Ref<NoxUI::UIScrollView> right = column(isMaterialGraph ? 270.0f : 290.0f);
+        if (!isMaterialGraph)
         {
             m_PreviewBox = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
             m_PreviewBox->WidthMode = NoxUI::UISizeMode::Fill;
@@ -186,6 +308,8 @@ namespace Nox
         m_Details->WidthMode = NoxUI::UISizeMode::Fill;
         m_Details->Padding = NoxUI::UIThickness::All(8.0f);
         right->AddChild(m_Details);
+        right->Visible = !isMaterialGraph;
+        m_RightPanel = right;
 
         m_StateView = Ref<StateMachineView>(new StateMachineView());
         m_StateView->Visible = false;
@@ -209,8 +333,23 @@ namespace Nox
         Ref<NoxUI::UIStackBox> body(new NoxUI::UIStackBox(NoxUI::UIOrientation::Horizontal, 0.0f));
         body->WidthMode = NoxUI::UISizeMode::Fill;
         body->HeightMode = NoxUI::UISizeMode::Fill;
-        body->AddChild(left);
+        if (!isMaterialGraph)
+        {
+            body->AddChild(left);
+            Ref<DrawerEdgeHandle> leftHandle(new DrawerEdgeHandle(
+                false,
+                [this]() { return m_LeftPanel && m_LeftPanel->Visible; },
+                [this]() { if (m_LeftPanel) m_LeftPanel->Visible = !m_LeftPanel->Visible; },
+                "Expand or collapse the Parameters drawer"));
+            body->AddChild(leftHandle);
+        }
         body->AddChild(middle);
+        Ref<DrawerEdgeHandle> rightHandle(new DrawerEdgeHandle(
+            true,
+            [this]() { return m_RightPanel && m_RightPanel->Visible; },
+            [this]() { if (m_RightPanel) m_RightPanel->Visible = !m_RightPanel->Visible; },
+            "Expand or collapse the Node Inspector drawer"));
+        body->AddChild(rightHandle);
         body->AddChild(right);
         root->AddChild(body);
 
@@ -239,6 +378,22 @@ namespace Nox
             FindPreviewMesh();
         if (m_DetailsDirty)
             RebuildDetails();
+        if (m_CompileStatus)
+        {
+            if (const Renderer* renderer = Application::Get().GetRenderer())
+            {
+                const Renderer::CustomLitStatus& gpu = renderer->GetCustomLitStatus();
+                if (gpu.Version != m_LastGpuBuildVersion || gpu.Building != m_LastGpuBuilding ||
+                    gpu.GraphsLive != m_LastGpuGraphsLive || m_Dirty != m_LastCompileDirty)
+                {
+                    m_LastGpuBuildVersion = gpu.Version;
+                    m_LastGpuBuilding = gpu.Building;
+                    m_LastGpuGraphsLive = gpu.GraphsLive;
+                    m_LastCompileDirty = m_Dirty;
+                    m_CompileStatusDirty = true;
+                }
+            }
+        }
         if (m_CompileStatusDirty)
             RefreshCompileStatus();
         if (m_PreviewBox)
@@ -307,11 +462,11 @@ namespace Nox
     {
         if ((e.Modifiers & NoxUI::UIMod::Ctrl) == 0)
             return false;
-        switch (e.KeyCode)
+        switch (static_cast<NoxUI::UIKey>(e.KeyCode))
         {
-        case SDL_SCANCODE_S: Save(); return true;
-        case SDL_SCANCODE_Z: if (e.Modifiers & NoxUI::UIMod::Shift) Redo(); else Undo(); return true;
-        case SDL_SCANCODE_Y: Redo(); return true;
+        case NoxUI::UIKey::S: Save(); return true;
+        case NoxUI::UIKey::Z: if (e.Modifiers & NoxUI::UIMod::Shift) Redo(); else Undo(); return true;
+        case NoxUI::UIKey::Y: Redo(); return true;
         default: return false;
         }
     }
@@ -595,7 +750,7 @@ namespace Nox
         if (!m_Details)
             return;
         m_Details->ClearChildren();
-        Ref<NoxUI::UILabel> title(new NoxUI::UILabel("Details", 15.0f));
+        Ref<NoxUI::UILabel> title(new NoxUI::UILabel("Details", 16.5f));
         m_Details->AddChild(title);
         if (!m_Asset || !m_Canvas)
             return;
@@ -608,12 +763,12 @@ namespace Nox
         if (selection.empty())
         {
             m_Details->AddChild(MutedLabel("Select a node to edit its properties.\n\nRight-click the canvas to add a node; drag from a pin to "
-                                           "connect; Alt+click a pin to cut its wires; double-click a wire for a reroute; F frames the graph."));
+                                           "connect; Alt+click a pin to cut its wires; double-click a wire for a reroute; F frames the graph.", 13.5f));
             return;
         }
         if (selection.size() > 1)
         {
-            m_Details->AddChild(MutedLabel(std::to_string(selection.size()) + " nodes selected."));
+            m_Details->AddChild(MutedLabel(std::to_string(selection.size()) + " nodes selected.", 14.0f));
             return;
         }
         NodeGraph& graph = m_Canvas->GetGraph() ? *m_Canvas->GetGraph() : m_Asset->Graph; // (a state's graph when one is open)
@@ -624,15 +779,15 @@ namespace Nox
         if (!node)
             return;
         const NodeTypeDesc* type = NodeTypeRegistry::Find(graph.Domain, node->TypeName);
-        Ref<NoxUI::UILabel> name(new NoxUI::UILabel(node->TypeName, 14.5f));
+        Ref<NoxUI::UILabel> name(new NoxUI::UILabel(node->TypeName, 15.5f));
         m_Details->AddChild(name);
         if (!type)
         {
-            m_Details->AddChild(MutedLabel("This node's type is not registered in this build: it is kept as it is."));
+            m_Details->AddChild(MutedLabel("This node's type is not registered in this build: it is kept as it is.", 13.5f));
             return;
         }
         if (!type->Category.empty())
-            m_Details->AddChild(MutedLabel(type->Category + (node->Id == graph.OutputNode ? "   |   the graph's output" : std::string())));
+            m_Details->AddChild(MutedLabel(type->Category + (node->Id == graph.OutputNode ? "   |   the graph's output" : std::string()), 13.5f));
 
         Ref<NoxUI::UIStackBox> body(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
         body->WidthMode = NoxUI::UISizeMode::Fill;
@@ -1135,19 +1290,26 @@ namespace Nox
     void NodeGraphEditor::RefreshCompileStatus()
     {
         m_CompileStatusDirty = false;
-        if (!m_CompileStatus || !m_Asset)
+        auto* pill = static_cast<CompileStatusPill*>(m_CompileStatus.get());
+        if (!pill || !m_Asset)
             return;
         // Compiled here from the graph as it is on the canvas, so an error shows while editing.
         const MaterialGraphProgram program = CompileMaterialGraph(m_Asset->Graph);
-        m_CompileStatus->UseColorOverride = true;
         if (!program.Valid)
         {
-            m_CompileStatus->ColorOverride = NoxUI::ThemeColor("StatusError", { 1.0f, 0.45f, 0.40f, 1.0f });
-            m_CompileStatus->Text = "Does not compile: " + program.Error;
+            pill->Accent = NoxUI::ThemeColor("StatusError", { 0.95f, 0.38f, 0.38f, 1.0f });
+            pill->Pulsing = false;
+            pill->Text = "Error: " + program.Error;
+            pill->Tooltip = "Graph does not compile:\n" + program.Error;
             return;
         }
         static constexpr const char* kOutputNames[] = { "Base Color", "Metallic", "Roughness", "Normal", "Emissive", "Ambient Occlusion", "Opacity",
-                                                        "Opacity Mask", "World Position Offset", "Custom Light", "Custom Ambient" };
+                                                        "Opacity Mask", "World Position Offset", "Custom Light", "Custom Ambient",
+                                                        "Vertex Normal", "Vertex Color", "Vertex Interpolators",
+                                                        "Specular", "Specular Color", "Clear Coat", "Clear Coat Roughness", "Clear Coat Normal",
+                                                        "Sheen Color", "Sheen Roughness", "Anisotropy", "Anisotropy Direction",
+                                                        "Transmission", "IOR", "Thickness", "Attenuation Color", "Attenuation Distance",
+                                                        "Diffuse Transmission", "Iridescence", "Iridescence Thickness", "Dispersion" };
         std::string outputs;
         for (uint32_t bit = 0; bit < std::size(kOutputNames); ++bit)
             if ((program.Outputs & (1u << bit)) != 0)
@@ -1156,15 +1318,48 @@ namespace Nox
         for (const MaterialGraphParameter& parameter : program.Parameters)
             if (!parameter.Name.starts_with('#'))
                 parameters += std::string(parameters.empty() ? "" : ", ") + parameter.Name;
-        std::string text = "Compiles. Sets: " + (outputs.empty() ? std::string("nothing yet (connect the Material Output)") : outputs) +
-                           ". Parameters: " + (parameters.empty() ? std::string("none") : parameters) + ".";
-        // World Position Offset without a Max Displacement: culled by the mesh's own bounds while pushed out of them.
+
+        const Renderer* renderer = Application::Get().GetRenderer();
+        const Renderer::CustomLitStatus* gpu = renderer ? &renderer->GetCustomLitStatus() : nullptr;
+        std::string shortState = "Ready";
+        std::string detailState = "Ready on GPU";
+        NoxUI::UIColor color = NoxUI::ThemeColor("StatusGood", { 0.36f, 0.80f, 0.46f, 1.0f });
+        bool pulsing = false;
+        if (gpu && gpu->Building)
+        {
+            shortState = gpu->GraphsLive ? "Finishing RT & Previews..." : "Building Shaders...";
+            detailState = gpu->GraphsLive ? "Opaque surfaces are live; finishing previews and ray tracing variants." : "Compiling material graph shaders on GPU...";
+            color = NoxUI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f });
+            pulsing = true;
+        }
+        else if (gpu && !gpu->Message.empty())
+        {
+            shortState = "Shader Error";
+            detailState = "GPU shader build error:\n" + gpu->Message;
+            color = NoxUI::ThemeColor("StatusError", { 0.95f, 0.38f, 0.38f, 1.0f });
+        }
+        else if (m_Dirty)
+        {
+            shortState = "Unsaved (Ctrl+S)";
+            detailState = "Graph is valid. Press Ctrl+S to save and rebuild GPU shaders.";
+            color = NoxUI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f });
+        }
+
         const bool wpoWithoutBounds = (program.Outputs & MaterialGraphOutputWorldPositionOffset) != 0 && program.MaxDisplacement <= 0.0f;
+        std::string tooltip = detailState +
+                              "\nSets: " + (outputs.empty() ? std::string("nothing yet (connect Material Output)") : outputs) +
+                              "\nParameters: " + (parameters.empty() ? std::string("none") : parameters);
         if (wpoWithoutBounds)
-            text += "\nWorld Position Offset: set Max World Position Offset Displacement on the Material Output (how far it moves the surface, "
-                    "world units), or the surface may be culled while pushed out of its bounds.";
-        m_CompileStatus->ColorOverride = wpoWithoutBounds ? NoxUI::ThemeColor("StatusWarning", { 1.0f, 0.80f, 0.30f, 1.0f }) : NoxUI::ThemeColor("StatusGood", { 0.55f, 0.82f, 0.60f, 1.0f });
-        m_CompileStatus->Text = text;
+        {
+            tooltip += "\n\nWarning: set Max World Position Offset Displacement on Material Output, or the mesh may be culled when pushed outside its bounds.";
+            if (!gpu || gpu->Message.empty())
+                color = NoxUI::ThemeColor("StatusWarning", { 0.96f, 0.74f, 0.28f, 1.0f });
+        }
+
+        pill->Accent = color;
+        pill->Pulsing = pulsing;
+        pill->Text = outputs.empty() ? shortState : (shortState + "  |  " + outputs);
+        pill->Tooltip = std::move(tooltip);
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------

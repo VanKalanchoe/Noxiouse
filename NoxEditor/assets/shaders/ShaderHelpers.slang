@@ -1118,6 +1118,8 @@ struct InstanceData
     uint32_t meshletCount;
     uint32_t pageOffset; // GpuMesh::pageOffset: NoGeometryRange when every cluster is resident
     uint32_t vertexColors; // the mesh has vertex colors (loadMeshVertexColor)
+    float3 boundsMin;
+    float3 boundsMax;
 
     float workflow;
     float4 diffuseFactor;
@@ -1221,6 +1223,8 @@ struct SceneInstances
             data.meshletCount = mesh.meshletCount;
             data.pageOffset = mesh.pageOffset;
             data.vertexColors = mesh.flags & GpuMeshVertexColors;
+            data.boundsMin = mesh.boundsMin;
+            data.boundsMax = mesh.boundsMax;
 
             data.workflow = material.workflow;
             data.diffuseFactor = material.diffuseFactor;

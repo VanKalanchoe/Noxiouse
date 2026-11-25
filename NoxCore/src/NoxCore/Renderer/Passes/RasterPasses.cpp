@@ -1363,6 +1363,11 @@ namespace Nox
         // Shared setup of the passes that draw over the lit scene.
         auto declareForward = [this](RGBuilder& builder, bool lit) { declareForwardInputs(builder, lit); };
 
+        // When transparents draw inside Forward 3D (no glass refraction, no OIT), copy the opaque depth first so Scene Depth /
+        // Depth Fade (step 4h) can sample it while Depth is bound as the depth target.
+        if (!pathTraced && hasDraws && !refraction && !oit && hasTransparentDraws())
+            addTransparentSceneDepthCopy();
+
         // Unlit & skybox (& transparent, without glass) geometry rendered in HDR on top of the lit scene.
         m_renderGraph.AddPass("Forward 3D", RGPassFlags::Raster,
             [&](RGBuilder& builder)
@@ -1373,6 +1378,8 @@ namespace Nox
                 else
                     builder.ColorTarget(resources.HDRScene, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 1.0f });
                 declareForward(builder, true);
+                if (resources.TransparentSceneDepth.IsValid())
+                    builder.Read(resources.TransparentSceneDepth);
             },
             [this, res = &resources, drawProbes, skyboxSun, hasDraws, refraction, oit, pathTraced](RGPassContext& context)
             {
@@ -1516,6 +1523,7 @@ namespace Nox
 
         if (oit)
         {
+            addTransparentSceneDepthCopy();
             if (refraction)
             {
                 addRefractionSourcePasses();
@@ -1533,6 +1541,8 @@ namespace Nox
                     declareForward(builder, true);
                     if (refraction)
                         builder.Read(resources.RefractionSource);
+                    if (resources.TransparentSceneDepth.IsValid())
+                        builder.Read(resources.TransparentSceneDepth);
                     if (resources.TransparentReflectionDepth.IsValid())
                     {
                         builder.Read(resources.TransparentReflectionDepth);
@@ -1571,6 +1581,7 @@ namespace Nox
                 });
         }
 
+        addTransparentSceneDepthCopy();
         addRefractionSourcePasses();
         addTransparentReflectionInputs();
 
@@ -1581,6 +1592,8 @@ namespace Nox
                 builder.ColorTarget(resources.HDRScene, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
                 declareForward(builder, true);
                 builder.Read(resources.RefractionSource);
+                if (resources.TransparentSceneDepth.IsValid())
+                    builder.Read(resources.TransparentSceneDepth);
                 if (resources.TransparentReflectionDepth.IsValid())
                 {
                     builder.Read(resources.TransparentReflectionDepth);
@@ -1666,6 +1679,31 @@ namespace Nox
         return ndcOffset * glm::vec2(0.5f, -0.5f);
     }
 
+    void Renderer::addTransparentSceneDepthCopy()
+    {
+        if (m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
+            return;
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (resources.TransparentSceneDepth.IsValid() || !resources.Depth.IsValid())
+            return;
+        // The depth the transparent passes test against is their depth target: they cannot sample it while it is bound. A copy (as
+        // the previous-frame snapshot's), made once the opaque surfaces are all in it, serves both Scene Depth (step 4h) and SSR.
+        RGTextureDesc depthDesc;
+        depthDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
+        resources.TransparentSceneDepth = m_renderGraph.CreateTexture("Transparent Scene Depth", depthDesc);
+        m_renderGraph.AddPass("Transparent Scene Depth", RGPassFlags::None,
+            [&](RGBuilder& builder)
+            {
+                builder.Read(resources.Depth, RGTextureAccess::CopySource);
+                builder.Write(resources.TransparentSceneDepth, RGTextureAccess::CopyDestination);
+            },
+            [this, res = &resources](RGPassContext& context)
+            {
+                nriCmdCopyTexture(context.Cmd().handle(), context.Texture(res->Depth), context.Texture(res->TransparentSceneDepth), m_frame.renderExtent.width,
+                                  m_frame.renderExtent.height);
+            });
+    }
+
     void Renderer::addTransparentReflectionInputs()
     {
         // SSR stands in for the RT reflections (as for the opaque surfaces, addSSRPass): with them running, glass takes its traced
@@ -1675,22 +1713,8 @@ namespace Nox
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
         if (!resources.RefractionSource.IsValid() || !resources.GBufferNormal.IsValid() || !m_hiZBuildPipeline)
             return;
-        // The depth the transparent passes test against is their depth target: they cannot sample it while it is bound. A copy (as
-        // the previous-frame snapshot's), made once the opaque surfaces are all in it.
-        RGTextureDesc depthDesc;
-        depthDesc.Usage = NRI_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
-        resources.TransparentReflectionDepth = m_renderGraph.CreateTexture("Transparent Reflection Depth", depthDesc);
-        m_renderGraph.AddPass("Transparent Reflection Depth", RGPassFlags::None,
-            [&](RGBuilder& builder)
-            {
-                builder.Read(resources.Depth, RGTextureAccess::CopySource);
-                builder.Write(resources.TransparentReflectionDepth, RGTextureAccess::CopyDestination);
-            },
-            [this, res = &resources](RGPassContext& context)
-            {
-                nriCmdCopyTexture(context.Cmd().handle(), context.Texture(res->Depth), context.Texture(res->TransparentReflectionDepth), m_frame.renderExtent.width,
-                                  m_frame.renderExtent.height);
-            });
+        addTransparentSceneDepthCopy();
+        resources.TransparentReflectionDepth = resources.TransparentSceneDepth;
         uint32_t hizLevels = 0;
         resources.TransparentReflectionHiZ = addSSRHiZPass(resources.TransparentReflectionDepth, "Transparent Reflection Hi-Z", hizLevels);
         uniformData.transparentSSRHiZLevels = hizLevels;

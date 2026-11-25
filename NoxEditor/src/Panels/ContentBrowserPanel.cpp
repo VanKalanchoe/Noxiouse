@@ -602,9 +602,14 @@ namespace Nox
             m_RenameFrames = 0;
             m_ScrollToIndex = m_RenameIndex;
             if (NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent())
+            {
                 ctx->SetFocus(m_RenameInput.get());
+                m_RenameInput->SelectAll();
+            }
             else
+            {
                 m_FocusRenameNextFrame = true;
+            }
         }
 
         bool IsRenaming() const { return m_RenameHandle != 0; }
@@ -771,9 +776,10 @@ namespace Nox
 
         bool OnKeyDown(const NoxUI::UIKeyEvent& e) override
         {
+            const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
             if (IsRenaming())
             {
-                if (e.KeyCode == SDL_SCANCODE_ESCAPE)
+                if (key == NoxUI::UIKey::Escape)
                 {
                     CancelRename();
                     return true;
@@ -781,18 +787,18 @@ namespace Nox
                 return false;
             }
             const bool ctrl = (e.Modifiers & NoxUI::UIMod::Ctrl) != 0;
-            switch (e.KeyCode)
+            switch (key)
             {
-            case SDL_SCANCODE_DELETE:
+            case NoxUI::UIKey::Delete:
                 if (!m_Selected.empty())
                     m_Panel.RequestDelete(std::vector<AssetHandle>(m_Selected.begin(), m_Selected.end()));
                 return true;
-            case SDL_SCANCODE_F2:
+            case NoxUI::UIKey::F2:
                 if (m_Selected.size() == 1)
                     m_Panel.BeginRename(*m_Selected.begin());
                 return true;
-            case SDL_SCANCODE_RETURN:
-            case SDL_SCANCODE_KP_ENTER:
+            case NoxUI::UIKey::Return:
+            case NoxUI::UIKey::KeypadEnter:
                 if (m_Selected.size() == 1)
                 {
                     const AssetHandle handle = *m_Selected.begin();
@@ -804,10 +810,10 @@ namespace Nox
                     }
                 }
                 return true;
-            case SDL_SCANCODE_BACKSPACE:
+            case NoxUI::UIKey::Backspace:
                 m_Panel.GoUp();
                 return true;
-            case SDL_SCANCODE_A:
+            case NoxUI::UIKey::A:
                 if (ctrl)
                 {
                     m_Selected.clear();
@@ -868,6 +874,7 @@ namespace Nox
                 if (m_FocusRenameNextFrame && IsRenaming())
                 {
                     ctx->SetFocus(m_RenameInput.get());
+                    m_RenameInput->SelectAll();
                     m_FocusRenameNextFrame = false;
                 }
             }

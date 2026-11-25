@@ -41,8 +41,8 @@ namespace Nox
         // The preview stage: 10 km below the renderer's origin (whatever the project's unit; relative to it, so a preview keeps its
         // precision however far out the camera is: large world coordinates), thumbnails and the live preview 2 km apart.
         glm::vec3 ThumbnailStage() { return glm::vec3(0.0f, -WorldUnits::FromMeters(10000.0f), 0.0f); }
-        glm::vec3 LiveStage() { return glm::vec3(WorldUnits::FromMeters(2000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
-        glm::vec3 AnimationStage() { return glm::vec3(WorldUnits::FromMeters(4000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
+        glm::vec3 LiveStage(uint32_t slot) { return glm::vec3(WorldUnits::FromMeters(2000.0f + static_cast<float>(slot) * 500.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
+        glm::vec3 AnimationStage() { return glm::vec3(WorldUnits::FromMeters(5000.0f), -WorldUnits::FromMeters(10000.0f), 0.0f); }
 
         // Set by the editor (SetRenderer): Application::Get() is gone by the time the editor layer is destroyed and clears this.
         Renderer* s_Renderer = nullptr;
@@ -72,7 +72,11 @@ namespace Nox
             return nullptr;
         m_LastUsed[handle] = m_Frame;
         if (auto found = m_Thumbnails.find(handle); found != m_Thumbnails.end())
+        {
+            if (m_StaleThumbnails.contains(handle) && !m_Failed.contains(handle))
+                m_Requests[handle] = m_Frame;
             return found->second;
+        }
         // Drawn in an earlier session: read from the cache on disk first (Update), drawn only when it is not there.
         if (m_DiskChecked.insert(handle).second)
         {
@@ -158,12 +162,9 @@ namespace Nox
 
     void AssetPreviewRenderer::Invalidate(AssetHandle handle)
     {
-        // ImGui frames still in flight may show the old image: released once they are done.
-        if (auto found = m_Thumbnails.find(handle); found != m_Thumbnails.end())
-        {
-            Renderer::DeferAssetRelease(found->second);
-            m_Thumbnails.erase(found);
-        }
+        // Keep the previous thumbnail visible while the replacement renders (prevents blank flashes in open editors / browser tiles).
+        if (m_Thumbnails.contains(handle))
+            m_StaleThumbnails.insert(handle);
         m_Failed.erase(handle);
         // The cached image is out of date too (and one still being read back is not saved).
         ++m_Generations[handle];
@@ -181,20 +182,55 @@ namespace Nox
         if (!renderer || material == 0 || size == 0)
             return nullptr;
 
-        // One live sphere: a second Material Editor shown in the same frame gets its material's thumbnail instead.
-        if (m_LiveRequestedFrame == m_Frame && m_Live.Asset != 0 && m_Live.Asset != material)
+        static_assert(MaxLiveSlots <= Renderer::LivePreviewCount);
+
+        // Reuse the slot already showing this material, or pick an empty / unused slot (up to MaxLiveSlots concurrent live spheres).
+        uint32_t chosen = MaxLiveSlots;
+        for (uint32_t i = 0; i < MaxLiveSlots; ++i)
+        {
+            if (m_LiveSlots[i].Placed.Asset == material)
+            {
+                chosen = i;
+                break;
+            }
+        }
+        if (chosen == MaxLiveSlots)
+        {
+            for (uint32_t i = 0; i < MaxLiveSlots; ++i)
+            {
+                if (m_LiveSlots[i].Placed.Asset == 0)
+                {
+                    chosen = i;
+                    break;
+                }
+            }
+        }
+        if (chosen == MaxLiveSlots)
+        {
+            for (uint32_t i = 0; i < MaxLiveSlots; ++i)
+            {
+                if (m_LiveSlots[i].RequestedFrame < m_Frame)
+                {
+                    chosen = i;
+                    break;
+                }
+            }
+        }
+        if (chosen == MaxLiveSlots)
             return GetThumbnail(material).get();
 
-        m_LiveRequestedFrame = m_Frame;
-        if (m_Live.Asset != material)
+        LiveSlot& slot = m_LiveSlots[chosen];
+        const uint32_t view = Renderer::LivePreviewView + chosen;
+        slot.RequestedFrame = m_Frame;
+        if (slot.Placed.Asset != material)
         {
-            Remove(m_Live);
-            renderer->ReleaseExtraView(Renderer::LivePreviewView);
-            if (!Place(material, LiveStage(), m_Live, true))
-                return nullptr;
+            Remove(slot.Placed);
+            renderer->ReleaseExtraView(view);
+            if (!Place(material, LiveStage(chosen), slot.Placed, true))
+                return GetThumbnail(material).get();
         }
-        Submit(Renderer::LivePreviewView, m_Live, size);
-        return renderer->GetExtraViewTexture(Renderer::LivePreviewView);
+        Submit(view, slot.Placed, size);
+        return renderer->GetExtraViewTexture(view);
     }
 
     Texture2D* AssetPreviewRenderer::GetAnimationPreview(AssetHandle mesh, AssetHandle skeleton, AssetHandle clip, float time, uint32_t size)
@@ -265,7 +301,8 @@ namespace Nox
         };
         if (m_Job)
             add(m_Job->Placed);
-        add(m_Live);
+        for (const LiveSlot& slot : m_LiveSlots)
+            add(slot.Placed);
         if (m_Animated.Asset != 0)
         {
             add(m_Animated);
@@ -281,11 +318,15 @@ namespace Nox
         if (!renderer)
             return;
 
-        // The live preview is drawn while a Material Editor shows it; it goes when none did last frame.
-        if (m_Live.Asset != 0 && m_LiveRequestedFrame + 1 < m_Frame)
+        // Live previews are drawn while Material Editors show them; unused slots are released after a frame.
+        for (uint32_t i = 0; i < MaxLiveSlots; ++i)
         {
-            Remove(m_Live);
-            renderer->ReleaseExtraView(Renderer::LivePreviewView);
+            LiveSlot& slot = m_LiveSlots[i];
+            if (slot.Placed.Asset != 0 && slot.RequestedFrame + 1 < m_Frame)
+            {
+                Remove(slot.Placed);
+                renderer->ReleaseExtraView(Renderer::LivePreviewView + i);
+            }
         }
         // The animation preview likewise. It goes before this frame's renderer update reads its bone matrices: they are set
         // again every frame it is shown, and a skinned instance must not keep last frame's offset into them.
@@ -322,7 +363,7 @@ namespace Nox
                 return;
             const AssetHandle asset = next->first;
             m_Requests.erase(next);
-            if (m_Thumbnails.contains(asset) || !AssetManager::IsAssetHandleValid(asset) || !CanRender(AssetManager::GetAssetType(asset)))
+            if ((m_Thumbnails.contains(asset) && !m_StaleThumbnails.contains(asset)) || !AssetManager::IsAssetHandleValid(asset) || !CanRender(AssetManager::GetAssetType(asset)))
                 return;
             // A model file not cooked yet is not cooked for its thumbnail (the import dialog decides how): drawn once it is loaded.
             if (AssetManager::GetAssetType(asset) == AssetType::MeshSource && !AssetManager::IsAssetLoaded(asset))
@@ -359,7 +400,10 @@ namespace Nox
         Remove(job.Placed);
         if (image)
         {
+            if (auto existing = m_Thumbnails.find(job.Asset); existing != m_Thumbnails.end())
+                Renderer::DeferAssetRelease(existing->second);
             m_Thumbnails[job.Asset] = image;
+            m_StaleThumbnails.erase(job.Asset);
             SaveCached(job.Asset, image);
             if (m_Thumbnails.size() > MaxThumbnails)
             {
@@ -385,7 +429,8 @@ namespace Nox
 
     void AssetPreviewRenderer::Clear()
     {
-        Remove(m_Live);
+        for (LiveSlot& slot : m_LiveSlots)
+            Remove(slot.Placed);
         Remove(m_Animated);
         m_AnimatedSources.clear();
         if (m_Job)
@@ -394,6 +439,7 @@ namespace Nox
         for (auto& [handle, image] : m_Thumbnails)
             Renderer::DeferAssetRelease(image);
         m_Thumbnails.clear();
+        m_StaleThumbnails.clear();
         m_Requests.clear();
         m_Failed.clear();
         m_LastUsed.clear();
@@ -402,7 +448,8 @@ namespace Nox
         if (Renderer* renderer = GetRenderer())
         {
             renderer->ReleaseExtraView(Renderer::ThumbnailView);
-            renderer->ReleaseExtraView(Renderer::LivePreviewView);
+            for (uint32_t i = 0; i < MaxLiveSlots; ++i)
+                renderer->ReleaseExtraView(Renderer::LivePreviewView + i);
             renderer->ReleaseExtraView(Renderer::AnimationPreviewView);
         }
     }

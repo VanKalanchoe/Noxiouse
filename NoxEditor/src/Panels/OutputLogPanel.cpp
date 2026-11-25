@@ -249,13 +249,14 @@ namespace Nox
 
         bool OnKeyDown(const NoxUI::UIKeyEvent& e) override
         {
+            const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
             const bool ctrl = (e.Modifiers & NoxUI::UIMod::Ctrl) != 0;
-            if (ctrl && e.KeyCode == SDL_SCANCODE_C)
+            if (ctrl && key == NoxUI::UIKey::C)
             {
                 m_Panel.CopyLines(true);
                 return true;
             }
-            if (ctrl && e.KeyCode == SDL_SCANCODE_A)
+            if (ctrl && key == NoxUI::UIKey::A)
             {
                 m_Panel.m_Selected.clear();
                 for (const auto& r : m_Panel.m_Rows)
@@ -266,12 +267,12 @@ namespace Nox
                 }
                 return true;
             }
-            if (e.KeyCode == SDL_SCANCODE_END)
+            if (key == NoxUI::UIKey::End)
             {
                 m_PinToBottom = true;
                 return true;
             }
-            if (e.KeyCode == SDL_SCANCODE_HOME)
+            if (key == NoxUI::UIKey::Home)
             {
                 m_PinToBottom = false;
                 m_Scroll = 0.0f;
@@ -403,19 +404,20 @@ namespace Nox
 
         bool OnKeyDown(const NoxUI::UIKeyEvent& e) override
         {
+            const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
             auto& history = m_Panel.m_History;
             int& index = m_Panel.m_HistoryIndex;
-            if ((e.KeyCode == SDL_SCANCODE_UP || e.KeyCode == SDL_SCANCODE_DOWN) && !history.empty())
+            if ((key == NoxUI::UIKey::Up || key == NoxUI::UIKey::Down) && !history.empty())
             {
                 const int count = static_cast<int>(history.size());
-                if (e.KeyCode == SDL_SCANCODE_UP)
+                if (key == NoxUI::UIKey::Up)
                     index = index < 0 ? count - 1 : std::max(0, index - 1);
                 else
                     index = index < 0 ? -1 : (index + 1 < count ? index + 1 : -1);
                 SetLine(index >= 0 ? history[static_cast<size_t>(index)] : std::string());
                 return true;
             }
-            if (e.KeyCode == SDL_SCANCODE_TAB)
+            if (key == NoxUI::UIKey::Tab)
             {
                 // The first word: completed to the longest prefix the names share (one name: completed with a space after it).
                 if (Text.find(' ') == std::string::npos && !Text.empty())

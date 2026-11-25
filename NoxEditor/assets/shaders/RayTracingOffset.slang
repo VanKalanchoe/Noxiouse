@@ -17,6 +17,8 @@ void computeMain(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThrea
     const GpuRayTracingInstance instance = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[work.instanceSlot];
     const GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
     const float4x4 world = BufferRef<GpuTransform>(ubo.sceneTransformsReference)[work.instanceSlot].world;
+    const uint meshIndex = BufferRef<GpuInstance>(ubo.sceneInstancesReference)[work.instanceSlot].meshIndex;
+    const GpuMesh gpuMesh = BufferRef<GpuMesh>(ubo.sceneMeshesReference)[meshIndex];
     RWBufferRef<SkinnedVertex> output = RWBufferRef<SkinnedVertex>(pushConstant.outputReference);
     BufferRef<PackedVertex> packedVertices = BufferRef<PackedVertex>(instance.vertexBufferAddress);
     BufferRef<SkinnedVertex> skinnedVertices = BufferRef<SkinnedVertex>(pushConstant.skinnedVerticesReference);
@@ -37,7 +39,8 @@ void computeMain(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThrea
         const float3 worldNormal = mul((float3x3)instance.normalMatrix, vertex.normal);
         const float4 color = instance.colorBufferAddress != 0 ? unpackVertexColor(vertexColors[vertexIndex]) : float4(1.0);
         const float3 offset = material_graph_offset(material, renderPos, worldNormal, vertex.uv0, vertex.uv1, color, ubo.timeSeconds, ubo,
-                                                    bindPosition, float4(mul((float3x3)world, vertex.tangent.xyz), vertex.tangent.w));
+                                                    bindPosition, float4(mul((float3x3)world, vertex.tangent.xyz), vertex.tangent.w),
+                                                    world, instance.normalMatrix, gpuMesh.boundsMin, gpuMesh.boundsMax);
         // World units into the mesh's own space (the BLAS's): the inverse of the instance's 3x3 is the transpose of its normal matrix
         // (transpose(inverse(world))).
         const float3 localOffset = mul(transpose((float3x3)instance.normalMatrix), offset);

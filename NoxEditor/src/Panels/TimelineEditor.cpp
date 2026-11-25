@@ -445,9 +445,9 @@ namespace Nox
 
     bool TimelineEditor::HandleKey(const NoxUI::UIKeyEvent& e)
     {
-        const int keyCode = e.KeyCode;
+        const auto key = static_cast<NoxUI::UIKey>(e.KeyCode);
         const uint16_t mods = e.Modifiers;
-        if (keyCode == SDL_SCANCODE_DELETE && !(mods & NoxUI::UIMod::Ctrl))
+        if (key == NoxUI::UIKey::Delete && !(mods & NoxUI::UIMod::Ctrl))
         {
             Timeline* timeline = GetTimeline();
             if (!timeline || SelectedTrack < 0 || SelectedTrack >= static_cast<int>(timeline->Tracks.size()))
@@ -462,11 +462,11 @@ namespace Nox
         }
         if (!(mods & NoxUI::UIMod::Ctrl))
             return false;
-        switch (keyCode)
+        switch (key)
         {
-        case SDL_SCANCODE_S: Save(); return true;
-        case SDL_SCANCODE_Z: if (mods & NoxUI::UIMod::Shift) Redo(); else Undo(); return true;
-        case SDL_SCANCODE_Y: Redo(); return true;
+        case NoxUI::UIKey::S: Save(); return true;
+        case NoxUI::UIKey::Z: if (mods & NoxUI::UIMod::Shift) Redo(); else Undo(); return true;
+        case NoxUI::UIKey::Y: Redo(); return true;
         default: return false;
         }
     }
