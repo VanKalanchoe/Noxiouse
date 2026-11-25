@@ -15457,6 +15457,12 @@ AssetRegistry:
       SourceMeshIndex: 165
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 1824304700196329426
+    FilePath: Materials/ObjectGradient.nmatgraph
+    SourceFilePath: Materials/ObjectGradient.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 1824559846268027608
     FilePath: StreamingTest/Textures/Tile_31_6.ntex
     Type: AssetType::Texture2D
@@ -58044,6 +58050,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6637323036996561396
+    FilePath: Materials/Cube_Cube_Material_Instance_12071180142104915658.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_12071180142104915658.nmat
+    Type: AssetType::Material
   - Handle: 6638860117556247533
     FilePath: StreamingTest/Meshes/Tile_73_70.nsmesh
     Type: AssetType::StaticMesh
@@ -63444,6 +63454,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7240852630820333458
+    FilePath: Materials/Cube_Cube_Material_Instance_9579982760490706325.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_9579982760490706325.nmat
+    Type: AssetType::Material
   - Handle: 7241006081101218322
     FilePath: StreamingTest/Textures/Tile_16_25.ntex
     Type: AssetType::Texture2D
@@ -74666,6 +74680,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8535823069821064717
+    FilePath: Materials/VertexOutputsTest.nmatgraph
+    SourceFilePath: Materials/VertexOutputsTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 8536497720783301350
     FilePath: StreamingTest/Meshes/Tile_16_63.nsmesh
     Type: AssetType::StaticMesh
@@ -77813,6 +77833,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8906420567881750731
+    FilePath: Materials/ViewSpaceNormal.nmatgraph
+    SourceFilePath: Materials/ViewSpaceNormal.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 8907462534320967291
     FilePath: StreamingTest/Meshes/Tile_64_64.nsmesh
     Type: AssetType::StaticMesh
@@ -80202,6 +80228,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9192811542566124200
+    FilePath: Materials/Cube_Cube_Material_Instance_9955532239087628733.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_9955532239087628733.nmat
+    Type: AssetType::Material
   - Handle: 9195943216838504792
     FilePath: StreamingTest/Meshes/Tile_53_36.nsmesh
     Type: AssetType::StaticMesh
@@ -86170,6 +86200,12 @@ AssetRegistry:
   - Handle: 9835486001557251531
     FilePath: StreamingTest/StreamingTestWorld.nox
     Type: AssetType::Scene
+  - Handle: 9837124521171411276
+    FilePath: Materials/CharDissolve.nmatgraph
+    SourceFilePath: Materials/CharDissolve.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 9837164617057192857
     FilePath: StreamingTest/Meshes/Tile_59_19.nsmesh
     Type: AssetType::StaticMesh
@@ -91692,6 +91728,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10479440153309460311
+    FilePath: Scenes/CoralFeatureTest.nox
+    SourceFilePath: Scenes/CoralFeatureTest.nox
+    Type: AssetType::Scene
   - Handle: 10479579987295696405
     FilePath: StreamingTest/Meshes/Tile_61_3.nsmesh
     Type: AssetType::StaticMesh
@@ -93069,6 +93109,10 @@ AssetRegistry:
   - Handle: 10656228389235205000
     FilePath: StreamingTest/Materials/Tile_66_56_Tile_66_56.nmat
     SourceFilePath: StreamingTest/Materials/Tile_66_56_Tile_66_56.nmat
+    Type: AssetType::Material
+  - Handle: 10656405731608508824
+    FilePath: Materials/Cube_Cube_Material_Instance_2156842620322047522.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_2156842620322047522.nmat
     Type: AssetType::Material
   - Handle: 10658789102499361133
     FilePath: StreamingTest/Materials/Tile_38_40_Tile_38_40.nmat

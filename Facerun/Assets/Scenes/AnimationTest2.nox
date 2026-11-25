@@ -1,10 +1,52 @@
 Scene: Untitled
 Entities:
-  - Entity: 1690385317207975323
+  - Entity: 7339261903166243699
     TagComponent:
-      Tag: Cube (1)
+      Tag: SphereHandSurfaceTest
     TransformComponent:
-      Translation: [-330, 50, 0]
+      Translation: [-174.3210906982422, 91.40858459472656, 511.956787109375]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 1596220588156943509
+  - Entity: 11904251423531582216
+    TagComponent:
+      Tag: SphereSubsurface
+    TransformComponent:
+      Translation: [133.6404266357422, 106.58247375488281, 390.2707824707031]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 3711635161358079385
+  - Entity: 10715523531660861204
+    TagComponent:
+      Tag: SphereLobeTest
+    TransformComponent:
+      Translation: [-620.9886474609375, 197.2176971435547, 569.5165405273438]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 11067785964245479810
+  - Entity: 11188594717902276035
+    TagComponent:
+      Tag: CubeViewSpace
+    TransformComponent:
+      Translation: [-513.3870849609375, 62.031063079833984, 305.274169921875]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     MeshComponent:
@@ -13,30 +55,67 @@ Entities:
       SubmeshCount: 1
     MaterialComponent:
       MaterialAssets:
-        - 9192811542566124200
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-      PhysicalSurface: Dirt
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 17940840130257770570
+        - 6637323036996561396
+  - Entity: 15222665227575994032
     TagComponent:
-      Tag: Ramp
+      Tag: CubeGradient
     TransformComponent:
-      Translation: [370, 55, 0]
-      Rotation: [0, 0, -1.1013027]
-      Scale: [1, 5, 5]
+      Translation: [-323.52728271484375, 148.76953125, 237.7495574951172]
+      Rotation: [0, 0, 0]
+      Scale: [0.63920003, 2.1526406, 0.63920003]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 10656405731608508824
+  - Entity: 13400532543733576519
+    TagComponent:
+      Tag: Post Process
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    PostProcessVolumeComponent:
+      Enabled: true
+      Unbound: true
+      HalfExtents: [500, 500, 500]
+      Priority: 0
+      Settings:
+        Bloom: false
+        BloomIntensity: 0.04
+        BloomRadius: 1
+        LensFlares: 0
+        DepthOfField: false
+        FocusDistanceMeters: 10
+        FStop: 2.8
+        MaxBlurPixels: 16
+        MotionBlur: false
+        MotionBlurShutter: 0.5
+        MotionBlurMaxPixels: 32
+        Saturation: 1
+        Contrast: 1
+        Vignette: 0
+        FilmGrain: 0
+        ChromaticAberration: 0
+        Sharpen: 0
+        LutPath: ""
+        LutStrength: 1
+        Outlines: false
+        OutlineColor: [0, 0, 0]
+        OutlineThickness: 2
+        OutlineDepthSensitivity: 0.5
+        OutlineNormalSensitivity: 0.5
+        OutlineToonOnly: false
+        OutlineFadeDistanceMeters: 0
+  - Entity: 10673435675432706796
+    TagComponent:
+      Tag: Stairs Down 6
+    TransformComponent:
+      Translation: [345, 7.5, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.15, 2]
     MeshComponent:
       MeshHandle: 11025342519802008604
       SubmeshIndex: 0
@@ -58,11 +137,347 @@ Entities:
       Offset: [0, 0, 0]
       Friction: 0.5
       Restitution: 0
-  - Entity: 262533699273590146
+  - Entity: 3159471664008607050
     TagComponent:
-      Tag: HandTarget
+      Tag: Stairs Down 5
     TransformComponent:
-      Translation: [-20, 130, 30]
+      Translation: [315, 15, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.3, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 17489323863770369967
+    TagComponent:
+      Tag: Stairs Down 4
+    TransformComponent:
+      Translation: [285, 22.5, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.45, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 3967353620713266955
+    TagComponent:
+      Tag: Stairs Down 3
+    TransformComponent:
+      Translation: [255, 30, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.6, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 16698093618658835620
+    TagComponent:
+      Tag: Stairs Down 2
+    TransformComponent:
+      Translation: [225, 37.5, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.75, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 11970426217413773713
+    TagComponent:
+      Tag: Stairs Down 1
+    TransformComponent:
+      Translation: [195, 45, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.9, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 12358550905177372157
+    TagComponent:
+      Tag: Stairs Landing
+    TransformComponent:
+      Translation: [130, 45, -400]
+      Rotation: [0, 0, 0]
+      Scale: [1, 0.9, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 5138217166021137897
+    TagComponent:
+      Tag: Stairs Up 6
+    TransformComponent:
+      Translation: [65, 45, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.9, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 7486481070405700348
+    TagComponent:
+      Tag: Stairs Up 5
+    TransformComponent:
+      Translation: [35, 37.5, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.75, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 15674040136412603380
+    TagComponent:
+      Tag: Stairs Up 4
+    TransformComponent:
+      Translation: [5, 30, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.6, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 140866690571188047
+    TagComponent:
+      Tag: Stairs Up 3
+    TransformComponent:
+      Translation: [-25, 22.5, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.45, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 2464174586663373175
+    TagComponent:
+      Tag: Stairs Up 2
+    TransformComponent:
+      Translation: [-55, 15, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.3, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 891542326178058896
+    TagComponent:
+      Tag: Stairs Up 1
+    TransformComponent:
+      Translation: [-85, 7.5, -400]
+      Rotation: [0, 0, 0]
+      Scale: [0.3, 0.15, 2]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 11455971011173680928
+    TagComponent:
+      Tag: LookTarget
+    TransformComponent:
+      Translation: [0, 160, 30]
       Rotation: [0, -0, 0]
       Scale: [0.1, 0.1, 0.1]
     MeshComponent:
@@ -71,152 +486,56 @@ Entities:
       SubmeshCount: 1
     MaterialComponent:
       {}
-  - Entity: 6035648435269262899
+  - Entity: 12203696487460098035
     TagComponent:
-      Tag: Env
+      Tag: UAL1_Standard
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    EnvironmentLightComponent:
-      Source: ProceduralSky
-      TexturePath: ""
-      RadianceScale: [1, 1, 1]
-      Rotation: 0
-      Enabled: true
-      RayleighScale: 1
-      MieScale: 1
-      OzoneScale: 1
-      MieAnisotropy: 0.8
-      GroundAlbedo: [0.3, 0.3, 0.3]
-      AltitudeKm: 0
-      AerialPerspectiveScale: 1
-      Clouds: true
-      CloudCoverage: 0.35
-      CloudDensity: 1
-      CloudBottomKm: 1.5
-      CloudThicknessKm: 2
-      CloudScaleKm: 8
-      CloudOffsetKm: [0, 0]
-      CloudWind: [0, 0]
-      SunThroughAtmosphere: true
-      Moon: true
-      MoonIntensity: 0.004
-      MoonColor: [0.75, 0.85, 1]
-      MoonAngularDiameter: 0.53
-      MoonOppositeSun: true
-      MoonElevation: 40
-      MoonAzimuth: 200
-      Stars: true
-      StarIntensity: 1
-      HeightFog: false
-      FogDensity: 0.5
-      FogHeightFalloff: 5
-      FogHeight: 0
-      FogStartDistance: 0
-      FogMaxOpacity: 1
-      FogColor: [1, 1, 1]
-      FogFromEnvironment: true
-      FogSunScattering: 0.05
-      FogSunExponent: 8
-  - Entity: 10156721963444547918
-    TagComponent:
-      Tag: Floor
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
-      Scale: [100, 1, 100]
     MeshComponent:
-      MeshHandle: 10000201986349826000
+      MeshHandle: 16531713622870338582
       SubmeshIndex: 0
-      SubmeshCount: 1
+      SubmeshCount: 4294967295
     MaterialComponent:
       {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-      PhysicalSurface: Grass
-    PlaneCollider3DComponent:
-      HalfSize: [0, 0]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 11039610221379602872
-    TagComponent:
-      Tag: Cube
-    TransformComponent:
-      Translation: [-150, 50, 0]
-      Rotation: [0, -0, 0]
-      Scale: [1, 1, 1]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      MaterialAssets:
-        - 9192811542566124200
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-      PhysicalSurface: Dirt
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 7900504514769074192
-    TagComponent:
-      Tag: Camera
-    TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    CameraComponent:
-      Camera:
-        ProjectionType: 0
-        PerspectiveFOV: 0.7853982
-        PerspectiveNear: 10
-        PerspectiveFar: 100000
-        OrthographicSize: 10
-        OrthographicNear: -1
-        OrthographicFar: 1
-      Primary: true
-      FixedAspectRatio: false
-      AutoExposure: false
-      ManualEV100: 2
-      ExposureCompensation: 0
-      AutoExposureMinEV: -16
-      AutoExposureMaxEV: 16
+    AnimatorComponent:
+      Animation: 17644891489966042489
+      Skeleton: 6087766411216149246
+      Playing: true
+      Looping: true
+      PlaybackSpeed: 1
+      NodeEntities:
+        []
+      Graph: 8121772498988545577
+      RootMotion: false
+      RootBone: ""
+      GraphParameterOverrides:
+        []
     ScriptComponent:
       Classes:
-        - Facerun.CameraFollow
+        - Facerun.CharacterMovement
+        - Facerun.IKTargetTest
       EntityReferences:
-        - Class: Facerun.CameraFollow
-          Field: Target
-          Entity: 12203696487460098035
+        []
       FieldOverrides:
-        - Class: Facerun.CameraFollow
-          Field: Distance
-          Type: Float
-          Value: 500
-        - Class: Facerun.CameraFollow
-          Field: Height
+        - Class: Facerun.CharacterMovement
+          Field: WalkSpeed
           Type: Float
           Value: 100
+        - Class: Facerun.CharacterMovement
+          Field: RunSpeed
+          Type: Float
+          Value: 540
+    CharacterController3DComponent:
+      Radius: 34
+      Height: 108.00001
+      StepHeight: 45
+      MaxSlopeDegrees: 44.8
+      GravityScale: 1.75
+      AirControl: 0.35
+      MaxAcceleration: 2048
+      BrakingDeceleration: 2000
   - Entity: 2699422253669067374
     TagComponent:
       Tag: UAL1_Standard_RM
@@ -271,61 +590,157 @@ Entities:
       AirControl: 0.35
       MaxAcceleration: 2048
       BrakingDeceleration: 2000
-  - Entity: 12203696487460098035
+  - Entity: 7900504514769074192
     TagComponent:
-      Tag: UAL1_Standard
+      Tag: Camera
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    MeshComponent:
-      MeshHandle: 16531713622870338582
-      SubmeshIndex: 0
-      SubmeshCount: 4294967295
-    MaterialComponent:
-      {}
-    AnimatorComponent:
-      Animation: 17644891489966042489
-      Skeleton: 6087766411216149246
-      Playing: true
-      Looping: true
-      PlaybackSpeed: 1
-      NodeEntities:
-        []
-      Graph: 8121772498988545577
-      RootMotion: false
-      RootBone: ""
-      GraphParameterOverrides:
-        []
+    CameraComponent:
+      Camera:
+        ProjectionType: 0
+        PerspectiveFOV: 0.7853982
+        PerspectiveNear: 10
+        PerspectiveFar: 100000
+        OrthographicSize: 10
+        OrthographicNear: -1
+        OrthographicFar: 1
+      Primary: true
+      FixedAspectRatio: false
+      AutoExposure: false
+      ManualEV100: 2
+      ExposureCompensation: 0
+      AutoExposureMinEV: -16
+      AutoExposureMaxEV: 16
     ScriptComponent:
       Classes:
-        - Facerun.CharacterMovement
-        - Facerun.IKTargetTest
+        - Facerun.CameraFollow
       EntityReferences:
-        []
+        - Class: Facerun.CameraFollow
+          Field: Target
+          Entity: 12203696487460098035
       FieldOverrides:
-        - Class: Facerun.CharacterMovement
-          Field: WalkSpeed
+        - Class: Facerun.CameraFollow
+          Field: Height
           Type: Float
           Value: 100
-        - Class: Facerun.CharacterMovement
-          Field: RunSpeed
+        - Class: Facerun.CameraFollow
+          Field: Distance
           Type: Float
-          Value: 540
-    CharacterController3DComponent:
-      Radius: 34
-      Height: 108.00001
-      StepHeight: 45
-      MaxSlopeDegrees: 44.8
-      GravityScale: 1.75
-      AirControl: 0.35
-      MaxAcceleration: 2048
-      BrakingDeceleration: 2000
-  - Entity: 11455971011173680928
+          Value: 500
+  - Entity: 11039610221379602872
     TagComponent:
-      Tag: LookTarget
+      Tag: Cube
     TransformComponent:
-      Translation: [0, 160, 30]
+      Translation: [-150, 50, 0]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 9192811542566124200
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+      PhysicalSurface: Dirt
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 10156721963444547918
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [100, 1, 100]
+    MeshComponent:
+      MeshHandle: 10000201986349826000
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+      PhysicalSurface: Grass
+    PlaneCollider3DComponent:
+      HalfSize: [0, 0]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 6035648435269262899
+    TagComponent:
+      Tag: Env
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8
+  - Entity: 262533699273590146
+    TagComponent:
+      Tag: HandTarget
+    TransformComponent:
+      Translation: [-20, 130, 30]
       Rotation: [0, -0, 0]
       Scale: [0.1, 0.1, 0.1]
     MeshComponent:
@@ -334,19 +749,20 @@ Entities:
       SubmeshCount: 1
     MaterialComponent:
       {}
-  - Entity: 891542326178058896
+  - Entity: 17940840130257770570
     TagComponent:
-      Tag: Stairs Up 1
+      Tag: Ramp
     TransformComponent:
-      Translation: [-85, 7.5, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.15, 2]
+      Translation: [370, 55, 0]
+      Rotation: [0, 0, -1.1013027]
+      Scale: [1, 5, 5]
     MeshComponent:
       MeshHandle: 11025342519802008604
       SubmeshIndex: 0
       SubmeshCount: 1
     MaterialComponent:
-      {}
+      MaterialAssets:
+        - 3747891042972464720
     RigidBody3DComponent:
       BodyType: Static
       MotionQuality: Discrete
@@ -362,378 +778,103 @@ Entities:
       Offset: [0, 0, 0]
       Friction: 0.5
       Restitution: 0
-  - Entity: 2464174586663373175
+  - Entity: 1690385317207975323
     TagComponent:
-      Tag: Stairs Up 2
+      Tag: Cube (1)
     TransformComponent:
-      Translation: [-55, 15, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.3, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 140866690571188047
-    TagComponent:
-      Tag: Stairs Up 3
-    TransformComponent:
-      Translation: [-25, 22.5, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.45, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 15674040136412603380
-    TagComponent:
-      Tag: Stairs Up 4
-    TransformComponent:
-      Translation: [5, 30, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.6, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 7486481070405700348
-    TagComponent:
-      Tag: Stairs Up 5
-    TransformComponent:
-      Translation: [35, 37.5, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.75, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 5138217166021137897
-    TagComponent:
-      Tag: Stairs Up 6
-    TransformComponent:
-      Translation: [65, 45, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.9, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 12358550905177372157
-    TagComponent:
-      Tag: Stairs Landing
-    TransformComponent:
-      Translation: [130, 45, -400]
-      Rotation: [0, 0, 0]
-      Scale: [1, 0.9, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 11970426217413773713
-    TagComponent:
-      Tag: Stairs Down 1
-    TransformComponent:
-      Translation: [195, 45, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.9, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 16698093618658835620
-    TagComponent:
-      Tag: Stairs Down 2
-    TransformComponent:
-      Translation: [225, 37.5, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.75, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 3967353620713266955
-    TagComponent:
-      Tag: Stairs Down 3
-    TransformComponent:
-      Translation: [255, 30, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.6, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 17489323863770369967
-    TagComponent:
-      Tag: Stairs Down 4
-    TransformComponent:
-      Translation: [285, 22.5, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.45, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 3159471664008607050
-    TagComponent:
-      Tag: Stairs Down 5
-    TransformComponent:
-      Translation: [315, 15, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.3, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 10673435675432706796
-    TagComponent:
-      Tag: Stairs Down 6
-    TransformComponent:
-      Translation: [345, 7.5, -400]
-      Rotation: [0, 0, 0]
-      Scale: [0.3, 0.15, 2]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-    RigidBody3DComponent:
-      BodyType: Static
-      MotionQuality: Discrete
-      Mass: 1
-      LinearDamping: 0.05
-      AngularDamping: 0.05
-      GravityFactor: 1
-      AllowSleeping: true
-      IsSensor: false
-      Layer: 1
-    BoxCollider3DComponent:
-      HalfExtents: [50, 50, 50]
-      Offset: [0, 0, 0]
-      Friction: 0.5
-      Restitution: 0
-  - Entity: 13400532543733576519
-    TagComponent:
-      Tag: Post Process
-    TransformComponent:
-      Translation: [0, 0, 0]
+      Translation: [-330, 50, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    PostProcessVolumeComponent:
-      Enabled: true
-      Unbound: true
-      HalfExtents: [500, 500, 500]
-      Priority: 0
-      Settings:
-        Bloom: false
-        BloomIntensity: 0.04
-        BloomRadius: 1
-        LensFlares: 0
-        DepthOfField: false
-        FocusDistanceMeters: 10
-        FStop: 2.8
-        MaxBlurPixels: 16
-        MotionBlur: false
-        MotionBlurShutter: 0.5
-        MotionBlurMaxPixels: 32
-        Saturation: 1
-        Contrast: 1
-        Vignette: 0
-        FilmGrain: 0
-        ChromaticAberration: 0
-        Sharpen: 0
-        LutPath: ""
-        LutStrength: 1
-        Outlines: false
-        OutlineColor: [0, 0, 0]
-        OutlineThickness: 2
-        OutlineDepthSensitivity: 0.5
-        OutlineNormalSensitivity: 0.5
-        OutlineToonOnly: false
-        OutlineFadeDistanceMeters: 0
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 9192811542566124200
+    RigidBody3DComponent:
+      BodyType: Static
+      MotionQuality: Discrete
+      Mass: 1
+      LinearDamping: 0.05
+      AngularDamping: 0.05
+      GravityFactor: 1
+      AllowSleeping: true
+      IsSensor: false
+      Layer: 1
+      PhysicalSurface: Dirt
+    BoxCollider3DComponent:
+      HalfExtents: [50, 50, 50]
+      Offset: [0, 0, 0]
+      Friction: 0.5
+      Restitution: 0
+  - Entity: 16420948219095921691
+    TagComponent:
+      Tag: CubeVertexOut
+    TransformComponent:
+      Translation: [-620.6032104492188, 76.81040954589844, 436.0099792480469]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 7240852630820333458
+  - Entity: 17066312700497891742
+    TagComponent:
+      Tag: CubeFadeTest
+    TransformComponent:
+      Translation: [384.3274230957031, 4.514482498168945, 385.276611328125]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 2706421380836821813
+  - Entity: 11548163153972744109
+    TagComponent:
+      Tag: Sphere
+    TransformComponent:
+      Translation: [243.43560791015625, 57.537437438964844, 391.0709228515625]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 18293635816513429416
+  - Entity: 5243082542942906127
+    TagComponent:
+      Tag: SphereAOLightEffect
+    TransformComponent:
+      Translation: [134.81137084960938, 219.781494140625, 437.3494873046875]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 6911129549795693436
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 6605209673496250987
+  - Entity: 11420592067141103643
+    TagComponent:
+      Tag: CubePDOTest
+    TransformComponent:
+      Translation: [-273.3090515136719, 45.474632263183594, 452.15191650390625]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      MaterialAssets:
+        - 8654792292855177873

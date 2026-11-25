@@ -3700,6 +3700,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 445990248245791569
+    FilePath: Materials/SubsurfaceGraphTest.nmatgraph
+    SourceFilePath: Materials/SubsurfaceGraphTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 447055104322526812
     FilePath: StreamingTest/Meshes/Tile_41_33.nsmesh
     Type: AssetType::StaticMesh
@@ -8481,10 +8487,6 @@ AssetRegistry:
   - Handle: 1003867006488018090
     FilePath: StreamingTest/Materials/Tile_50_10_Tile_50_10.nmat
     SourceFilePath: StreamingTest/Materials/Tile_50_10_Tile_50_10.nmat
-    Type: AssetType::Material
-  - Handle: 1004110498010734075
-    FilePath: Materials/Sphere_Sphere_Material.nmat
-    SourceFilePath: Materials/Sphere_Sphere_Material.nmat
     Type: AssetType::Material
   - Handle: 1004988951144084358
     FilePath: StreamingTest/Textures/Tile_69_8.ntex
@@ -13571,6 +13573,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1596220588156943509
+    FilePath: Materials/Sphere_Sphere_Material_Instance_13956078906572642376.nmat
+    SourceFilePath: Materials/Sphere_Sphere_Material_Instance_13956078906572642376.nmat
+    Type: AssetType::Material
   - Handle: 1596760701005147347
     FilePath: StreamingDense/Materials/Tile_2_1_Tile_2_1.nmat
     SourceFilePath: StreamingDense/Materials/Tile_2_1_Tile_2_1.nmat
@@ -15457,6 +15463,12 @@ AssetRegistry:
       SourceMeshIndex: 165
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 1824304700196329426
+    FilePath: Materials/ObjectGradient.nmatgraph
+    SourceFilePath: Materials/ObjectGradient.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 1824559846268027608
     FilePath: StreamingTest/Textures/Tile_31_6.ntex
     Type: AssetType::Texture2D
@@ -23357,6 +23369,12 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_20_66_Tile_20_66.nmat
     SourceFilePath: StreamingTest/Materials/Tile_20_66_Tile_20_66.nmat
     Type: AssetType::Material
+  - Handle: 2706421380836821813
+    FilePath: Materials/DepthFadeMat.nmat
+    SourceFilePath: Materials/DepthFadeMat.nmat
+    Type: AssetType::Material
+    FormerPaths:
+      - Materials/NewMaterial.nmat
   - Handle: 2706866617994176646
     FilePath: StreamingTest/Meshes/Tile_9_66.nsmesh
     Type: AssetType::StaticMesh
@@ -27308,6 +27326,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3178384907263644179
+    FilePath: Materials/LobeTest.nmatgraph
+    SourceFilePath: Materials/LobeTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 3178521335246637556
     FilePath: StreamingDense/Meshes/Tile_1_12.nsmesh
     Type: AssetType::StaticMesh
@@ -29862,6 +29886,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3451587893563893369
+    FilePath: Materials/PDOTest.nmatgraph
+    SourceFilePath: Materials/PDOTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 3452767692648700614
     FilePath: StreamingDense/Materials/Tile_16_3_Tile_16_3.nmat
     SourceFilePath: StreamingDense/Materials/Tile_16_3_Tile_16_3.nmat
@@ -32093,6 +32123,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3689075713214712875
+    FilePath: Materials/AOLightAffectTest.nmatgraph
+    SourceFilePath: Materials/AOLightAffectTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 3689086411071990129
     FilePath: StreamingDense/Textures/Tile_12_10.ntex
     Type: AssetType::Texture2D
@@ -32330,6 +32366,12 @@ AssetRegistry:
       SourceMeshIndex: 20
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 3711635161358079385
+    FilePath: Materials/WaxSubsurfaceMat.nmat
+    SourceFilePath: Materials/WaxSubsurfaceMat.nmat
+    Type: AssetType::Material
+    FormerPaths:
+      - Materials/NewMaterial.nmat
   - Handle: 3712616328326079563
     FilePath: StreamingTest/Meshes/Tile_32_2.nsmesh
     Type: AssetType::StaticMesh
@@ -32550,6 +32592,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3747891042972464720
+    FilePath: Materials/Cube_Cube_Material_Instance_12655269398170201671.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_12655269398170201671.nmat
+    Type: AssetType::Material
   - Handle: 3748513467410118260
     FilePath: StreamingTest/Meshes/Tile_74_3.nsmesh
     Type: AssetType::StaticMesh
@@ -41447,6 +41493,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4790353260901448438
+    FilePath: Materials/DepthFadeTest.nmatgraph
+    SourceFilePath: Materials/DepthFadeTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 4791317118381508331
     FilePath: StreamingDense/Meshes/Tile_11_3.nsmesh
     Type: AssetType::StaticMesh
@@ -51510,6 +51562,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5881801986632955500
+    FilePath: Materials/Sphere_Sphere_Material.nmat
+    SourceFilePath: Materials/Sphere_Sphere_Material.nmat
+    Type: AssetType::Material
   - Handle: 5882108635104933562
     FilePath: StreamingTest/Meshes/Tile_37_81.nsmesh
     Type: AssetType::StaticMesh
@@ -57745,6 +57801,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6605209673496250987
+    FilePath: Materials/Sphere_Sphere_Material_Instance_15035757338342387950.nmat
+    SourceFilePath: Materials/Sphere_Sphere_Material_Instance_15035757338342387950.nmat
+    Type: AssetType::Material
   - Handle: 6608133666130352651
     FilePath: StreamingTest/Meshes/Tile_59_38.nsmesh
     Type: AssetType::StaticMesh
@@ -58044,6 +58104,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6637323036996561396
+    FilePath: Materials/Cube_Cube_Material_Instance_12071180142104915658.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_12071180142104915658.nmat
+    Type: AssetType::Material
   - Handle: 6638860117556247533
     FilePath: StreamingTest/Meshes/Tile_73_70.nsmesh
     Type: AssetType::StaticMesh
@@ -63293,6 +63357,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 7221196538927167019
+    FilePath: Shaders/HandSurfaceTest.slang
+    SourceFilePath: Shaders/HandSurfaceTest.slang
+    Type: AssetType::MaterialShader
+    FormerPaths:
+      - Shaders/NewMaterialShader.slang
   - Handle: 7221588426855484995
     FilePath: StreamingTest/Textures/Tile_38_22.ntex
     Type: AssetType::Texture2D
@@ -63444,6 +63514,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7240852630820333458
+    FilePath: Materials/Cube_Cube_Material_Instance_9579982760490706325.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_9579982760490706325.nmat
+    Type: AssetType::Material
   - Handle: 7241006081101218322
     FilePath: StreamingTest/Textures/Tile_16_25.ntex
     Type: AssetType::Texture2D
@@ -74666,6 +74740,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8535823069821064717
+    FilePath: Materials/VertexOutputsTest.nmatgraph
+    SourceFilePath: Materials/VertexOutputsTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 8536497720783301350
     FilePath: StreamingTest/Meshes/Tile_16_63.nsmesh
     Type: AssetType::StaticMesh
@@ -75698,6 +75778,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8654792292855177873
+    FilePath: Materials/Cube_Cube_Material_Instance_7536267913390979208.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_7536267913390979208.nmat
+    Type: AssetType::Material
   - Handle: 8655159722768646877
     FilePath: StreamingTest/Textures/Tile_77_69.ntex
     Type: AssetType::Texture2D
@@ -77813,6 +77897,12 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 8906420567881750731
+    FilePath: Materials/ViewSpaceNormal.nmatgraph
+    SourceFilePath: Materials/ViewSpaceNormal.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 8907462534320967291
     FilePath: StreamingTest/Meshes/Tile_64_64.nsmesh
     Type: AssetType::StaticMesh
@@ -86174,6 +86264,12 @@ AssetRegistry:
   - Handle: 9835486001557251531
     FilePath: StreamingTest/StreamingTestWorld.nox
     Type: AssetType::Scene
+  - Handle: 9837124521171411276
+    FilePath: Materials/CharDissolve.nmatgraph
+    SourceFilePath: Materials/CharDissolve.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 9837164617057192857
     FilePath: StreamingTest/Meshes/Tile_59_19.nsmesh
     Type: AssetType::StaticMesh
@@ -93078,6 +93174,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_66_56_Tile_66_56.nmat
     SourceFilePath: StreamingTest/Materials/Tile_66_56_Tile_66_56.nmat
     Type: AssetType::Material
+  - Handle: 10656405731608508824
+    FilePath: Materials/Cube_Cube_Material_Instance_2156842620322047522.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_2156842620322047522.nmat
+    Type: AssetType::Material
   - Handle: 10658789102499361133
     FilePath: StreamingTest/Materials/Tile_38_40_Tile_38_40.nmat
     SourceFilePath: StreamingTest/Materials/Tile_38_40_Tile_38_40.nmat
@@ -96578,6 +96678,10 @@ AssetRegistry:
   - Handle: 11067573600694691113
     FilePath: StreamingTest/Materials/Tile_46_16_Tile_46_16.nmat
     SourceFilePath: StreamingTest/Materials/Tile_46_16_Tile_46_16.nmat
+    Type: AssetType::Material
+  - Handle: 11067785964245479810
+    FilePath: Materials/Sphere_Sphere_Material_Instance_4998595750232082847.nmat
+    SourceFilePath: Materials/Sphere_Sphere_Material_Instance_4998595750232082847.nmat
     Type: AssetType::Material
   - Handle: 11069172202481756284
     FilePath: StreamingTest/Textures/Tile_19_41.ntex
@@ -106630,6 +106734,12 @@ AssetRegistry:
       SourceMeshIndex: 95
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 12233353969772384305
+    FilePath: Materials/PixelNormalTest.nmatgraph
+    SourceFilePath: Materials/PixelNormalTest.nmatgraph
+    Type: AssetType::MaterialGraph
+    FormerPaths:
+      - Materials/NewMaterialGraph.nmatgraph
   - Handle: 12233550994541320756
     FilePath: StreamingTest/Textures/Tile_10_70.ntex
     Type: AssetType::Texture2D
@@ -157324,6 +157434,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_46_70_Tile_46_70.nmat
     SourceFilePath: StreamingTest/Materials/Tile_46_70_Tile_46_70.nmat
     Type: AssetType::Material
+  - Handle: 18003830957844461384
+    FilePath: Materials/Cube_Cube_Material_Instance_15161668082928450834.nmat
+    SourceFilePath: Materials/Cube_Cube_Material_Instance_15161668082928450834.nmat
+    Type: AssetType::Material
   - Handle: 18004199552998522778
     FilePath: StreamingTest/Textures/Tile_27_51.ntex
     Type: AssetType::Texture2D
@@ -159793,6 +159907,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 18293635816513429416
+    FilePath: Materials/Sphere_Sphere_Material_Instance_17582652460139301932.nmat
+    SourceFilePath: Materials/Sphere_Sphere_Material_Instance_17582652460139301932.nmat
+    Type: AssetType::Material
   - Handle: 18294394032722444940
     FilePath: StreamingTest/Meshes/Tile_16_15.nsmesh
     Type: AssetType::StaticMesh

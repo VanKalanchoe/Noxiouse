@@ -5,7 +5,8 @@ Project:
   AssetRegistryPath: AssetRegistry.nxr
   ScriptModulePath: Scripts/Binaries/Facerun.dll
   WorldUnitsPerMeter: 100
-  RenderQuality: Ray Traced (All)
+  RenderQuality: Raster (All)
+  RenderingStyle: Physical
   WindowMode: Borderless
   AudioMixer: Audio/Mixer.nmixer
   PhysicalSurfaces: [Default, Concrete, Stone, Grass, Dirt, Sand, Gravel, Wood, Metal, Water, Snow, Carpet, Tile, Glass]

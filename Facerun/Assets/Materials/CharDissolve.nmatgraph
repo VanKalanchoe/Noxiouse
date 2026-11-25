@@ -1,0 +1,60 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 6
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [400, 0]
+    Properties:
+      []
+  - Id: 2
+    Type: Local Position
+    Position: [-269.84003, 35.039997]
+    Properties:
+      []
+  - Id: 3
+    Type: Noise
+    Position: [-79.80001, 36.319992]
+    Properties:
+      - Name: Scale
+        Value:
+          Float: 0.050000012
+  - Id: 4
+    Type: Scalar Parameter
+    Position: [-81.640015, 134.76]
+    Properties:
+      - Name: Name
+        Value:
+          Str: Dissolve
+      - Name: Default
+        Value:
+          Float: 0
+  - Id: 5
+    Type: Subtract
+    Position: [107.87999, 62.079975]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 5
+    ToPin: 1
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 1
+    ToPin: 7
+Parameters:
+  []

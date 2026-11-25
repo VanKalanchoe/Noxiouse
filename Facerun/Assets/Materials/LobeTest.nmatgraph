@@ -1,0 +1,121 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 13
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [400, 0]
+    Properties:
+      []
+  - Id: 2
+    Type: Color
+    Position: [-209.43942, 14.466991]
+    Properties:
+      - Name: Value
+        Value:
+          Vec4: [0.05098039, 0.07843138, 0.2509804, 1]
+  - Id: 3
+    Type: Constant
+    Position: [-208.60272, 100.64837]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 0.6
+  - Id: 4
+    Type: Constant
+    Position: [-217.92819, 171.6473]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 1
+  - Id: 5
+    Type: Constant
+    Position: [-239.80435, 274.44122]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 0.05
+  - Id: 6
+    Type: Constant
+    Position: [-239.0893, 363.01105]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 1
+  - Id: 7
+    Type: Local Position
+    Position: [-676.3793, 480.62442]
+    Properties:
+      []
+  - Id: 8
+    Type: Noise
+    Position: [-488.2654, 479.51785]
+    Properties:
+      - Name: Scale
+        Value:
+          Float: 0.05
+  - Id: 9
+    Type: Multiply
+    Position: [-283.55328, 489.47684]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 500
+  - Id: 10
+    Type: Add
+    Position: [-94.33293, 493.903]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 150
+  - Id: 11
+    Type: Color
+    Position: [118.82788, 476.61554]
+    Properties:
+      - Name: Value
+        Value:
+          Vec4: [1, 0.25098038, 0.65098035, 1]
+  - Id: 12
+    Type: Constant
+    Position: [11.561356, 607.04987]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 0.4
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 1
+    ToPin: 2
+  - FromNode: 7
+    FromPin: 0
+    ToNode: 8
+    ToPin: 0
+  - FromNode: 8
+    FromPin: 0
+    ToNode: 9
+    ToPin: 0
+  - FromNode: 9
+    FromPin: 0
+    ToNode: 10
+    ToPin: 0
+  - FromNode: 11
+    FromPin: 0
+    ToNode: 1
+    ToPin: 18
+  - FromNode: 12
+    FromPin: 0
+    ToNode: 1
+    ToPin: 19
+Parameters:
+  []

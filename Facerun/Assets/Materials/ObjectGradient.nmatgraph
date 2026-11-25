@@ -1,0 +1,151 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 12
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [635.52, 23.92]
+    Properties:
+      - Name: Max World Position Offset Displacement
+        Value:
+          Float: 0
+  - Id: 2
+    Type: World Position
+    Position: [-970.11, 1.2440014]
+    Properties:
+      []
+  - Id: 3
+    Type: Object Bounds
+    Position: [-958.11, 98.844]
+    Properties:
+      []
+  - Id: 4
+    Type: Subtract
+    Position: [-768.51, 10.843999]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0
+  - Id: 5
+    Type: Divide
+    Position: [-563.70996, 29.243996]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 6
+    Type: Component Mask
+    Position: [-342.91, 54.044]
+    Properties:
+      - Name: B
+        Value:
+          Bool: false
+      - Name: R
+        Value:
+          Bool: false
+      - Name: G
+        Value:
+          Bool: true
+      - Name: A
+        Value:
+          Bool: false
+  - Id: 7
+    Type: Add
+    Position: [-71.56799, 77.536]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+  - Id: 8
+    Type: Multiply
+    Position: [140.14107, 182.06215]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0.5
+  - Id: 9
+    Type: Lerp
+    Position: [397.53137, -50.249496]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 1
+      - Name: Alpha
+        Value:
+          Float: 0.5
+  - Id: 10
+    Type: Color
+    Position: [148.58682, -47.099693]
+    Properties:
+      - Name: Value
+        Value:
+          Vec4: [0, 0.25, 1, 1]
+  - Id: 11
+    Type: Color
+    Position: [137.68094, 72.30317]
+    Properties:
+      - Name: Value
+        Value:
+          Vec4: [1, 0.5590909, 0, 1]
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 4
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 4
+    ToPin: 1
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 1
+    ToNode: 5
+    ToPin: 1
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 6
+    ToPin: 0
+  - FromNode: 6
+    FromPin: 0
+    ToNode: 7
+    ToPin: 0
+  - FromNode: 7
+    FromPin: 0
+    ToNode: 8
+    ToPin: 0
+  - FromNode: 10
+    FromPin: 0
+    ToNode: 9
+    ToPin: 0
+  - FromNode: 11
+    FromPin: 0
+    ToNode: 9
+    ToPin: 1
+  - FromNode: 8
+    FromPin: 0
+    ToNode: 9
+    ToPin: 2
+  - FromNode: 9
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+Parameters:
+  []

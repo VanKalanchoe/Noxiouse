@@ -1,0 +1,69 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 6
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [400, 0]
+    Properties:
+      []
+  - Id: 2
+    Type: Vertex Normal
+    Position: [-573.8, 3]
+    Properties:
+      []
+  - Id: 3
+    Type: Transform
+    Position: [-372.19998, 3.7999969]
+    Properties:
+      - Name: From
+        Value:
+          Int: 1
+      - Name: To
+        Value:
+          Int: 2
+      - Name: Kind
+        Value:
+          Int: 0
+      - Name: Value
+        Value:
+          Vec4: [0, 0, 0, 0]
+  - Id: 4
+    Type: Multiply
+    Position: [-142.59999, -3.4000032]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0.5
+  - Id: 5
+    Type: Add
+    Position: [81.40001, 7.799988]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0.5
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 4
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+Parameters:
+  []

@@ -1,0 +1,37 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 5
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [400, 0]
+    Properties:
+      []
+  - Id: 3
+    Type: Color
+    Position: [-113.78066, 12.557541]
+    Properties:
+      - Name: Value
+        Value:
+          Vec4: [0, 0.7058823, 0.8627451, 1]
+  - Id: 4
+    Type: Depth Fade
+    Position: [-66.48823, 153.70724]
+    Properties:
+      - Name: Fade Distance
+        Value:
+          Float: 50
+      - Name: Opacity
+        Value:
+          Float: 0.9
+Links:
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 1
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 1
+    ToPin: 6
+Parameters:
+  []

@@ -1,0 +1,72 @@
+Domain: MaterialGraph
+OutputNode: 1
+NextNodeId: 8
+Nodes:
+  - Id: 1
+    Type: Material Output
+    Position: [400, 0]
+    Properties:
+      []
+  - Id: 2
+    Type: Local Position
+    Position: [-710.6, 107.99999]
+    Properties:
+      []
+  - Id: 3
+    Type: Multiply
+    Position: [-514.6, 107.19999]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0.01
+  - Id: 4
+    Type: Add
+    Position: [-310.6, 107.99999]
+    Properties:
+      - Name: A
+        Value:
+          Float: 0
+      - Name: B
+        Value:
+          Float: 0.5
+  - Id: 5
+    Type: Vertex Interpolator
+    Position: [-115.400024, 122.399994]
+    Properties:
+      - Name: Value
+        Value:
+          Float: 0
+  - Id: 6
+    Type: Color
+    Position: [-175.47221, 232.42853]
+    Properties:
+      - Name: Value
+        Value:
+          Vec4: [0, 1, 0, 1]
+  - Id: 7
+    Type: Screen Position
+    Position: [-96.60345, 374.33853]
+    Properties:
+      []
+Links:
+  - FromNode: 2
+    FromPin: 0
+    ToNode: 3
+    ToPin: 0
+  - FromNode: 3
+    FromPin: 0
+    ToNode: 4
+    ToPin: 0
+  - FromNode: 4
+    FromPin: 0
+    ToNode: 5
+    ToPin: 0
+  - FromNode: 5
+    FromPin: 0
+    ToNode: 1
+    ToPin: 12
+Parameters:
+  []
