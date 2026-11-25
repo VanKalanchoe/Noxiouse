@@ -74,7 +74,8 @@ namespace Nox
         DefaultLit = 0,
         Unlit = 1,
         Toon = 2,
-        CustomLit = 3
+        CustomLit = 3,
+        Subsurface = 4
     };
     inline constexpr int32_t MaterialCustomParameterCount = 4;
 
@@ -261,6 +262,13 @@ namespace Nox
         // instances). Stored in .nmat files only ("NMA6").
         std::string SurfaceGraph;                  // the graph's path in the project's Assets (empty: none)
         std::vector<MaterialGraphParameterValue> GraphParameters;
+
+        // The Subsurface shading model's settings (ShadingModel Subsurface; SubsurfaceShading.slang, step R1):
+        // light scattered beneath the surface (skin, wax, marble, jade). Stored in .nmat files ("NMA7").
+        glm::vec3 SubsurfaceColor = glm::vec3(0.95f, 0.28f, 0.18f);
+        float SubsurfaceOpacity = 0.5f;            // 0 = thin / strong backlit glow, 1 = thick / subtle wrap only
+        float SubsurfaceRadius = 0.5f;             // 0..2: wrap scattering softness across the light terminator
+        MaterialTexture SubsurfaceColorTexture;    // RGB, sRGB (multiplies SubsurfaceColor)
     };
 
     // The lobe textures of a material, with how each is read: sRGB color, or a tangent-space normal map.

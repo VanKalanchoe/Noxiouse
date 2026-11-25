@@ -1314,6 +1314,12 @@ namespace Nox
         for (uint32_t bit = 0; bit < std::size(kOutputNames); ++bit)
             if ((program.Outputs & (1u << bit)) != 0)
                 outputs += std::string(outputs.empty() ? "" : ", ") + kOutputNames[bit];
+        if ((program.Outputs2 & MaterialGraphOutput2SubsurfaceColor) != 0)
+            outputs += std::string(outputs.empty() ? "" : ", ") + "Subsurface Color";
+        if ((program.Outputs2 & MaterialGraphOutput2AOLightAffect) != 0)
+            outputs += std::string(outputs.empty() ? "" : ", ") + "AO Light Affect";
+        if ((program.Outputs2 & MaterialGraphOutput2PixelDepthOffset) != 0)
+            outputs += std::string(outputs.empty() ? "" : ", ") + "Pixel Depth Offset";
         std::string parameters;
         for (const MaterialGraphParameter& parameter : program.Parameters)
             if (!parameter.Name.starts_with('#'))

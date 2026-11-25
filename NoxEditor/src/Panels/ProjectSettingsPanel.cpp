@@ -1,9 +1,11 @@
 #include "ProjectSettingsPanel.h"
 
 #include <algorithm>
+#include <chrono>
 
 #include <NoxUI/Widgets/UIPropertyRows.h>
 #include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Core/Window.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Project/ProjectRendererSettings.h"
@@ -147,6 +149,58 @@ namespace Nox
                 "shadowed, Ray Reconstruction, Auto Exposure, OIT. Raster (All): raster except reflections. The project opens with it; "
                 "changing a setting in Renderer Settings makes it Custom for this session.");
             rendering.Text([r]() { return std::string("The renderer's settings now equal: ") + Renderer::GetQualityName(r->GetCurrentQuality()); });
+
+            // Step 6: Rendering Style (Physical / Stylized) + async project audit of non-physical materials (Toon / Custom Lit).
+            rendering.Choice("Rendering Style",
+                { "Physical (PBR - audit non-physical materials)", "Stylized (Toon / Custom Lit allowed)" },
+                []()
+                {
+                    const ProjectConfig* c = Config();
+                    return (c && c->RenderingStyle == "Stylized") ? 1 : 0;
+                },
+                [this](int index)
+                {
+                    if (ProjectConfig* c = Config())
+                    {
+                        c->RenderingStyle = (index == 1) ? "Stylized" : "Physical";
+                        Project::SaveActive();
+                        m_Rebuild = true;
+                    }
+                },
+                "Physical keeps the project PBR-focused and flags Toon / Custom Lit materials; Stylized enables stylized shading without warnings.");
+
+            if (!m_AuditCompleted && !m_AuditRunning)
+                StartMaterialAudit();
+
+            if (m_AuditRunning)
+            {
+                rendering.Note("Non-physical materials: scanning project materials in background...");
+            }
+            else if (m_AuditResult.NonPhysical.empty())
+            {
+                rendering.Note("Non-physical materials: none (" + std::to_string(m_AuditResult.TotalMaterials) + " project materials checked).");
+            }
+            else
+            {
+                const std::string header = "Non-physical materials (" + std::to_string(m_AuditResult.NonPhysical.size()) + " of " +
+                                           std::to_string(m_AuditResult.TotalMaterials) +
+                                           (config->RenderingStyle == "Stylized" ? " - allowed in Stylized style)" : " - flagged in Physical style)");
+                rendering.Header(header, "Materials using Toon or Custom Lit shading models.");
+                for (const std::string& entry : m_AuditResult.NonPhysical)
+                    rendering.Note("  - " + entry);
+            }
+            auto refreshBtn = NoxUI::Button(m_AuditRunning ? "Scanning..." : "Rescan Materials", [this]()
+            {
+                if (!m_AuditRunning)
+                {
+                    StartMaterialAudit();
+                    m_Rebuild = true;
+                }
+            });
+            refreshBtn->SetEnabled(!m_AuditRunning);
+            refreshBtn->Padding = NoxUI::UIThickness::Symmetric(10.0f, 3.0f);
+            refreshBtn->Tooltip = "Scan all project .nmat files asynchronously for Toon / Custom Lit materials.";
+            rendering.GetBody()->AddChild(refreshBtn);
 
             rendering.Header("Saved on top of the preset", "The .nproj's Renderer settings: the editor and the packaged game start with them.");
             ProjectRendererSettings* saved = &config->Renderer;
@@ -301,8 +355,53 @@ namespace Nox
             m_Hooks.SurfaceRenamed(from, typed);
     }
 
+    void ProjectSettingsPanel::StartMaterialAudit()
+    {
+        if (m_AuditRunning)
+            return;
+        std::vector<std::pair<std::string, std::filesystem::path>> candidates;
+        if (const Ref<Project> proj = Project::GetActive())
+        {
+            if (const auto assets = proj->GetEditorAssetManager())
+            {
+                const std::filesystem::path assetDir = Project::GetActiveAssetDirectory();
+                for (const auto& [handle, meta] : assets->GetAssetRegistry())
+                {
+                    if (meta.Type == AssetType::Material && !meta.FilePath.empty())
+                        candidates.emplace_back(meta.FilePath.generic_string(), assetDir / meta.FilePath);
+                }
+            }
+        }
+        m_AuditRunning = true;
+        m_AuditFuture = std::async(std::launch::async, [files = std::move(candidates)]() -> MaterialAuditResult
+        {
+            MaterialAuditResult result;
+            result.TotalMaterials = files.size();
+            for (const auto& [rel, fullPath] : files)
+            {
+                MaterialData mat;
+                if (!MaterialSerializer::Deserialize(fullPath, mat))
+                    continue;
+                if (mat.ShadingModel == MaterialShadingModel::Toon)
+                    result.NonPhysical.push_back(rel + "  (Toon)");
+                else if (mat.ShadingModel == MaterialShadingModel::CustomLit)
+                    result.NonPhysical.push_back(rel + "  (Custom Lit)");
+            }
+            std::sort(result.NonPhysical.begin(), result.NonPhysical.end());
+            return result;
+        });
+    }
+
     void ProjectSettingsPanel::Update()
     {
+        if (m_AuditRunning && m_AuditFuture.valid() &&
+            m_AuditFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        {
+            m_AuditResult = m_AuditFuture.get();
+            m_AuditRunning = false;
+            m_AuditCompleted = true;
+            m_Rebuild = true;
+        }
         if (m_Rebuild)
             BuildUI(m_Context);
         if (m_SurfacesDirty)

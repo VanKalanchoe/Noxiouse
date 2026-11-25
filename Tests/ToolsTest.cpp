@@ -601,6 +601,52 @@ static void TestMaterialGraph()
     link(depthInWpo, node(depthInWpo, "Scene Depth"), 0, depthInWpo.OutputNode, 8);
     CHECK(!CompileMaterialGraph(depthInWpo).Valid, "Scene Depth feeding World Position Offset is refused");
 
+    // Step R1: Subsurface Color pin (pin 31, MaterialGraphOutput2SubsurfaceColor).
+    NodeGraph sssGraph = CreateEmptyMaterialGraph();
+    const uint32_t sssCol = node(sssGraph, "Color", { { "Value", glm::vec4(0.95f, 0.25f, 0.15f, 1.0f) } });
+    link(sssGraph, sssCol, 0, sssGraph.OutputNode, 31);
+    const MaterialGraphProgram sssProgram = CompileMaterialGraph(sssGraph);
+    CHECK(sssProgram.Valid &&
+              (sssProgram.Outputs2 & MaterialGraphOutput2SubsurfaceColor) != 0 &&
+              sssProgram.SurfaceCode.find("o.subsurfaceColor =") != std::string::npos,
+          "Step R1 Subsurface Color pin compiles cleanly into Outputs2 / SurfaceCode: '{}'", sssProgram.Error);
+
+    // Step R2: AO Light Affect (pin 32) & Pixel Depth Offset (pin 33).
+    NodeGraph r2Graph = CreateEmptyMaterialGraph();
+    const uint32_t aoAffVal = node(r2Graph, "Constant", { { "Value", 0.8f } });
+    const uint32_t pdoVal = node(r2Graph, "Constant", { { "Value", 25.0f } });
+    link(r2Graph, aoAffVal, 0, r2Graph.OutputNode, 32);
+    link(r2Graph, pdoVal, 0, r2Graph.OutputNode, 33);
+    const MaterialGraphProgram r2Program = CompileMaterialGraph(r2Graph);
+    CHECK(r2Program.Valid &&
+              (r2Program.Outputs2 & MaterialGraphOutput2AOLightAffect) != 0 &&
+              (r2Program.Outputs2 & MaterialGraphOutput2PixelDepthOffset) != 0 &&
+              r2Program.SurfaceCode.find("o.aoLightAffect =") != std::string::npos &&
+              r2Program.Code.find("float pixel_depth_offset(MaterialGraphInputs i)") != std::string::npos,
+          "Step R2 AO Light Affect & Pixel Depth Offset compile cleanly: '{}'", r2Program.Error);
+
+    // Step 5: hand-written surface() in a Material Shader (.slang).
+    const std::string handSurface = R"(
+#include "CustomLit.slang"
+void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)
+{
+    o.baseColor = float3(0.2, 0.8, 0.4);
+    o.roughness = 0.25;
+    o.subsurfaceColor = float3(0.1, 0.9, 0.3);
+}
+)";
+    uint32_t handOut1 = 0, handOut2 = 0;
+    CustomLitShaders::DetectSurfaceOutputs(handSurface, handOut1, handOut2);
+    const MaterialGraphSource handWrapped = CustomLitShaders::BuildShaderSurfaceSource({ "Shaders/Hand.slang", handSurface, "" }, handOut1);
+    CHECK(CustomLitShaders::HasSurfaceFunction(handSurface) &&
+              !CustomLitShaders::HasLightFunctions(handSurface) &&
+              (handOut1 & MaterialGraphOutputBaseColor) != 0 &&
+              (handOut1 & MaterialGraphOutputRoughness) != 0 &&
+              (handOut1 & MaterialGraphOutputNormal) == 0 &&
+              (handOut2 & MaterialGraphOutput2SubsurfaceColor) != 0 &&
+              handWrapped.Code.find("void surface(") != std::string::npos,
+          "Step 5 hand-written surface() detection, output bit scanning & wrapper work cleanly");
+
     // Every node is offered in the node graph editor's Add menu: a "Parameter" property marks a node reading a graph variable, which the
     // menu lists only as "Get <variable>" -- Texture Sample had one and was missing from the menu (the user's test).
     size_t offered = 0, hidden = 0;

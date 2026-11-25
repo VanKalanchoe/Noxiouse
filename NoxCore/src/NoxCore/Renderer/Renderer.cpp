@@ -423,16 +423,24 @@ namespace Nox
         // yet, or it does not compile): the material's own values.
         packed.graphSlot = 0xFFFFFFFFu;
         packed.graphOutputs = 0;
+        packed.graphOutputs2 = 0;
         packed.graphMaxDisplacement = 0.0f;
+        packed.subsurfaceColor = glm::clamp(material.SubsurfaceColor, glm::vec3(0.0f), glm::vec3(1.0f));
+        packed.subsurfaceOpacity = std::clamp(material.SubsurfaceOpacity, 0.0f, 1.0f);
+        packed.subsurfaceRadius = std::clamp(material.SubsurfaceRadius, 0.0f, 2.0f);
+        packed.subsurfaceColorTextureIndex = static_cast<uint32_t>(GetTextureIndex(material.SubsurfaceColorTexture.Path));
+        packed.subsurfaceColorTextureSet = material.SubsurfaceColorTexture.Set;
         std::fill(std::begin(packed.graphTextureIndex), std::end(packed.graphTextureIndex), 0xFFFFFFFFu);
-        if (!material.SurfaceGraph.empty())
+        const std::string& surfacePath = !material.SurfaceGraph.empty() ? material.SurfaceGraph : material.CustomShader;
+        if (!surfacePath.empty())
         {
             const MaterialGraphProgram* program = nullptr;
-            const uint32_t slot = Renderer::FindMaterialGraph(material.SurfaceGraph, &program);
+            const uint32_t slot = Renderer::FindMaterialGraph(surfacePath, &program);
             if (slot != 0xFFFFFFFFu && program)
             {
                 packed.graphSlot = slot;
                 packed.graphOutputs = program->Outputs;
+                packed.graphOutputs2 = program->Outputs2;
                 packed.graphMaxDisplacement = program->MaxDisplacement;
                 for (const MaterialGraphParameter& parameter : program->Parameters)
                 {

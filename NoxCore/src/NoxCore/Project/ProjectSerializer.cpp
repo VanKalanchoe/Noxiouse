@@ -28,6 +28,7 @@ namespace Nox
                 out << YAML::Key << "ScriptModulePath" << YAML::Value << config.ScriptModulePath.string();
                 out << YAML::Key << "WorldUnitsPerMeter" << YAML::Value << config.WorldUnitsPerMeter;
                 out << YAML::Key << "RenderQuality" << YAML::Value << config.RenderQuality;
+                out << YAML::Key << "RenderingStyle" << YAML::Value << config.RenderingStyle;
                 out << YAML::Key << "WindowMode" << YAML::Value << config.WindowMode;
                 out << YAML::Key << "AudioMixer" << YAML::Value << config.AudioMixer.generic_string();
                 out << YAML::Key << "PhysicalSurfaces" << YAML::Value << YAML::Flow << config.PhysicalSurfaces;
@@ -95,6 +96,8 @@ namespace Nox
             config.WorldUnitsPerMeter = projectNode["WorldUnitsPerMeter"].as<float>();
         if (projectNode["RenderQuality"])
             config.RenderQuality = projectNode["RenderQuality"].as<std::string>();
+        if (projectNode["RenderingStyle"])
+            config.RenderingStyle = projectNode["RenderingStyle"].as<std::string>();
         if (projectNode["WindowMode"])
             config.WindowMode = projectNode["WindowMode"].as<std::string>();
         if (projectNode["AudioMixer"])

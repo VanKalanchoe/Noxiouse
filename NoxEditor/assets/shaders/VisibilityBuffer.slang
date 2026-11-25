@@ -140,6 +140,9 @@
     struct VisOutput
     {
         uint2 visibility : SV_Target0;
+#ifdef NOX_MATERIAL_GRAPH
+        float depth : SV_DepthLessEqual; // Reverse-Z: Pixel Depth Offset (step R2) only pushes further away (smaller Z)
+#endif
     };
 
     [shader("fragment")]
@@ -181,6 +184,11 @@
         // .x = instance slot (+ 1 so 0 is reserved strictly for background)
         // .y = (MeshletID << 8) | (PrimitiveID & 0xFF)
         output.visibility = uint2(inVert.drawID + 1, (inVert.meshletID << 8) | (primitiveID & 0xFF));
+#ifdef NOX_MATERIAL_GRAPH
+        output.depth = material_graph_apply_pdo(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace,
+                                                mul(ubo.proj, ubo.view), ubo, instances.material(inVert.drawID), instance, inVert.localPos,
+                                                inVert.tangent, inVert.pos.z);
+#endif
         return output;
     }
 
@@ -195,7 +203,12 @@
 
     // Masked casters: the visibility pass's alpha test, so leaves cast the shape of their texture as with the RT shadows.
     [shader("fragment")]
+#ifdef NOX_MATERIAL_GRAPH
+    void depthMaskFragMain(VSOutput inVert, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant,
+                           out float outDepth : SV_DepthLessEqual)
+#else
     void depthMaskFragMain(VSOutput inVert, bool isFrontFace : SV_IsFrontFace, uniform PushConstantMeshlets pushConstant)
+#endif
     {
         UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
         SceneInstances instances = SceneInstances(ubo);
@@ -221,4 +234,9 @@
             if (alpha < instance.alphaMaskCutoff)
                 discard;
         }
+#ifdef NOX_MATERIAL_GRAPH
+        outDepth = material_graph_apply_pdo(inVert.uv0, inVert.uv1, inVert.worldPos, inVert.normal, inVert.vertexColor, isFrontFace,
+                                            mul(ubo.proj, ubo.view), ubo, instances.material(inVert.drawID), instance, inVert.localPos,
+                                            inVert.tangent, inVert.pos.z);
+#endif
     }

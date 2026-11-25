@@ -51,6 +51,13 @@ namespace Nox
         // The code a new Material Shader starts with (Content Browser > + Add > Material Shader): a two-tone toon with a rim.
         std::string_view TemplateSource();
 
+        // Step 5: hand-written surface() in a Material Shader (.slang). Detects whether `code` defines `void surface(...)` and/or
+        // `light(...)`/`ambient(...)`, scans which `o.*` MaterialGraphOutputs fields it writes, and wraps it as a MaterialGraphSource.
+        bool HasSurfaceFunction(std::string_view code);
+        bool HasLightFunctions(std::string_view code);
+        void DetectSurfaceOutputs(std::string_view code, uint32_t& outOutputs, uint32_t& outOutputs2);
+        MaterialGraphSource BuildShaderSurfaceSource(const CustomLitSource& source, uint32_t outputs);
+
         // <executable folder>/shaders/Generated, and the two pipelines' sources in it.
         std::filesystem::path GeneratedFolder();
         std::filesystem::path DeferredSourcePath(); // DeferredLightingCustomLit.slang

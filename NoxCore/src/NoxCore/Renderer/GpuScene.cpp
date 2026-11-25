@@ -24,6 +24,12 @@ namespace Nox
             return material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs & shaderio::MaterialGraphOutputWorldPositionOffset) != 0;
         }
 
+        // A material graph's Pixel Depth Offset writes custom fragment depth (step R2), so it runs in the programmable Mask bin.
+        bool HasPixelDepthOffset(const shaderio::GpuMaterial& material)
+        {
+            return material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs2 & shaderio::MaterialGraphOutput2PixelDepthOffset) != 0;
+        }
+
         RenderBucket SelectRenderBucket(const shaderio::GpuMaterial& material)
         {
             const bool doubleSided = material.doubleSided != 0;
@@ -57,7 +63,7 @@ namespace Nox
             // A World Position Offset: the Masked buckets, whose geometry passes run the material graph variant (Unreal's programmable
             // raster bins, which take Masked and World Position Offset materials alike) -- the Opaque buckets' fixed-function pipelines
             // would draw the mesh unmoved. An opaque material there is not alpha tested (the test is for alphaMode Mask only).
-            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Mask) || HasVertexOffset(material))
+            if (material.alphaMode == static_cast<uint32_t>(AlphaMode::Mask) || HasVertexOffset(material) || HasPixelDepthOffset(material))
                 return doubleSided ? RenderBucket::MaskDoubleSided : RenderBucket::Mask;
             return doubleSided ? RenderBucket::OpaqueDoubleSided : RenderBucket::Opaque;
         }

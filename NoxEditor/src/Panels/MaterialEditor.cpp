@@ -124,6 +124,15 @@ namespace Nox
             Texture2D* sphere = AssetPreviewRenderer::Get().GetLivePreview(m_Handle, 160);
             preview->TextureId = sphere ? sphere->GetDescriptorIndexSlot() : ~0u;
         }
+        if (const Ref<Project> proj = Project::GetActive())
+        {
+            const std::string& style = proj->GetConfig().RenderingStyle;
+            if (style != m_LastRenderingStyle)
+            {
+                m_LastRenderingStyle = style;
+                m_Rebuild = true;
+            }
+        }
         if (!m_Rebuild)
             return; // (the rows follow the material themselves: UIElement::OnSync)
         m_Body->ClearChildren();

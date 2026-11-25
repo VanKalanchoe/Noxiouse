@@ -378,9 +378,15 @@
             }
             float4 hitPosH = mul(ubo.invViewProj, float4(ndc, pixelDepth, 1.0));
             float3 hitPos = hitPosH.xyz / hitPosH.w;
-            float3 bary = barycentricOfPoint(hitPos, worldPos0.xyz, e1, e2, d00, d01, d11, invDenom);
             // Camera-to-surface direction (double-sided normal flip, below), from the same accurate hit position.
             float3 viewDir = normalize(hitPos - ubo.cameraWorldPos.xyz);
+            float3 bary = barycentricOfPoint(hitPos, worldPos0.xyz, e1, e2, d00, d01, d11, invDenom);
+#ifdef NOX_MATERIAL_GRAPH
+            // When Pixel Depth Offset (step R2) pushed the depth behind the triangle plane, recover barycentrics by intersecting the
+            // view ray with the triangle so UVs and shading do not slide across the surface.
+            if ((instances.material(instanceSlot).graphOutputs2 & MaterialGraphOutput2PixelDepthOffset) != 0u)
+                bary = computeBarycentric3D(ubo.cameraWorldPos.xyz, viewDir, worldPos0.xyz, e1, e2, triNorm, d00, d01, d11, invDenom).xyz;
+#endif
 
             // Derivatives (texture LOD only, not the normal/position above): an analytic ray/triangle-plane solve
             // against THIS pixel's own triangle, like the main bary above used to be -- not a hardware ddx/ddy of the
@@ -695,6 +701,17 @@
             emission *= SampleMaterialTextureGrad(ubo, instance.emissiveTextureIndex, samp, emUV, ddx_em, ddy_em).rgb;
         }
 
+        // 5b. SUBSURFACE COLOR (step R1) & AO LIGHT AFFECT (step R2): overridable by the material graph.
+        float aoLightAffect = 0.0;
+        float3 subsurfaceColor = gpuMaterial.subsurfaceColor;
+        if (instance.shadingModel == ShadingModelSubsurface && gpuMaterial.subsurfaceColorTextureIndex != 0xFFFFFFFF)
+        {
+            float2 sssUV = material_texture_uv(gpuMaterial, gpuMaterial.subsurfaceColorTextureSet, uv0, uv1);
+            float2 ddx_sss = material_texture_uv_delta(gpuMaterial, gpuMaterial.subsurfaceColorTextureSet, ddx_uv0, ddx_uv1);
+            float2 ddy_sss = material_texture_uv_delta(gpuMaterial, gpuMaterial.subsurfaceColorTextureSet, ddy_uv0, ddy_uv1);
+            subsurfaceColor *= SampleMaterialTextureGrad(ubo, gpuMaterial.subsurfaceColorTextureIndex, samp, sssUV, ddx_sss, ddy_sss).rgb;
+        }
+
 #ifdef NOX_MATERIAL_GRAPH
         // 6. THE MATERIAL GRAPH (MaterialGraph.slang; this file compiled with the project's graphs, Renderer::createMaterialGraphPipelines):
         // the Material Output pins the graph connects replace the values above, the others stay the material's own.
@@ -790,8 +807,10 @@
             graphOut.anisotropyDirection = float2(1.0, 0.0);
             graphOut.ior = gpuMaterial.ior > 0.0 ? gpuMaterial.ior : 1.5;
             graphOut.attenuationColor = float3(1.0);
+            graphOut.subsurfaceColor = subsurfaceColor;
             material_graph_surface(gpuMaterial.graphSlot, graphIn, graphOut);
             const uint outputs = gpuMaterial.graphOutputs;
+            const uint outputs2 = gpuMaterial.graphOutputs2;
             if ((outputs & MaterialGraphOutputBaseColor) != 0u)
                 baseColor.rgb = saturate(graphOut.baseColor);
             if ((outputs & MaterialGraphOutputMetallic) != 0u)
@@ -810,6 +829,10 @@
                 emission = max(graphOut.emissive, float3(0.0));
             if ((outputs & MaterialGraphOutputOcclusion) != 0u)
                 occlusion = saturate(graphOut.occlusion);
+            if ((outputs2 & MaterialGraphOutput2SubsurfaceColor) != 0u)
+                subsurfaceColor = saturate(graphOut.subsurfaceColor);
+            if ((outputs2 & MaterialGraphOutput2AOLightAffect) != 0u)
+                aoLightAffect = saturate(graphOut.aoLightAffect);
             if (instance.shadingModel == ShadingModelDefaultLit)
                 material_graph_apply_lobes(outputs, graphOut, gpuMaterial, geomNormal, rawGeomTangent, tangentHandedness, backFace, -viewDir,
                                            lobes, anisotropicT, diffuseTransmission);
@@ -859,7 +882,7 @@
         // The coat is over the emission too: what it reflects of the view does not come from below (the spec's coated_emission).
         if (lobes.coat > 0.0)
             emission *= 1.0 - lobes.coat * (0.04 + 0.96 * pow(1.0 - saturate(dot(lobes.coatNormal, -viewDir)), 5.0));
-        output.emission = float4(emission, 1.0);
+        output.emission = float4(emission, aoLightAffect);
         output.entityID = instance.entityID;
 
         // The anisotropy direction as an angle against the stored normal's basis (the reader rebuilds the same basis from it).
@@ -878,6 +901,14 @@
         else if (instance.shadingModel == ShadingModelCustomLit)
             output.lobes = gbuffer_encode_custom_lit(gpuMaterial.customLitSlot, instances.instances[instanceSlot].materialIndex, uv0,
                                                      max(length(ddx_uv0), length(ddy_uv0)));
+        else if (instance.shadingModel == ShadingModelSubsurface)
+        {
+            SubsurfaceSettings sss;
+            sss.color = saturate(subsurfaceColor);
+            sss.opacity = saturate(gpuMaterial.subsurfaceOpacity);
+            sss.radius = clamp(gpuMaterial.subsurfaceRadius, 0.0, 2.0);
+            output.lobes = gbuffer_encode_subsurface(sss);
+        }
         else
             output.lobes = gbuffer_encode_lobes(lobes);
         output.specular = gbuffer_encode_specular(lobes);

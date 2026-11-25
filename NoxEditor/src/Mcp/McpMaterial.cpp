@@ -26,7 +26,8 @@ namespace Nox::Mcp
         Json ToJson(MaterialShadingModel value)
         {
             return value == MaterialShadingModel::Unlit ? "Unlit" : value == MaterialShadingModel::Toon ? "Toon"
-                 : value == MaterialShadingModel::CustomLit ? "CustomLit" : "DefaultLit";
+                 : value == MaterialShadingModel::CustomLit ? "CustomLit"
+                 : value == MaterialShadingModel::Subsurface ? "Subsurface" : "DefaultLit";
         }
 
         std::string FromJson(const Json& value, float& out)
@@ -120,8 +121,10 @@ namespace Nox::Mcp
                 out = MaterialShadingModel::Toon;
             else if (name == "CustomLit" || name == "Custom Lit")
                 out = MaterialShadingModel::CustomLit;
+            else if (name == "Subsurface")
+                out = MaterialShadingModel::Subsurface;
             else
-                return "must be \"DefaultLit\", \"Unlit\", \"Toon\" or \"CustomLit\"";
+                return "must be \"DefaultLit\", \"Unlit\", \"Toon\", \"CustomLit\" or \"Subsurface\"";
             return {};
         }
 
@@ -206,6 +209,10 @@ namespace Nox::Mcp
                 NOX_MATERIAL_FIELD(ToonRimColor),
                 NOX_MATERIAL_FIELD(ToonRimWidth),
                 NOX_MATERIAL_FIELD(ToonRimIntensity),
+                NOX_MATERIAL_FIELD(SubsurfaceColor),
+                NOX_MATERIAL_FIELD(SubsurfaceOpacity),
+                NOX_MATERIAL_FIELD(SubsurfaceRadius),
+                NOX_MATERIAL_FIELD(SubsurfaceColorTexture),
                 NOX_MATERIAL_FIELD(CustomShader),
                 Field{ "CustomParameters",
                        [](const MaterialData& m)

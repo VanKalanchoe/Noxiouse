@@ -74,6 +74,14 @@ namespace Nox
         MaterialGraphOutputDispersion = 1u << 31,
     };
 
+    // Extended Material Output pins (GpuMaterial::graphOutputs2; step R1+).
+    enum MaterialGraphOutput2 : uint32_t
+    {
+        MaterialGraphOutput2SubsurfaceColor = 1u << 0,
+        MaterialGraphOutput2AOLightAffect = 1u << 1,
+        MaterialGraphOutput2PixelDepthOffset = 1u << 2,
+    };
+
     // A value a material (.nmat) may override: a Scalar / Vector Parameter node's, or a Texture Sample's with a parameter name. Texture
     // Samples without a name get a slot too (Name "#<node id>", not overridable).
     struct MaterialGraphParameter
@@ -111,6 +119,7 @@ namespace Nox
         uint32_t ParameterSlots = 0;
         uint32_t TextureSlots = 0;
         uint32_t Outputs = 0; // MaterialGraphOutput bits
+        uint32_t Outputs2 = 0; // MaterialGraphOutput2 bits (step R1+: Subsurface Color, etc.)
         // The Material Output's Max World Position Offset Displacement (Unreal's, world units): the offset is clamped to that length and
         // the culling bounds grow by it, so a moving surface is not culled where its mesh's bounds end. 0: neither (no clamp, the mesh's
         // own bounds -- a surface pushed past them may be culled while still on screen).

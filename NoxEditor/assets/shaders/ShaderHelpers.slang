@@ -45,12 +45,16 @@ static const uint GBufferModelMask = 0xC0u;
 static const uint GBufferToon = 0x40u;
 static const uint GBufferUnlit = 0x80u;
 static const uint GBufferCustomLit = 0xC0u;
+// Bit 5 of material.b (with model bits 0): Subsurface shading model (step R1; Dispersion is never stored in the opaque G-buffer).
+static const uint GBufferSubsurface = 0x20u;
 
 float gbuffer_encode_flags(uint lobes, uint shadingModel)
 {
+    if (shadingModel == ShadingModelSubsurface)
+        return float(GBufferSubsurface) / 255.0;
     const uint model = shadingModel == ShadingModelUnlit ? GBufferUnlit : shadingModel == ShadingModelToon ? GBufferToon
                      : shadingModel == ShadingModelCustomLit ? GBufferCustomLit : 0u;
-    return float((model == 0u ? (lobes & 0x3Fu) : 0u) | model) / 255.0;
+    return float((model == 0u ? (lobes & 0x1Fu) : 0u) | model) / 255.0;
 }
 
 uint gbuffer_flags(float encoded)
@@ -71,6 +75,38 @@ bool gbuffer_toon(float encoded)
 bool gbuffer_custom_lit(float encoded)
 {
     return (gbuffer_flags(encoded) & GBufferModelMask) == GBufferCustomLit;
+}
+
+bool gbuffer_subsurface(float encoded)
+{
+    const uint flags = gbuffer_flags(encoded);
+    return (flags & GBufferModelMask) == 0u && (flags & GBufferSubsurface) != 0u;
+}
+
+// Subsurface shading model settings packed into the G-buffer lobe target (RGBA32_UINT, step R1).
+struct SubsurfaceSettings
+{
+    float3 color;
+    float opacity;
+    float radius;
+};
+
+uint4 gbuffer_encode_subsurface(SubsurfaceSettings sss)
+{
+    const uint3 c = uint3(round(sqrt(saturate(sss.color)) * 255.0));
+    const uint op = uint(round(saturate(sss.opacity) * 255.0));
+    const uint rad = uint(round(saturate(sss.radius * 0.5) * 255.0));
+    return uint4(c.r | (c.g << 8u) | (c.b << 16u) | (op << 24u), rad, 0u, 0u);
+}
+
+SubsurfaceSettings gbuffer_decode_subsurface(uint4 packed)
+{
+    SubsurfaceSettings sss;
+    const float3 c = float3(packed.x & 0xFFu, (packed.x >> 8u) & 0xFFu, (packed.x >> 16u) & 0xFFu) / 255.0;
+    sss.color = c * c;
+    sss.opacity = float(packed.x >> 24u) / 255.0;
+    sss.radius = float(packed.y & 0xFFu) / 255.0 * 2.0;
+    return sss;
 }
 
 // A Custom Lit pixel's lobe target (RGBA32_UINT; it has no lobes, which are Default Lit only): x the Material Shader's slot
@@ -1068,7 +1104,10 @@ float scene_exposure(UniformBufferObject ubo, uint autoExposureTextureIndex, flo
 // A pixel's lobes from the G-buffer lobe targets (ubo indices), default when it has none.
 GBufferLobes gbuffer_load_lobes(UniformBufferObject ubo, int2 pixel, float encodedFlags)
 {
-    const uint flags = gbuffer_flags(encodedFlags) & 0x3Fu;
+    const uint raw = gbuffer_flags(encodedFlags);
+    if ((raw & GBufferModelMask) != 0u || (raw & GBufferSubsurface) != 0u)
+        return gbuffer_default_lobes();
+    const uint flags = raw & 0x1Fu;
     if (flags == 0u || ubo.gbufferLobesTextureIndex == 0xFFFFFFFF)
         return gbuffer_default_lobes();
     Texture2D<uint4> lobesTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.gbufferLobesTextureIndex, 0));

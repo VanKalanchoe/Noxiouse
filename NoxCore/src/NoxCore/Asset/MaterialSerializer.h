@@ -45,9 +45,11 @@ namespace Nox
             char magic[4]{};
             stream.read(magic, 4);
             const std::string kind(magic, 4);
-            // NMA6 (current), NMA5 (no material graph), NMA4 (no Custom Lit either), NMA3 (no shading model settings).
+            // NMA7 (current: Subsurface), NMA6 (no subsurface), NMA5 (no material graph), NMA4 (no Custom Lit either), NMA3 (no shading model settings).
             int version = 0;
             if (kind == std::string(Magic, 4))
+                version = 7;
+            else if (kind == std::string(MagicWithoutSubsurface, 4))
                 version = 6;
             else if (kind == std::string(MagicWithoutGraph, 4))
                 version = 5;
@@ -163,8 +165,8 @@ namespace Nox
             Read(stream, doubleSided);
             Read(stream, shadingModel);
             material.DoubleSided = doubleSided != 0;
-            material.ShadingModel = shadingModel <= static_cast<uint8_t>(MaterialShadingModel::CustomLit) ? static_cast<MaterialShadingModel>(shadingModel)
-                                                                                                          : MaterialShadingModel::DefaultLit;
+            material.ShadingModel = shadingModel <= static_cast<uint8_t>(MaterialShadingModel::Subsurface) ? static_cast<MaterialShadingModel>(shadingModel)
+                                                                                                           : MaterialShadingModel::DefaultLit;
             for (MaterialUVChannel& channel : material.UVChannels)
             {
                 Read(stream, channel.Source);
@@ -226,10 +228,15 @@ namespace Nox
                 Write(stream, parameter.Value);
                 WriteString(stream, parameter.Texture);
             }
+            // The Subsurface shading model's settings ("NMA7", step R1).
+            Write(stream, material.SubsurfaceColor);
+            Write(stream, material.SubsurfaceOpacity);
+            Write(stream, material.SubsurfaceRadius);
+            WriteTexture(stream, material.SubsurfaceColorTexture);
         }
 
-        // `version`: the file's (4: the toon settings only; 5: and the Custom Lit ones; 6: and the material graph).
-        static void ReadShadingFields(std::istream& stream, MaterialData& material, int version = 6)
+        // `version`: the file's (4: toon; 5: + Custom Lit; 6: + material graph; 7: + Subsurface).
+        static void ReadShadingFields(std::istream& stream, MaterialData& material, int version = 7)
         {
             Read(stream, material.ToonBands);
             Read(stream, material.ToonBandSoftness);
@@ -264,12 +271,19 @@ namespace Nox
                 ReadString(stream, parameter.Texture);
                 material.GraphParameters.push_back(std::move(parameter));
             }
+            if (version < 7)
+                return;
+            Read(stream, material.SubsurfaceColor);
+            Read(stream, material.SubsurfaceOpacity);
+            Read(stream, material.SubsurfaceRadius);
+            ReadTexture(stream, material.SubsurfaceColorTexture);
         }
 
     private:
-        // "NMA6": every field, the shading models' settings (toon, Custom Lit) and the material graph; "NMA5": without the graph; "NMA4":
+        // "NMA7": every field + Subsurface; "NMA6": without Subsurface; "NMA5": without the graph; "NMA4":
         // without the Custom Lit settings either; "NMA3": without any (read with their defaults). Older files are made again.
-        static constexpr char Magic[4] = { 'N', 'M', 'A', '6' };
+        static constexpr char Magic[4] = { 'N', 'M', 'A', '7' };
+        static constexpr char MagicWithoutSubsurface[4] = { 'N', 'M', 'A', '6' };
         static constexpr char MagicWithoutGraph[4] = { 'N', 'M', 'A', '5' };
         static constexpr char MagicToonOnly[4] = { 'N', 'M', 'A', '4' };
         static constexpr char MagicWithoutShading[4] = { 'N', 'M', 'A', '3' };

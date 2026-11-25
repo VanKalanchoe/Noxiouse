@@ -3,6 +3,7 @@
 #include "DDGICommon.slang"
 #include "PBRLighting.slang"
 #include "ToonShading.slang"
+#include "SubsurfaceShading.slang"
 #include "HeightFog.slang"
 #include "ShadowMaps.slang"
 #include "IrradianceVolumeCommon.slang"
@@ -422,6 +423,14 @@
             Texture2D<uint4> toonTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.gbufferLobesTextureIndex, 0));
             toonSettings = gbuffer_decode_toon(toonTex.Load(int3(int2(pixelCoord), 0)));
         }
+        // The Subsurface shading model (SubsurfaceShading.slang, step R1): its settings in the lobe target.
+        const bool subsurface = gbuffer_subsurface(materialSample.b) && ubo.gbufferLobesTextureIndex != 0xFFFFFFFF;
+        SubsurfaceSettings subsurfaceSettings;
+        if (subsurface)
+        {
+            Texture2D<uint4> sssTex = Texture2D<uint4>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.gbufferLobesTextureIndex, 0));
+            subsurfaceSettings = gbuffer_decode_subsurface(sssTex.Load(int3(int2(pixelCoord), 0)));
+        }
 
         float3 diffuseColor, specularColor, specularEnvironmentR90;
         lobe_base_reflectance(lobes, baseColor, metallic, diffuseColor, specularColor, specularEnvironmentR90);
@@ -478,8 +487,8 @@
         // result, which shadow-rays every light regardless of count instead of only light index 0
         // (see the brute-force loop below: only `i == 0` ever gets a real shadow term).
         float3 directLighting = float3(0.0);
-        // (ReSTIR DI's resampled light is physical shading: a toon pixel takes the light loop below.)
-        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF && !toon && !CustomLitPass)
+        // (ReSTIR DI's resampled light is physical shading: toon and subsurface pixels take the light loop below.)
+        if (pushConstant.directLightingMode == 1 && pushConstant.restirDIDiffuseTextureIndex != 0xFFFFFFFF && !toon && !subsurface && !CustomLitPass)
         {
             // De-modulated diffuse and specular (ReSTIRDIFinalShading.slang): modulated back with the same factors.
             Texture2D diffuseDITex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.restirDIDiffuseTextureIndex, 0));
@@ -566,15 +575,16 @@
                 }
                 const bool backLit = false;
 #else
+                const float NdotL_signed = NdotL_raw;
                 bool isDoubleSided = gbuffer_double_sided(materialSample.a);
-                const bool backLit = isDoubleSided && NdotL_raw < 0.0;
+                const bool backLit = isDoubleSided && !subsurface && NdotL_raw < 0.0;
                 if (backLit)
                 {
                     // Translucent thin cloth / foliage: the light behind comes through by the material's diffuse transmission
                     NdotL_raw = -NdotL_raw * gbuffer_back_light(materialSample.a);
                 }
 
-                if (NdotL_raw <= 0.0)
+                if (NdotL_raw <= 0.0 && !subsurface)
                 {
                     continue;
                 }
@@ -653,6 +663,9 @@
                 else if (toon) // the light and its shadow banded together (ToonShading.slang)
                     directLighting += toon_direct_light(ubo, toonSettings, diffuseColor, baseColor, metallic, n, v, l, NdotL, lightShadow,
                                                         light.color.rgb * light.color.w * attenuation);
+                else if (subsurface) // wrap diffuse + backlit transmission scatter (SubsurfaceShading.slang, step R1)
+                    directLighting += subsurface_direct_light(subsurfaceSettings, pbrInputs, n, v, l, NdotL_signed, lightShadow,
+                                                              light.color.rgb * light.color.w * attenuation);
                 else if (hasLobes)
                     directLighting += evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance);
                 else
@@ -660,6 +673,11 @@
 #endif
             }
         }
+
+        // AO Light Affect (step R2, Godot's AO_LIGHT_AFFECT): how much the material's own AO darkens direct light as well as ambient.
+        const float aoLightAffect = saturate(emissionSample.a);
+        if (aoLightAffect > 0.0)
+            directLighting *= lerp(1.0, albedoSample.a, aoLightAffect);
 
 #ifdef NOX_CUSTOM_LIT
         // The ambient as a white matte surface (diffuse) and a perfect mirror of this roughness (F0 = F90 = 1) receive it: what the
@@ -705,6 +723,8 @@
         IBLResult ibl = getIBLContributionOccluded(ubo, iblInputs, n, environmentReflection, occlusion, worldPos, volumeSkyVisibility,
                                                    volumeOccludedRadiance); // the reflection probes too
         float3 ambientDiffuse = ibl.diffuse;
+        if (subsurface)
+            ambientDiffuse += subsurface_ambient_scatter(subsurfaceSettings, ibl.diffuse, occlusion);
         float3 ambientSpecular = ibl.specular;
 
         float specularOcclusion = 1.0;

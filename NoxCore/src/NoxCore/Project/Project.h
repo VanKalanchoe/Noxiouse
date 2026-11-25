@@ -32,6 +32,9 @@ namespace Nox
         // The renderer's quality preset the project opens with (Renderer::RenderQuality by name): "Auto" picks the one this GPU
         // should run (Renderer::GetRecommendedQuality); "Custom" leaves the renderer's own defaults.
         std::string RenderQuality = "Auto";
+        // Rendering style (docs/Stylized_Rendering_And_Material_Graph_Plan_2026-11.md step 6): "Physical" (PBR default, flags Toon /
+        // Custom Lit materials in Project Settings and the Material Editor) or "Stylized".
+        std::string RenderingStyle = "Physical";
         // Settings kept on top of the preset (ray tracing resolution, GI, ...), and the packaged game's window mode.
         ProjectRendererSettings Renderer;
         std::string WindowMode = kDefaultWindowMode;

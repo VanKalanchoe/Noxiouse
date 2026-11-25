@@ -1,12 +1,14 @@
 #include "NoxCore/Renderer/CustomLitShaders.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
 #include <SDL3/SDL.h>
 
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Renderer/MaterialGraph.h"
 
 namespace Nox::CustomLitShaders
 {
@@ -19,6 +21,9 @@ namespace Nox::CustomLitShaders
 // A Material Shader (Custom Lit): how a material whose Shading Model is "Custom Lit" is lit.
 //   light()   runs once for every light that reaches the surface: that light's share of the pixel's light.
 //   ambient() runs once: the light from all around (sky, GI, reflections).
+//   surface() (optional, step 5): `void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)` computes baseColor, metallic,
+//             roughness, normal, emissive, occlusion, opacity, subsurfaceColor, etc. in Slang (works on any Shading Model when set as
+//             Surface Graph, or automatically on Custom Lit).
 // The pixel is the sum of light() over the lights + ambient() + the material's emissive (then the fog in front of it).
 // Inputs: CustomLitSurface s (position, normal, view, baseColor, metallic, roughness, occlusion, uv, screenUV, time,
 // parameters[0..3], textures), CustomLitLight l (direction, color, shadow, distance, type), CustomLitAmbient a (diffuse,
@@ -85,7 +90,9 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 std::string_view line(code.data() + start, end - start);
                 const size_t first = line.find_first_not_of(" \t");
                 const bool engineInclude = first != std::string_view::npos && line.substr(first).starts_with("#include") &&
-                                           (line.find("CustomLit.slang") != std::string_view::npos || line.find("shaderIO.h") != std::string_view::npos);
+                                           (line.find("CustomLit.slang") != std::string_view::npos ||
+                                            line.find("MaterialGraph.slang") != std::string_view::npos ||
+                                            line.find("shaderIO.h") != std::string_view::npos);
                 if (!engineInclude)
                     result.append(line);
                 if (last)
@@ -104,11 +111,144 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
             std::replace(safe.begin(), safe.end(), '\\', '/');
             return safe;
         }
+        // Strips // and /* */ comments so function / field detection ignores commented-out examples.
+        std::string StripComments(std::string_view code)
+        {
+            std::string out;
+            out.reserve(code.size());
+            bool lineComment = false, blockComment = false;
+            for (size_t i = 0; i < code.size(); ++i)
+            {
+                if (lineComment)
+                {
+                    if (code[i] == '\n') { lineComment = false; out.push_back('\n'); }
+                    continue;
+                }
+                if (blockComment)
+                {
+                    if (code[i] == '*' && i + 1 < code.size() && code[i + 1] == '/') { blockComment = false; ++i; }
+                    else if (code[i] == '\n') out.push_back('\n');
+                    continue;
+                }
+                if (code[i] == '/' && i + 1 < code.size() && code[i + 1] == '/') { lineComment = true; ++i; continue; }
+                if (code[i] == '/' && i + 1 < code.size() && code[i + 1] == '*') { blockComment = true; ++i; continue; }
+                out.push_back(code[i]);
+            }
+            return out;
+        }
+
+        bool ContainsSignature(std::string_view stripped, std::string_view returnType, std::string_view funcName)
+        {
+            size_t pos = 0;
+            while ((pos = stripped.find(funcName, pos)) != std::string_view::npos)
+            {
+                const bool leftBoundary = pos == 0 || (!std::isalnum(static_cast<unsigned char>(stripped[pos - 1])) && stripped[pos - 1] != '_');
+                size_t after = pos + funcName.size();
+                while (after < stripped.size() && std::isspace(static_cast<unsigned char>(stripped[after])))
+                    ++after;
+                const bool hasParen = after < stripped.size() && stripped[after] == '(';
+                if (leftBoundary && hasParen && pos > 0)
+                {
+                    size_t before = pos;
+                    while (before > 0 && std::isspace(static_cast<unsigned char>(stripped[before - 1])))
+                        --before;
+                    if (before >= returnType.size() && stripped.substr(before - returnType.size(), returnType.size()) == returnType)
+                    {
+                        const size_t retStart = before - returnType.size();
+                        if (retStart == 0 || (!std::isalnum(static_cast<unsigned char>(stripped[retStart - 1])) && stripped[retStart - 1] != '_'))
+                            return true;
+                    }
+                }
+                pos += funcName.size();
+            }
+            return false;
+        }
     }
 
     std::string_view TemplateSource()
     {
         return kTemplate;
+    }
+
+    bool HasSurfaceFunction(std::string_view code)
+    {
+        return ContainsSignature(StripComments(code), "void", "surface");
+    }
+
+    bool HasLightFunctions(std::string_view code)
+    {
+        const std::string stripped = StripComments(code);
+        return ContainsSignature(stripped, "float3", "light") && ContainsSignature(stripped, "float3", "ambient");
+    }
+
+    void DetectSurfaceOutputs(std::string_view code, uint32_t& outOutputs, uint32_t& outOutputs2)
+    {
+        outOutputs = 0;
+        outOutputs2 = 0;
+        const std::string stripped = StripComments(code);
+        auto writes = [&](const char* field) -> bool
+        {
+            const std::string needle = std::string(".") + field;
+            size_t pos = 0;
+            while ((pos = stripped.find(needle, pos)) != std::string::npos)
+            {
+                const size_t end = pos + needle.size();
+                if (end >= stripped.size() || (!std::isalnum(static_cast<unsigned char>(stripped[end])) && stripped[end] != '_'))
+                    return true;
+                pos = end;
+            }
+            return false;
+        };
+        if (writes("baseColor")) outOutputs |= MaterialGraphOutputBaseColor;
+        if (writes("metallic")) outOutputs |= MaterialGraphOutputMetallic;
+        if (writes("roughness")) outOutputs |= MaterialGraphOutputRoughness;
+        if (writes("normal")) outOutputs |= MaterialGraphOutputNormal;
+        if (writes("emissive")) outOutputs |= MaterialGraphOutputEmissive;
+        if (writes("occlusion")) outOutputs |= MaterialGraphOutputOcclusion;
+        if (writes("opacity")) outOutputs |= MaterialGraphOutputOpacity;
+        if (writes("specular")) outOutputs |= MaterialGraphOutputSpecular;
+        if (writes("specularColor")) outOutputs |= MaterialGraphOutputSpecularColor;
+        if (writes("clearCoat")) outOutputs |= MaterialGraphOutputClearCoat;
+        if (writes("clearCoatRoughness")) outOutputs |= MaterialGraphOutputClearCoatRoughness;
+        if (writes("clearCoatNormal")) outOutputs |= MaterialGraphOutputClearCoatNormal;
+        if (writes("sheenColor")) outOutputs |= MaterialGraphOutputSheenColor;
+        if (writes("sheenRoughness")) outOutputs |= MaterialGraphOutputSheenRoughness;
+        if (writes("anisotropy")) outOutputs |= MaterialGraphOutputAnisotropy;
+        if (writes("anisotropyDirection")) outOutputs |= MaterialGraphOutputAnisotropyDirection;
+        if (writes("transmission")) outOutputs |= MaterialGraphOutputTransmission;
+        if (writes("ior")) outOutputs |= MaterialGraphOutputIOR;
+        if (writes("thickness")) outOutputs |= MaterialGraphOutputThickness;
+        if (writes("attenuationColor")) outOutputs |= MaterialGraphOutputAttenuationColor;
+        if (writes("attenuationDistance")) outOutputs |= MaterialGraphOutputAttenuationDistance;
+        if (writes("diffuseTransmission")) outOutputs |= MaterialGraphOutputDiffuseTransmission;
+        if (writes("iridescence")) outOutputs |= MaterialGraphOutputIridescence;
+        if (writes("iridescenceThickness")) outOutputs |= MaterialGraphOutputIridescenceThickness;
+        if (writes("dispersion")) outOutputs |= MaterialGraphOutputDispersion;
+        if (writes("subsurfaceColor")) outOutputs2 |= MaterialGraphOutput2SubsurfaceColor;
+        if (writes("aoLightAffect")) outOutputs2 |= MaterialGraphOutput2AOLightAffect;
+        // Fallback: if surface() delegates to a helper without naming fields directly, enable core surface outputs (except normal).
+        if (outOutputs == 0 && outOutputs2 == 0)
+            outOutputs = MaterialGraphOutputBaseColor | MaterialGraphOutputMetallic | MaterialGraphOutputRoughness |
+                         MaterialGraphOutputEmissive | MaterialGraphOutputOcclusion | MaterialGraphOutputOpacity;
+    }
+
+    MaterialGraphSource BuildShaderSurfaceSource(const CustomLitSource& source, uint32_t outputs)
+    {
+        const std::string lineHeader = "#line 1 \"" + LinePath(source.File.empty() ? source.Path : source.File) + "\"\n";
+        std::string body = WithoutEngineIncludes(source.Code);
+        if (!body.empty() && body.back() != '\n')
+            body.push_back('\n');
+        MaterialGraphSource out;
+        out.Path = source.Path;
+        out.SurfaceCode = lineHeader + body;
+        out.Code = "static const uint Outputs = " + std::to_string(outputs) + "u;\n" +
+                   lineHeader + body +
+                   "#line 1 \"MaterialShaderSurface (generated)\"\n"
+                   "float opacity_mask(MaterialGraphInputs i) { return 1.0; }\n"
+                   "float pixel_depth_offset(MaterialGraphInputs i) { return 0.0; }\n"
+                   "float3 world_position_offset(MaterialGraphInputs i) { return float3(0.0); }\n"
+                   "void vertex_outputs(MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo) {}\n";
+        return out;
     }
 
     std::filesystem::path GeneratedFolder()
@@ -213,10 +353,15 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
         {
             return s.Graph && std::find(paths.begin(), paths.end(), s.Path) != paths.end();
         });
-        if (graphLighting)
+        const bool shaderSurface = std::any_of(sources.begin(), sources.end(), [&](const CustomLitSource& s)
+        {
+            return !s.Graph && HasSurfaceFunction(s.Code) && std::find(paths.begin(), paths.end(), s.Path) != paths.end();
+        });
+        if (graphLighting || shaderSurface)
             text += "#ifndef NOX_MATERIAL_GRAPH_MASK_ONLY\n#define NOX_MATERIAL_GRAPH_MASK_ONLY 1\n#endif\n"
-                    "#include \"MaterialGraph.slang\"\n\n"
-                    "// A material graph's inputs where its Custom Light / Custom Ambient run: from the surface the lighting sees (no second UV set\n"
+                    "#include \"MaterialGraph.slang\"\n\n";
+        if (graphLighting)
+            text += "// A material graph's inputs where its Custom Light / Custom Ambient run: from the surface the lighting sees (no second UV set\n"
                     "// or vertex colour there; texture mips from the surface's UV footprint).\n"
                     "MaterialGraphInputs material_graph_lit_inputs(CustomLitSurface s)\n{\n"
                     "    MaterialGraphInputs i = (MaterialGraphInputs)0;\n"
@@ -272,6 +417,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 "// whenever one is saved -- edit the graphs, not this file. Each is in a namespace of its own; material_graph_surface calls the\n"
                 "// one a pixel's material names by its slot (GpuMaterial::graphSlot).\n"
                 "#pragma once\n"
+                "#include \"CustomLit.slang\"\n"
                 "#include \"MaterialGraph.slang\"\n\n";
         std::vector<bool> graphPresent(graphPaths.size(), false);
         for (size_t slot = 0; slot < graphPaths.size(); ++slot)
@@ -306,6 +452,14 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 text += "    case " + std::to_string(slot) + "u: return MaterialGraph" + std::to_string(slot) + "::opacity_mask(i);\n";
         }
         text += "    default: return 1.0;\n    }\n}\n\n";
+        // Pixel Depth Offset (step R2: pushes depth further along the view ray in the visibility buffer and shadow maps). An unknown slot: 0.
+        text += "float material_graph_pixel_depth_offset(uint slot, MaterialGraphInputs i)\n{\n    switch (slot)\n    {\n";
+        for (size_t slot = 0; slot < graphPaths.size(); ++slot)
+        {
+            if (graphPresent[slot])
+                text += "    case " + std::to_string(slot) + "u: return MaterialGraph" + std::to_string(slot) + "::pixel_depth_offset(i);\n";
+        }
+        text += "    default: return 0.0;\n    }\n}\n\n";
         // World Position Offset (per vertex: every pass that draws the geometry). An unknown slot: no offset.
         text += "float3 material_graph_world_position_offset(uint slot, MaterialGraphInputs i)\n{\n    switch (slot)\n    {\n";
         for (size_t slot = 0; slot < graphPaths.size(); ++slot)
@@ -334,6 +488,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
         text += "// Generated by the Nox renderer from the project's material graphs (Renderer/CustomLitShaders.cpp, MaterialGraph.h): their Opacity\n"
                 "// Mask functions alone, for the ray tracing passes' alpha tests (material_graph_ray_mask). Edit the graphs, not this file.\n"
                 "#pragma once\n"
+                "#include \"CustomLit.slang\"\n"
                 "#ifndef NOX_MATERIAL_GRAPH_MASK_ONLY\n#define NOX_MATERIAL_GRAPH_MASK_ONLY 1\n#endif\n"
                 "#include \"MaterialGraph.slang\"\n\n";
         std::vector<bool> present(graphPaths.size(), false);
@@ -395,6 +550,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
         text += "// Generated by the Nox renderer from the project's material graphs (Renderer/CustomLitShaders.cpp, MaterialGraph.h): their surface\n"
                 "// functions alone, for the ray tracing passes that shade their hits (material_graph_ray_surface). Edit the graphs, not this file.\n"
                 "#pragma once\n"
+                "#include \"CustomLit.slang\"\n"
                 "#ifndef NOX_MATERIAL_GRAPH_MASK_ONLY\n#define NOX_MATERIAL_GRAPH_MASK_ONLY 1\n#endif\n"
                 "#include \"MaterialGraph.slang\"\n\n";
         std::vector<bool> present(graphPaths.size(), false);

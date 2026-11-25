@@ -24,6 +24,7 @@
 #include "PBRLighting.slang"
 #include "MaterialLobes.slang"
 #include "ToonShading.slang"
+#include "SubsurfaceShading.slang"
 #include "CustomLit.slang"
 // The Custom Lit build (CustomLit.slang; Renderer: the forward pipelines' Custom Lit variants) is this file compiled with NOX_CUSTOM_LIT by a
 // generated file that first includes every Material Shader of the project (custom_lit_light / custom_lit_ambient by slot): a Custom Lit
@@ -569,7 +570,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
     graphOut.anisotropyDirection = float2(1.0, 0.0);
     graphOut.ior = graphIn.material.ior > 0.0 ? graphIn.material.ior : 1.5;
     graphOut.attenuationColor = float3(1.0);
-    if (graphOutputs != 0u)
+    graphOut.subsurfaceColor = graphIn.material.subsurfaceColor;
+    if (graphOutputs != 0u || graphIn.material.graphOutputs2 != 0u)
     {
         material_graph_surface(graphIn.material.graphSlot, graphIn, graphOut);
         if ((graphOutputs & MaterialGraphOutputBaseColor) != 0u)
@@ -876,8 +878,10 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 #endif
             attenuation *= shadow;
 
-            float NdotL = clamp(dot(n, l), 0.001, 1.0);
-            if (dot(n, l) <= 0.0)
+            const float NdotL_signed = dot(n, l);
+            const bool isSubsurface = instance.shadingModel == ShadingModelSubsurface;
+            float NdotL = clamp(NdotL_signed, 0.001, 1.0);
+            if (NdotL_signed <= 0.0 && !isSubsurface)
             {
                 continue;
             }
@@ -896,6 +900,20 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
             if (instance.shadingModel == ShadingModelToon)
                 contribution = toon_direct_light(ubo, toon_settings(gpuMaterial), diffuseColor, baseColor.rgb, metallic, n, v, l, NdotL, 1.0,
                                                  lightRadiance);
+            else if (isSubsurface)
+            {
+                float3 sssColor = gpuMaterial.subsurfaceColor;
+                if (gpuMaterial.subsurfaceColorTextureIndex != 0xFFFFFFFF)
+                    sssColor *= SampleMaterialTextureBias(ubo, gpuMaterial.subsurfaceColorTextureIndex, sampLinearHandle,
+                                                          material_texture_uv(gpuMaterial, gpuMaterial.subsurfaceColorTextureSet, vertIn.uv0, vertIn.uv1),
+                                                          ubo.textureLodBias).rgb;
+#ifdef NOX_MATERIAL_GRAPH
+                if ((graphIn.material.graphOutputs2 & MaterialGraphOutput2SubsurfaceColor) != 0u)
+                    sssColor = saturate(graphOut.subsurfaceColor);
+#endif
+                contribution = subsurface_direct_light(subsurface_settings(gpuMaterial, sssColor), pbrInputs, n, v, l, NdotL_signed, 1.0,
+                                                       lightRadiance);
+            }
             else
                 contribution = hasLobes ? evaluateDirectLightLobes(ubo, pbrInputs, lobeShading, n, v, l, lightRadiance)
                                         : evaluateDirectLight(pbrInputs, lightRadiance);
@@ -980,6 +998,8 @@ FSOutput shadeTransparent(VSOutput vertIn, bool isFrontFace, PushConstantMeshlet
 #ifdef NOX_MATERIAL_GRAPH
     if ((graphOutputs & MaterialGraphOutputOcclusion) != 0u)
         ao = saturate(graphOut.occlusion);
+    if ((graphIn.material.graphOutputs2 & MaterialGraphOutput2AOLightAffect) != 0u)
+        directLighting *= lerp(1.0, ao, saturate(graphOut.aoLightAffect));
 #endif
     // The screen-space AO at this pixel is the opaque surface's behind it: right for a decal lying on that surface, wrong for glass
     // or anything standing in front of it (the background's occlusion, noisy and sliding as the camera moves). Only where this

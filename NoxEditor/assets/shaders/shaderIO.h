@@ -241,10 +241,18 @@ struct GpuMaterial
     // bits), its parameters (the graph's layout: the material's overrides, else the graph's defaults) and textures (0xFFFFFFFF: none).
     uint32_t graphSlot;
     uint32_t graphOutputs;
+    uint32_t graphOutputs2; // MaterialGraphOutput2* bits (step R1+: Subsurface Color, etc.)
     uint32_t graphTextureIndex[8];
     vec4 graphParameters[16];
     // Its World Position Offset's Max Displacement (MaterialGraphProgram::MaxDisplacement, world units; 0: no clamp, no larger bounds).
     float graphMaxDisplacement;
+
+    // The Subsurface shading model (MaterialData::Subsurface*; SubsurfaceShading.slang, step R1).
+    vec3 subsurfaceColor;
+    float subsurfaceOpacity;
+    float subsurfaceRadius;
+    uint32_t subsurfaceColorTextureIndex;
+    int32_t subsurfaceColorTextureSet;
 };
 
 // GpuMaterial::graphOutputs (MaterialGraphOutput, Renderer/MaterialGraph.h).
@@ -289,11 +297,17 @@ STATIC_CONST uint32_t MaterialGraphOutputAllLobes =
     MaterialGraphOutputIridescence | MaterialGraphOutputIridescenceThickness |
     MaterialGraphOutputDispersion;
 
+// GpuMaterial::graphOutputs2 (MaterialGraphOutput2, Renderer/MaterialGraph.h; step R1+).
+STATIC_CONST uint32_t MaterialGraphOutput2SubsurfaceColor = 1u << 0;
+STATIC_CONST uint32_t MaterialGraphOutput2AOLightAffect = 1u << 1;
+STATIC_CONST uint32_t MaterialGraphOutput2PixelDepthOffset = 1u << 2;
+
 // GpuMaterial::shadingModel (MaterialShadingModel, DataTypes.h).
 STATIC_CONST uint32_t ShadingModelDefaultLit = 0u;
 STATIC_CONST uint32_t ShadingModelUnlit = 1u;
 STATIC_CONST uint32_t ShadingModelToon = 2u;
 STATIC_CONST uint32_t ShadingModelCustomLit = 3u;
+STATIC_CONST uint32_t ShadingModelSubsurface = 4u;
 
 // GpuMaterial::lobes.
 STATIC_CONST uint32_t MaterialLobeClearcoat = 1u << 0;

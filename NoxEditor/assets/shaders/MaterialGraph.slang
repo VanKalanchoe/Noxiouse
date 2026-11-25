@@ -88,6 +88,9 @@ struct MaterialGraphOutputs
     float iridescence;
     float iridescenceThickness; // nanometers
     float dispersion;
+    // Extended outputs (step R1+):
+    float3 subsurfaceColor;
+    float aoLightAffect;
 };
 
 // Applies a material graph's connected lobe outputs (step 4g) over the evaluated GBufferLobes and diffuseTransmission.
@@ -434,6 +437,59 @@ bool material_graph_mask_cuts(float2 uv0, float2 uv1, float3 worldPos, float3 no
     if (!handled)
         return false;
     return material_graph_opacity_mask(material.graphSlot, i) < instance.alphaMaskCutoff;
+}
+
+// Pixel Depth Offset (step R2, Unreal's Pixel Depth Offset): pushes the pixel further away along the view ray by >= 0 world units
+// and returns the new Reverse-Z depth (<= baseDepth, compatible with SV_DepthLessEqual). Returns baseDepth unchanged when unused.
+float material_graph_apply_pdo(float2 uv0, float2 uv1, float3 worldPos, float3 normal, float4 vertexColor, bool isFrontFace,
+                               float4x4 viewProj, UniformBufferObject ubo, GpuMaterial material, InstanceData instance,
+                               float3 localPosition, float4 tangent, float baseDepth)
+{
+    const bool hasPdo = material.graphSlot != 0xFFFFFFFFu && (material.graphOutputs2 & MaterialGraphOutput2PixelDepthOffset) != 0u;
+    MaterialGraphInputs i = (MaterialGraphInputs)0;
+    i.uv0 = uv0;
+    i.uv0Dx = ddx(uv0);
+    i.uv0Dy = ddy(uv0);
+    i.uv1 = uv1;
+    i.uv1Dx = ddx(uv1);
+    i.uv1Dy = ddy(uv1);
+    i.position = worldPos + ubo.renderOrigin;
+    i.positionDx = ddx(worldPos);
+    i.positionDy = ddy(worldPos);
+    const float3 n = normalize(normal);
+    i.normal = instance.doubleSided != 0 && !isFrontFace ? -n : n;
+    i.pixelNormal = i.normal;
+    i.localPosition = localPosition;
+    i.localPositionDx = ddx(localPosition);
+    i.localPositionDy = ddy(localPosition);
+    i.tangent = tangent;
+    i.objectToWorld = instance.modelMatrix;
+    i.objectNormalMatrix = instance.normalMatrix;
+    i.objectBoundsMin = instance.boundsMin;
+    i.objectBoundsMax = instance.boundsMax;
+    i.vertexColor = vertexColor;
+    i.view = normalize(ubo.cameraWorldPos.xyz - worldPos);
+    const float4 clip = mul(viewProj, float4(worldPos, 1.0));
+    i.screenUV = clip.w > 1e-6 ? float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5) : float2(0.5);
+    i.screenUVDx = ddx(i.screenUV);
+    i.screenUVDy = ddy(i.screenUV);
+    i.pixelDepth = abs(mul(ubo.view, float4(worldPos, 1.0)).z);
+    i.sceneDepth = i.pixelDepth;
+    i.time = ubo.timeSeconds;
+    i.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
+    i.material = material;
+    i.mipFeedback = false;
+    i.ubo = ubo;
+    if (!hasPdo)
+        return baseDepth;
+    const float pdo = max(material_graph_pixel_depth_offset(material.graphSlot, i), 0.0);
+    if (pdo <= 0.0)
+        return baseDepth;
+    const float3 pushedPos = worldPos - i.view * pdo;
+    const float4 pushedClip = mul(viewProj, float4(pushedPos, 1.0));
+    if (pushedClip.w <= 1e-6)
+        return 0.0;
+    return min(baseDepth, max(pushedClip.z / pushedClip.w, 0.0));
 }
 
 #endif // NOX_MATERIAL_GRAPH_MASK_ONLY

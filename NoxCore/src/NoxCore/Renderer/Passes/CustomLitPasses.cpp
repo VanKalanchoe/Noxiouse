@@ -181,9 +181,13 @@ namespace Nox
 
     void Renderer::startCustomLitBuild(const std::vector<CustomLitSource>& shaderSources, const std::vector<ProjectMaterialGraph>& graphs)
     {
-        // The Material Shaders, and the material graphs whose Custom Light / Custom Ambient light a Custom Lit material (material graph
-        // step 4c part 5): each takes a slot of the same dispatcher, so the Custom Lit pass and the forward shader light both alike.
-        std::vector<CustomLitSource> sources = shaderSources;
+        // The Material Shaders (those defining light()/ambient()), and the material graphs whose Custom Light / Custom Ambient light a
+        // Custom Lit material (step 4c part 5): each takes a slot of the same dispatcher.
+        std::vector<CustomLitSource> sources;
+        sources.reserve(shaderSources.size());
+        for (const CustomLitSource& shader : shaderSources)
+            if (shader.Graph || CustomLitShaders::HasLightFunctions(shader.Code) || !CustomLitShaders::HasSurfaceFunction(shader.Code))
+                sources.push_back(shader);
         for (const ProjectMaterialGraph& graph : graphs)
             if (graph.Program.Valid && !graph.Program.LightCode.empty())
                 sources.push_back({ graph.Path, graph.Program.LightCode, std::string(), true });
@@ -199,7 +203,7 @@ namespace Nox
             graphNames.push_back(graph.Path);
             // A graph that connects no Material Output pin changes nothing: no case, no build (a new graph is one -- creating it
             // compiled every variant again, the user's test).
-            if (graph.Program.Valid && graph.Program.Outputs == 0)
+            if (graph.Program.Valid && graph.Program.Outputs == 0 && graph.Program.Outputs2 == 0)
                 continue;
             if (graph.Program.Valid)
             {
@@ -208,6 +212,21 @@ namespace Nox
             }
             else
                 graphErrors.emplace(graph.Path, graph.Program.Error);
+        }
+        // Step 5: hand-written surface() in Material Shaders (.slang) takes a slot in the same surface dispatcher.
+        for (const CustomLitSource& shader : shaderSources)
+        {
+            if (shader.Graph || !CustomLitShaders::HasSurfaceFunction(shader.Code))
+                continue;
+            uint32_t out1 = 0, out2 = 0;
+            CustomLitShaders::DetectSurfaceOutputs(shader.Code, out1, out2);
+            graphNames.push_back(shader.Path);
+            graphSources.push_back(CustomLitShaders::BuildShaderSurfaceSource(shader, out1));
+            MaterialGraphProgram prog;
+            prog.Valid = true;
+            prog.Outputs = out1;
+            prog.Outputs2 = out2;
+            programs.emplace(shader.Path, std::move(prog));
         }
         const std::vector<std::string> graphPaths = CustomLitShaders::AssignPathSlots(m_materialGraphRequestedPaths, graphNames);
         const size_t graphCount = programs.size();

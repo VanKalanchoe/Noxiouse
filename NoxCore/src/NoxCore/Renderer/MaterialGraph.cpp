@@ -80,13 +80,14 @@ namespace Nox
             uint32_t ParameterSlots = 0;
             uint32_t TextureSlots = 0;
             uint32_t Outputs = 0;
+            uint32_t Outputs2 = 0;
             std::string Error;
             // Which function is being generated: surface() (every Material Output pin but Opacity Mask and World Position Offset),
             // opacity_mask() or world_position_offset() (that pin alone; the Material Output then writes `return`). The offset is
             // computed per vertex: no screen derivatives, nothing that needs the pixel on screen.
             // custom_light() / custom_ambient(): the Custom Light / Custom Ambient pins (the Lit Surface, Light and Ambient Light nodes
             // only there).
-            enum class Function { Surface, OpacityMask, WorldPositionOffset, VertexOutputs, CustomLight, CustomAmbient };
+            enum class Function { Surface, OpacityMask, PixelDepthOffset, WorldPositionOffset, VertexOutputs, CustomLight, CustomAmbient };
             Function Pass = Function::Surface;
             // Vertex Interpolator slot assignment (step 4f): node Id -> slot 0..3 and component count 1..4.
             std::unordered_map<uint32_t, uint32_t> InterpolatorSlots;
@@ -970,7 +971,10 @@ namespace Nox
                        V("Diffuse Transmission", "Per pixel: thin-surface back-lit transmission 0..1 (Float)"),
                        V("Iridescence", "Per pixel: thin-film iridescence strength 0..1 (Float)"),
                        V("Iridescence Thickness", "Per pixel: thin-film thickness in nanometers, e.g. 100..800 (Float)"),
-                       V("Dispersion", "Per pixel: chromatic dispersion strength >= 0 (Float)") }, {},
+                       V("Dispersion", "Per pixel: chromatic dispersion strength >= 0 (Float)"),
+                       V("Subsurface Color", "Per pixel (Subsurface shading model): colour of light scattered beneath the surface (skin, wax, marble) (Float3)"),
+                       V("AO Light Affect", "Per pixel: how much Ambient Occlusion darkens direct light, 0 ambient only .. 1 full direct darkening (Float)"),
+                       V("Pixel Depth Offset", "Per pixel: pushes the pixel further away along the view ray in world units >= 0 (Float)") }, {},
                      // (appended after the pins: links name pins by index, so graphs saved before World Position Offset keep theirs)
                      { { "Max World Position Offset Displacement", 0.0f } },
                      [](EmitArgs& args)
@@ -1040,6 +1044,18 @@ namespace Nox
                                  args.Ctx.Body += "    return 1.0;\n";
                              return true;
                          }
+                         if (args.Ctx.Pass == Context::Function::PixelDepthOffset)
+                         {
+                             constexpr size_t pdoPin = 33;
+                             if (args.Connected.size() > pdoPin && args.Connected[pdoPin])
+                             {
+                                 args.Ctx.Body += "    return max(" + Convert(args.In[pdoPin], 1).Code + ", 0.0);\n";
+                                 args.Ctx.Outputs2 |= MaterialGraphOutput2PixelDepthOffset;
+                             }
+                             else
+                                 args.Ctx.Body += "    return 0.0;\n";
+                             return true;
+                         }
                          struct Pin { size_t Index; const char* Field; int Components; uint32_t Bit; const char* Before; const char* After; };
                          const Pin pins[] = {
                              { 0, "baseColor", 3, MaterialGraphOutputBaseColor, "max(", ", float3(0.0))" },
@@ -1075,6 +1091,21 @@ namespace Nox
                              const Value value = Convert(args.In[pin.Index], pin.Components);
                              args.Ctx.Body += std::string("    o.") + pin.Field + " = " + pin.Before + value.Code + pin.After + ";\n";
                              args.Ctx.Outputs |= pin.Bit;
+                         }
+                         // Extended surface pins (MaterialGraphOutput2, step R1+).
+                         constexpr size_t subsurfaceColorPin = 31;
+                         if (args.Connected.size() > subsurfaceColorPin && args.Connected[subsurfaceColorPin])
+                         {
+                             const Value value = Convert(args.In[subsurfaceColorPin], 3);
+                             args.Ctx.Body += "    o.subsurfaceColor = saturate(" + value.Code + ");\n";
+                             args.Ctx.Outputs2 |= MaterialGraphOutput2SubsurfaceColor;
+                         }
+                         constexpr size_t aoLightAffectPin = 32;
+                         if (args.Connected.size() > aoLightAffectPin && args.Connected[aoLightAffectPin])
+                         {
+                             const Value value = Convert(args.In[aoLightAffectPin], 1);
+                             args.Ctx.Body += "    o.aoLightAffect = saturate(" + value.Code + ");\n";
+                             args.Ctx.Outputs2 |= MaterialGraphOutput2AOLightAffect;
                          }
                          return true;
                      });
@@ -1140,11 +1171,13 @@ namespace Nox
         constexpr uint32_t kAmbientPin = 10;
         constexpr uint32_t kVertexNormalPin = 11;
         constexpr uint32_t kVertexColorPin = 12;
+        constexpr uint32_t kPdoPin = 33;
         auto pinFunction = [&](uint32_t pin)
         {
             return pin == kMaskPin ? Context::Function::OpacityMask : pin == kOffsetPin ? Context::Function::WorldPositionOffset
                  : pin == kLightPin ? Context::Function::CustomLight : pin == kAmbientPin ? Context::Function::CustomAmbient
                  : (pin == kVertexNormalPin || pin == kVertexColorPin) ? Context::Function::VertexOutputs
+                 : pin == kPdoPin ? Context::Function::PixelDepthOffset
                  : Context::Function::Surface;
         };
         auto neededFor = [&](Context::Function function, const std::vector<uint32_t>& extraRoots = {})
@@ -1177,12 +1210,13 @@ namespace Nox
         };
 
         const std::vector<bool> maskNeeded = neededFor(Context::Function::OpacityMask);
+        const std::vector<bool> pdoNeeded = neededFor(Context::Function::PixelDepthOffset);
         const std::vector<bool> surfaceNeeded = neededFor(Context::Function::Surface);
         std::vector<uint32_t> interpolatorRoots;
         std::unordered_map<uint32_t, uint32_t> interpolatorSlots;
         for (uint32_t index = 0; index < compiled.Nodes.size(); ++index)
         {
-            if ((!maskNeeded[index] && !surfaceNeeded[index]) || !compiled.Nodes[index].Type ||
+            if ((!maskNeeded[index] && !pdoNeeded[index] && !surfaceNeeded[index]) || !compiled.Nodes[index].Type ||
                 compiled.Nodes[index].Type->TypeName != "Vertex Interpolator")
                 continue;
             if (interpolatorSlots.size() >= MaterialGraphMaxInterpolators)
@@ -1203,6 +1237,9 @@ namespace Nox
         Context maskContext;
         maskContext.Pass = Context::Function::OpacityMask;
         maskContext.InterpolatorSlots = interpolatorSlots;
+        Context pdoContext;
+        pdoContext.Pass = Context::Function::PixelDepthOffset;
+        pdoContext.InterpolatorSlots = interpolatorSlots;
         Context offsetContext;
         offsetContext.Pass = Context::Function::WorldPositionOffset;
         offsetContext.InterpolatorSlots = interpolatorSlots;
@@ -1327,7 +1364,10 @@ namespace Nox
         continueFrom(context, maskContext);
         if (!generate(context, surfaceNeeded, normalPrePass.empty() ? nullptr : &normalPrePass))
             return program;
-        continueFrom(offsetContext, context);
+        continueFrom(pdoContext, context);
+        if (!generate(pdoContext, pdoNeeded))
+            return program;
+        continueFrom(offsetContext, pdoContext);
         if (!generate(offsetContext, neededFor(Context::Function::WorldPositionOffset)))
             return program;
         // The lighting last: its parameters after the others' (a lighting edit moves no slot the other functions use).
@@ -1351,6 +1391,7 @@ namespace Nox
         program.TextureSlots = lastContext.TextureSlots;
         const uint32_t geometryOutputs = context.Outputs | maskContext.Outputs | offsetContext.Outputs | vertexContext.Outputs;
         program.Outputs = geometryOutputs | lightContext.Outputs | ambientContext.Outputs;
+        program.Outputs2 = context.Outputs2 | pdoContext.Outputs2;
         if (const NodeGraphValue* displacement = Property(outputNode, "Max World Position Offset Displacement"))
             if (const float* value = std::get_if<float>(displacement))
                 program.MaxDisplacement = std::max(*value, 0.0f);
@@ -1361,9 +1402,10 @@ namespace Nox
         program.SurfaceCode = std::format("void surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n", context.Body);
         program.Code = std::format("static const uint Outputs = {}u;\n\nvoid surface(MaterialGraphInputs i, inout MaterialGraphOutputs o)\n{{\n{}}}\n\n"
                                    "float opacity_mask(MaterialGraphInputs i)\n{{\n{}}}\n\n"
+                                   "float pixel_depth_offset(MaterialGraphInputs i)\n{{\n{}}}\n\n"
                                    "float3 world_position_offset(MaterialGraphInputs i)\n{{\n{}}}\n\n"
                                    "void vertex_outputs(MaterialGraphInputs i, inout MaterialGraphVertexOutputs vo)\n{{\n{}}}\n",
-                                   geometryOutputs, context.Body, maskContext.Body, offsetContext.Body, vertexContext.Body);
+                                   geometryOutputs, context.Body, maskContext.Body, pdoContext.Body, offsetContext.Body, vertexContext.Body);
         // The graph's lighting for a Custom Lit material (Custom Light / Custom Ambient): its inputs from the Custom Lit surface
         // (material_graph_lit_inputs, generated into CustomLitShaders.slang with it), so the graph's other nodes read there too.
         if ((program.Outputs & (MaterialGraphOutputCustomLight | MaterialGraphOutputCustomAmbient)) != 0)

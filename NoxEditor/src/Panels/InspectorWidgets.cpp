@@ -849,14 +849,31 @@ namespace Nox
             c.AddFloat("Alpha Cutoff", &data.AlphaMaskCutoff, 0.005f, 0.0f, 1.0f, "{:.3f}", notifySaved);
         c.AddBool("Two Sided", &data.DoubleSided, notifySaved);
 
-        c.AddEnum("Shading Model", { "Default Lit", "Unlit", "Toon", "Custom Lit" }, static_cast<int>(data.ShadingModel),
+        c.AddEnum("Shading Model", { "Default Lit", "Unlit", "Toon", "Custom Lit", "Subsurface" }, static_cast<int>(data.ShadingModel),
             [&data, notifySavedRebuild](int idx)
             {
                 data.ShadingModel = static_cast<MaterialShadingModel>(idx);
                 notifySavedRebuild();
             });
 
-        if (data.ShadingModel == MaterialShadingModel::Toon)
+        // Step 6: gentle advisory when the project's Rendering Style is Physical and this material uses a non-physical shading model.
+        if (const Ref<Project> activeProj = Project::GetActive();
+            activeProj && activeProj->GetConfig().RenderingStyle != "Stylized" &&
+            (data.ShadingModel == MaterialShadingModel::Toon || data.ShadingModel == MaterialShadingModel::CustomLit))
+        {
+            c.AddStatusNote("Project Rendering Style is Physical (non-physical shading model; switch to Stylized in Project Settings if intentional).",
+                            NoxUI::ThemeColor("StatusWarning", { 0.95f, 0.75f, 0.25f, 1.0f }));
+        }
+
+        if (data.ShadingModel == MaterialShadingModel::Subsurface)
+        {
+            c.AddSubheader("Subsurface Scattering");
+            c.AddColor3("Subsurface Color", &data.SubsurfaceColor, notifySaved);
+            c.AddSlider("Opacity (Thickness)", &data.SubsurfaceOpacity, 0.0f, 1.0f, notifySaved);
+            c.AddSlider("Scatter Radius", &data.SubsurfaceRadius, 0.0f, 2.0f, notifySaved);
+            addTextureSlot("Subsurface Texture", data.SubsurfaceColorTexture.Path);
+        }
+        else if (data.ShadingModel == MaterialShadingModel::Toon)
         {
             c.AddSubheader("Toon Shading");
             c.AddInt32("Bands", &data.ToonBands, 1, 8, notifySaved);
@@ -922,13 +939,17 @@ namespace Nox
             addTextureSlot("Custom Tex 2 (lin)", data.CustomTexture2.Path);
         }
 
-        // Material Graph section
+        // Material Graph / Surface Shader section (step 4 & step 5)
         {
-            c.AddSubheader("Material Graph");
+            c.AddSubheader("Surface Graph / Shader");
             auto assets = Project::GetActive() ? Project::GetActive()->GetEditorAssetManager() : nullptr;
-            const AssetHandle currentGraph = (assets && !data.SurfaceGraph.empty())
-                ? assets->FindHandleByPath(data.SurfaceGraph, AssetType::MaterialGraph)
-                : AssetHandle(0);
+            AssetHandle currentGraph = 0;
+            if (assets && !data.SurfaceGraph.empty())
+            {
+                currentGraph = assets->FindHandleByPath(data.SurfaceGraph, AssetType::MaterialGraph);
+                if (currentGraph == 0)
+                    currentGraph = assets->FindHandleByPath(data.SurfaceGraph, AssetType::MaterialShader);
+            }
 
             auto grRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
             grRow->WidthMode = NoxUI::UISizeMode::Fill;
@@ -937,7 +958,6 @@ namespace Nox
             pickBtn->FlexWeight = 1.0f;
             pickBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
             pickBtn->TextElide = NoxUI::UITextElide::Middle;
-        pickBtn->TextElide = NoxUI::UITextElide::Middle; // an asset's name keeps its start and its end
             NoxUI::UIButton* grBtnPtr = pickBtn.Get().get();
             pickBtn->OnClick = [grBtnPtr, currentGraph, assets, &data, notifySavedRebuild]()
             {
@@ -946,7 +966,7 @@ namespace Nox
                     return;
                 ShowSearchableAssetPicker(
                     *ctx, grBtnPtr->GetBounds(), "None", currentGraph,
-                    CollectAssetPickerOptions({ AssetType::MaterialGraph }),
+                    CollectAssetPickerOptions({ AssetType::MaterialGraph, AssetType::MaterialShader }),
                     [assets, &data, notifySavedRebuild](AssetHandle picked)
                     {
                         data.SurfaceGraph = picked != 0 ? assets->GetMetadata(picked).FilePath.generic_string() : std::string();
@@ -954,7 +974,20 @@ namespace Nox
                     });
             };
             grRow->AddChild(pickBtn);
-            if (currentGraph != 0 && callbacks.OpenAsset)
+            const bool isShaderAsset = assets && currentGraph != 0 &&
+                                       assets->GetMetadata(currentGraph).Type == AssetType::MaterialShader;
+            if (currentGraph != 0 && isShaderAsset)
+            {
+                auto openExtBtn = NoxUI::Button("Open", [assets, currentGraph]()
+                {
+                    const std::string rel = assets->GetMetadata(currentGraph).FilePath.generic_string();
+                    const std::string url = "file:///" + std::filesystem::absolute(Project::GetActiveAssetDirectory() / rel).generic_string();
+                    SDL_OpenURL(url.c_str());
+                }).Tooltip("Open .slang file in external code editor");
+                openExtBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                grRow->AddChild(openExtBtn);
+            }
+            else if (currentGraph != 0 && callbacks.OpenAsset)
             {
                 auto openBtn = NoxUI::Button("Open", [callbacks, currentGraph]() { callbacks.OpenAsset(currentGraph); });
                 openBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
@@ -966,7 +999,7 @@ namespace Nox
                 {
                     data.SurfaceGraph.clear();
                     notifySavedRebuild();
-                }).Tooltip("Clear surface graph");
+                }).Tooltip("Clear surface graph / shader");
                 clrBtn->WidthMode = NoxUI::UISizeMode::Fixed;
                 clrBtn->HeightMode = NoxUI::UISizeMode::Fixed;
                 clrBtn->FixedSize = { 24.0f, 24.0f };
@@ -975,7 +1008,11 @@ namespace Nox
             }
             c.AddRow("Surface Graph", grRow);
 
-            if (!data.SurfaceGraph.empty() && currentGraph != 0)
+            if (!data.SurfaceGraph.empty() && currentGraph != 0 && isShaderAsset)
+            {
+                c.AddStatusNote("Hand-written Slang surface() shader active.", NoxUI::ThemeColor("StatusGood", { 0.36f, 0.80f, 0.46f, 1.0f }));
+            }
+            else if (!data.SurfaceGraph.empty() && currentGraph != 0)
             {
                 const Ref<NodeGraphAsset> graphAsset = AssetManager::GetAsset<NodeGraphAsset>(currentGraph);
                 const MaterialGraphProgram program = graphAsset ? CompileMaterialGraph(graphAsset->Graph) : MaterialGraphProgram{};

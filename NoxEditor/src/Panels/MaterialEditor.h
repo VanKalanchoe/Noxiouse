@@ -43,6 +43,7 @@ namespace Nox
         Ref<NoxUI::UIElement> m_Status;
         Ref<NoxUI::UIElement> m_Preview;
         std::unordered_map<std::string, bool> m_ExpandedSections;
+        std::string m_LastRenderingStyle;
         bool m_Rebuild = true;
     };
 }

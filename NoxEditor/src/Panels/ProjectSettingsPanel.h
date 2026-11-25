@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <future>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -40,9 +41,16 @@ namespace Nox
         // Once a frame while shown.
         void Update();
         // Another project opened: the rows read its settings (built again).
-        void MarkDirty() { m_Rebuild = true; }
+        void MarkDirty() { m_Rebuild = true; m_AuditCompleted = false; }
 
     private:
+        struct MaterialAuditResult
+        {
+            std::vector<std::string> NonPhysical;
+            size_t TotalMaterials = 0;
+        };
+
+        void StartMaterialAudit();
         void RebuildSurfaces();
         void CommitSurface(size_t index, const std::string& name);
 
@@ -53,6 +61,10 @@ namespace Nox
         Ref<NoxUI::UIStackBox> m_Surfaces;
         std::vector<Ref<NoxUI::UITextInput>> m_SurfaceFields; // index i: surface i (none for "Default")
         std::unordered_map<std::string, bool> m_Expanded;
+        std::future<MaterialAuditResult> m_AuditFuture;
+        MaterialAuditResult m_AuditResult;
+        bool m_AuditCompleted = false;
+        bool m_AuditRunning = false;
         bool m_Rebuild = false;
         bool m_SurfacesDirty = false;
     };
