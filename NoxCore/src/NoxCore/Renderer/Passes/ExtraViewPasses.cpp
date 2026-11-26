@@ -288,9 +288,13 @@ namespace Nox
                 });
 
             // The scene's particles, from this camera (asset previews have none): blended like the camera's, without OIT.
-            if (!view.Preview && !(flags & ExtraViewNoParticles) && !m_particleBatches.empty() && m_particlePipeline && m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex])
+            const bool hasExtraCpuBuffer = m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex];
+            const bool hasExtraParticles = std::any_of(m_particleBatches.begin(), m_particleBatches.end(),
+                [hasExtraCpuBuffer](const ParticleBatch& b) { return b.GpuIndirectBuffer != nullptr || hasExtraCpuBuffer; });
+            if (!view.Preview && !(flags & ExtraViewNoParticles) && hasExtraParticles && m_particlePipeline)
             {
                 const bool particleShadows = getRayTracedShadowsActive() && resources.TLAS.IsValid();
+                const uint64_t cpuParticlesRef = hasExtraCpuBuffer ? bufferReadRef(m_particleBuffers[frameIndex]) : 0ull;
                 m_renderGraph.AddPass(kParticleNames[index], RGPassFlags::Raster,
                     [&](RGBuilder& builder)
                     {
@@ -305,7 +309,7 @@ namespace Nox
                         }
                         builder.SetRenderArea(extent);
                     },
-                    [this, uniformBuffer, depth, particleShadows](RGPassContext& context)
+                    [this, uniformBuffer, depth, particleShadows, cpuParticlesRef](RGPassContext& context)
                     {
                         nri::CommandBuffer& cmd = context.Cmd();
                         cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_particlePipeline);
@@ -322,10 +326,13 @@ namespace Nox
                         std::stable_sort(batches.begin(), batches.end(), [](const ParticleBatch& a, const ParticleBatch& b) { return a.Distance > b.Distance; });
                         for (const ParticleBatch& batch : batches)
                         {
+                            if (!batch.GpuIndirectBuffer && cpuParticlesRef == 0ull)
+                                continue;
                             cmd.setColorBlendEquation(0, batch.Settings.Additive ? additive : covering);
                             shaderio::PushConstantParticles push{};
                             push.matrixReference = bufferReadRef(*uniformBuffer);
-                            push.particlesReference = bufferReadRef(m_particleBuffers[frameIndex]);
+                            push.particlesReference = batch.GpuIndirectBuffer ? batch.GpuRenderParticlesRef : cpuParticlesRef;
+                            push.countersReference = batch.GpuIndirectBuffer ? batch.GpuCountersRef : 0ull;
                             push.firstParticle = batch.First;
                             push.particleCount = batch.Count;
                             push.textureIndex = batch.Settings.TextureSlot;
@@ -337,7 +344,10 @@ namespace Nox
                             push.depthTextureIndex = context.Slot(depth);
                             push.softDistance = batch.Settings.SoftDistance;
                             cmd.pushData(&push, sizeof(push));
-                            nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
+                            if (batch.GpuIndirectBuffer)
+                                nri::drawMeshTasksIndirect(cmd, *batch.GpuIndirectBuffer, 0, 1, 12u);
+                            else
+                                nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
                         }
                         cmd.setColorBlendEnable(0, false);
                     });

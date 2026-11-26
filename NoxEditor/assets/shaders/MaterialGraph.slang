@@ -519,7 +519,7 @@ MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject ubo, GpuRayTra
     i.position = position + ubo.renderOrigin;
     i.normal = dot(normal, normal) > 1e-12 ? normalize(normal) : float3(0.0, 0.0, 1.0);
     // Local Position: the mesh's own vertices (before skinning, morphs and World Position Offset), not the ray tracing scene's.
-    PackedVertex* meshVertices = (PackedVertex*)instance.vertexBufferAddress;
+    BufferRef<PackedVertex> meshVertices = BufferRef<PackedVertex>(instance.vertexBufferAddress);
     i.localPosition = unpackVertex(meshVertices[corners.x]).pos * w.x + unpackVertex(meshVertices[corners.y]).pos * w.y +
                       unpackVertex(meshVertices[corners.z]).pos * w.z;
     // The tangent as the hit's vertices have it (a skinned or moved instance's from its deformed vertices), through the instance's
@@ -527,7 +527,7 @@ MaterialGraphInputs material_graph_ray_inputs(UniformBufferObject ubo, GpuRayTra
     float3 localTangent = v0.tangent.xyz * w.x + v1.tangent.xyz * w.y + v2.tangent.xyz * w.z;
     if (instance.skinnedVertexBufferAddress != 0)
     {
-        SkinnedVertex* deformed = (SkinnedVertex*)instance.skinnedVertexBufferAddress;
+        BufferRef<SkinnedVertex> deformed = BufferRef<SkinnedVertex>(instance.skinnedVertexBufferAddress);
         localTangent = deformed[corners.x].tangent.xyz * w.x + deformed[corners.y].tangent.xyz * w.y + deformed[corners.z].tangent.xyz * w.z;
     }
     i.tangent = float4(mul((float3x3)world, localTangent), v0.tangent.w);

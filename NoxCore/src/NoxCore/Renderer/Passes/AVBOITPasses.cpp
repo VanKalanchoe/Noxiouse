@@ -92,11 +92,11 @@ namespace Nox
         // The alpha-blended particles that go into the OIT targets (addParticlePass), drawn far to near like there (no order needed).
         std::vector<ParticleBatch> particleBatches;
         const bool particleBuffer = m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex];
-        if (particleBuffer && m_particleOITPipeline)
+        if (m_particleOITPipeline)
         {
             for (const ParticleBatch& batch : m_particleBatches)
             {
-                if (!batch.Settings.Additive)
+                if (!batch.Settings.Additive && (batch.GpuIndirectBuffer != nullptr || particleBuffer))
                     particleBatches.push_back(batch);
             }
         }
@@ -224,7 +224,8 @@ namespace Nox
                         {
                             shaderio::PushConstantParticles push{};
                             push.matrixReference = uniforms;
-                            push.particlesReference = particles;
+                            push.particlesReference = batch.GpuIndirectBuffer ? batch.GpuRenderParticlesRef : particles;
+                            push.countersReference = batch.GpuIndirectBuffer ? batch.GpuCountersRef : 0ull;
                             push.firstParticle = batch.First;
                             push.particleCount = batch.Count;
                             push.textureIndex = batch.Settings.TextureSlot;
@@ -234,7 +235,10 @@ namespace Nox
                             push.depthTextureIndex = depthSlot;
                             push.softDistance = batch.Settings.SoftDistance;
                             cmd.pushData(&push, sizeof(push));
-                            nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
+                            if (batch.GpuIndirectBuffer)
+                                nri::drawMeshTasksIndirect(cmd, *batch.GpuIndirectBuffer, 0, 1, 12u);
+                            else
+                                nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
                         }
                     }
                     cmd.setColorWriteMask(0, nri::ColorComponent::All);

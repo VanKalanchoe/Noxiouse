@@ -2632,15 +2632,63 @@ namespace Nox
                      [entity](CardBuilder& c) mutable
                      {
                          auto& comp = entity.GetComponent<ParticleEmitterComponent>();
+                         c.AddBool("GPU Simulated", &comp.GpuSimulated, [&comp]()
+                         {
+                             comp.Simulation.GpuNeedsReset = true;
+                             comp.Simulation.Particles.clear();
+                         });
                          c.AddBool("Emitting", &comp.Emitting);
                          c.AddBool("Looping", &comp.Looping);
                          c.AddFloat("Duration (s)", &comp.Duration, 0.1f, 0.05f, 600.0f);
-                         c.AddFloat("Spawn Rate", &comp.SpawnRate, 0.5f, 0.0f, 5000.0f);
-                         c.AddUInt32("Burst", &comp.Burst, 0, 10000);
-                         c.AddUInt32("Max Particles", &comp.MaxParticles, 1, 50000);
-                         c.AddEnum("Shape", { "Point", "Sphere", "Box", "Cone" }, static_cast<int>(comp.Shape),
+                         c.AddFloat("Spawn Rate", &comp.SpawnRate, 1.0f, 0.0f, 100000.0f);
+                         c.AddUInt32("Burst", &comp.Burst, 0, 100000);
+                         c.AddUInt32("Max Particles", &comp.MaxParticles, 64, 250000);
+                         c.AddEnum("Shape", { "Point", "Sphere", "Box", "Cone", "Mesh Surface" }, static_cast<int>(comp.Shape),
                              [&comp](int i) { comp.Shape = static_cast<ParticleShape>(i); });
+                         c.AddVec3("Shape Size (m)", &comp.ShapeSize, 0.05f);
+                         c.AddFloat("Cone Angle", &comp.ConeAngle, 0.5f, 0.0f, 90.0f);
+                         c.AddFloat("Surface Normal Speed (m/s)", &comp.MeshSurfaceNormalSpeed, 0.1f, -50.0f, 50.0f);
+                         c.AddFloat("Lifetime Min", &comp.LifetimeMin, 0.05f, 0.05f, 60.0f);
+                         c.AddFloat("Lifetime Max", &comp.LifetimeMax, 0.05f, 0.05f, 60.0f);
+                         c.AddVec3("Velocity (m/s)", &comp.Velocity, 0.1f);
+                         c.AddVec3("Velocity Random", &comp.VelocityRandom, 0.1f);
+                         c.AddFloat("Gravity", &comp.Gravity, 0.05f, -10.0f, 10.0f);
+                         c.AddFloat("Drag", &comp.Drag, 0.05f, 0.0f, 20.0f);
+                         c.AddFloat("Size Start (m)", &comp.SizeStart, 0.01f, 0.001f, 50.0f);
+                         c.AddFloat("Size End (m)", &comp.SizeEnd, 0.01f, 0.0f, 50.0f);
+                         c.AddColor4("Color Start", &comp.ColorStart);
+                         c.AddColor4("Color End", &comp.ColorEnd);
+                         c.AddFloat("Intensity (HDR)", &comp.Intensity, 0.1f, 0.0f, 50.0f);
+                         c.AddEnum("Blend", { "Additive", "Alpha" }, static_cast<int>(comp.Blend),
+                             [&comp](int i) { comp.Blend = static_cast<ParticleBlend>(i); });
+                         c.AddBool("Lit", &comp.Lit);
+                         c.AddBool("Soft Particles", &comp.SoftParticles);
+                         c.AddBool("Local Space", &comp.LocalSpace);
                          c.AddAssetSlot("Texture", comp.Texture, { AssetType::Texture2D }, [&comp](AssetHandle h) { comp.Texture = h; }, "Soft Dot");
+
+                         // GPU VFX Module Stack (Step V2)
+                         c.AddBool("Curl Noise", &comp.CurlNoiseEnabled);
+                         c.AddFloat("Curl Strength", &comp.CurlNoiseStrength, 0.2f, 0.0f, 100.0f);
+                         c.AddFloat("Curl Frequency", &comp.CurlNoiseFrequency, 0.05f, 0.05f, 20.0f);
+                         c.AddFloat("Curl Scroll Speed", &comp.CurlNoiseScrollSpeed, 0.05f, 0.0f, 10.0f);
+
+                         c.AddBool("Vortex", &comp.VortexEnabled);
+                         c.AddFloat("Vortex Strength", &comp.VortexStrength, 0.2f, -100.0f, 100.0f);
+                         c.AddFloat("Vortex Radial Pull", &comp.VortexRadialPull, 0.2f, -50.0f, 50.0f);
+                         c.AddFloat("Vortex Radius (m)", &comp.VortexRadius, 0.1f, 0.1f, 100.0f);
+                         c.AddVec3("Vortex Axis", &comp.VortexAxis, 0.05f);
+
+                         c.AddBool("Point Attractor", &comp.AttractorEnabled);
+                         c.AddVec3("Attractor Offset (m)", &comp.AttractorOffset, 0.1f);
+                         c.AddFloat("Attractor Strength", &comp.AttractorStrength, 0.5f, -200.0f, 200.0f);
+                         c.AddFloat("Attractor Radius (m)", &comp.AttractorRadius, 0.1f, 0.1f, 100.0f);
+                         c.AddFloat("Attractor Kill Radius (m)", &comp.AttractorKillRadius, 0.05f, 0.0f, 20.0f);
+
+                         c.AddBool("Depth Collisions", &comp.DepthCollisionEnabled);
+                         c.AddFloat("Bounce (Restitution)", &comp.CollisionRestitution, 0.02f, 0.0f, 1.0f);
+                         c.AddFloat("Bounce Friction", &comp.CollisionFriction, 0.02f, 0.0f, 1.0f);
+                         c.AddFloat("Collision Thickness (m)", &comp.CollisionThickness, 0.02f, 0.02f, 5.0f);
+                         c.AddBool("Kill On Collision", &comp.CollisionKillOnHit);
                      });
         }
 

@@ -8,7 +8,11 @@
 
     struct VSOutput
     {
+#ifdef NOX_MATERIAL_GRAPH
+        noperspective centroid float4 pos : SV_Position; // DXIL requires centroid/sample on SV_Position when outputting SV_DepthLessEqual
+#else
         float4 pos : SV_Position;
+#endif
         float2 uv0 : TEXCOORD0;
         float2 uv1 : TEXCOORD1;
         float vertexAlpha : TEXCOORD2; // vertex color alpha (glTF COLOR_0): part of the base color's alpha the mask tests

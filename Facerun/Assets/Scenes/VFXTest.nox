@@ -1,0 +1,118 @@
+Scene: Untitled
+Entities:
+  - Entity: 14123991644088834448
+    TagComponent:
+      Tag: Floor
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, -0, 0]
+      Scale: [100, 1, 100]
+    MeshComponent:
+      MeshHandle: 10000201986349826000
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 5683023298584899068
+    TagComponent:
+      Tag: Particle
+    TransformComponent:
+      Translation: [0, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    ParticleEmitterComponent:
+      GpuSimulated: true
+      Emitting: true
+      Looping: true
+      Duration: 5
+      SpawnRate: 15000
+      Burst: 0
+      MaxParticles: 80000
+      Shape: Cone
+      ShapeSize: [0.25, 0.25, 0.25]
+      ConeAngle: 35
+      LifetimeMin: 1
+      LifetimeMax: 2
+      Velocity: [0, 6, 0]
+      VelocityRandom: [0.3, 0.3, 0.3]
+      Gravity: 1
+      Drag: 0
+      SpinMin: 0
+      SpinMax: 0
+      SizeStart: 0.06
+      SizeEnd: 0.01
+      SizeRandom: 0
+      ColorStart: [1, 0.627451, 0.15686274, 1]
+      ColorEnd: [1, 0.15686274, 0.039215684, 0]
+      Intensity: 4
+      Texture: 0
+      FlipbookColumns: 1
+      FlipbookRows: 1
+      FlipbookFPS: 0
+      Blend: Additive
+      Lit: false
+      SoftParticles: true
+      SoftDistance: 0.3
+      LocalSpace: false
+      CurlNoiseEnabled: true
+      CurlNoiseStrength: 6
+      CurlNoiseFrequency: 1.2
+      CurlNoiseScrollSpeed: 0.5
+      VortexEnabled: true
+      VortexStrength: 14
+      VortexRadialPull: 4
+      VortexRadius: 5
+      VortexAxis: [0, 1, 0]
+      DepthCollisionEnabled: true
+      CollisionRestitution: 0.65
+      CollisionFriction: 0.2
+      CollisionThickness: 0.3
+      CollisionKillOnHit: false
+  - Entity: 11846806231363535392
+    TagComponent:
+      Tag: Enviroment
+    TransformComponent:
+      Translation: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8

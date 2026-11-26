@@ -1143,7 +1143,10 @@ namespace Nox
 
     void Renderer::addParticlePass()
     {
-        if (m_particleBatches.empty() || !m_particlePipeline || m_particleBuffers.size() <= frameIndex || !m_particleBuffers[frameIndex] ||
+        const bool hasCpuParticles = std::any_of(m_particleBatches.begin(), m_particleBatches.end(),
+            [](const ParticleBatch& b) { return b.GpuIndirectBuffer == nullptr; });
+        if (m_particleBatches.empty() || !m_particlePipeline ||
+            (hasCpuParticles && (m_particleBuffers.size() <= frameIndex || !m_particleBuffers[frameIndex])) ||
             m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
         {
             addOITCompositePass(); // the transparent surfaces' alone
@@ -1171,7 +1174,8 @@ namespace Nox
         for (const ParticleBatch& batch : m_particleBatches)
             lit |= batch.Settings.Lit;
         const bool shadows = lit && getRayTracedShadowsActive();
-        const uint64_t particles = bufferReadRef(m_particleBuffers[frameIndex]);
+        const uint64_t particles = (m_particleBuffers.size() > frameIndex && m_particleBuffers[frameIndex])
+            ? bufferReadRef(m_particleBuffers[frameIndex]) : 0ull;
         const uint64_t uniforms = bufferReadRef(m_uniformBuffers[frameIndex]);
 
         auto declareParticles = [&](RGBuilder& builder)
@@ -1199,7 +1203,8 @@ namespace Nox
         {
             shaderio::PushConstantParticles push{};
             push.matrixReference = uniforms;
-            push.particlesReference = particles;
+            push.particlesReference = batch.GpuIndirectBuffer ? batch.GpuRenderParticlesRef : particles;
+            push.countersReference = batch.GpuIndirectBuffer ? batch.GpuCountersRef : 0ull;
             push.firstParticle = batch.First;
             push.particleCount = batch.Count;
             push.textureIndex = batch.Settings.TextureSlot;
@@ -1210,7 +1215,10 @@ namespace Nox
             push.depthTextureIndex = depthSlot;
             push.softDistance = batch.Settings.SoftDistance;
             cmd.pushData(&push, sizeof(push));
-            nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
+            if (batch.GpuIndirectBuffer)
+                nri::drawMeshTasksIndirect(cmd, *batch.GpuIndirectBuffer, 0, 1, 12u);
+            else
+                nri::drawMeshTasks(cmd, (batch.Count + 31) / 32, 1, 1);
         };
 
         if (!oitBatches.empty())

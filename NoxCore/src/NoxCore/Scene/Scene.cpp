@@ -1815,7 +1815,10 @@ namespace Nox
         for (auto entity : view)
         {
             auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
-            ParticleSystem::Simulate(emitter, world.WorldMatrix, m_FrameInput.Timestep);
+            if (emitter.GpuSimulated)
+                ParticleSystem::StepGpuTimeline(emitter, m_FrameInput.Timestep);
+            else
+                ParticleSystem::Simulate(emitter, world.WorldMatrix, m_FrameInput.Timestep);
         }
     }
 
@@ -1853,7 +1856,7 @@ namespace Nox
         for (auto entity : view)
         {
             auto [emitter, world] = view.get<ParticleEmitterComponent, WorldTransformComponent>(entity);
-            if (emitter.Simulation.Particles.empty())
+            if (!emitter.GpuSimulated && emitter.Simulation.Particles.empty())
                 continue;
 
             Renderer::ParticleBatchSettings settings;
@@ -1871,6 +1874,113 @@ namespace Nox
             settings.Lit = emitter.Lit;
             settings.Soft = emitter.SoftParticles;
             settings.SoftDistance = WorldUnits::FromMeters(std::max(emitter.SoftDistance, 0.0f));
+
+            if (emitter.GpuSimulated)
+            {
+                const float unit = WorldUnits::PerMeter();
+                const glm::dvec3 renderOrigin = m_renderer->GetRenderOrigin();
+                glm::mat3 basis(glm::mat4(world.WorldMatrix));
+                for (int col = 0; col < 3; ++col)
+                {
+                    const float len = glm::length(basis[col]);
+                    if (len > 1e-6f)
+                        basis[col] /= len;
+                }
+                shaderio::GpuVfxEmitterParams gpuParams{};
+                gpuParams.origin = glm::vec3(glm::dvec3(world.WorldMatrix[3]) - renderOrigin);
+                gpuParams.dt = m_FrameInput.StepAnimation ? std::min(m_FrameInput.Timestep, 0.1f) : 0.0f;
+                gpuParams.basisX = basis[0];
+                gpuParams.time = emitter.Simulation.Time;
+                gpuParams.basisY = basis[1];
+                gpuParams.spawnCount = m_FrameInput.StepAnimation ? emitter.Simulation.PendingGpuSpawnCount : 0u;
+                gpuParams.basisZ = basis[2];
+                gpuParams.maxParticles = std::max(emitter.MaxParticles, 64u);
+                gpuParams.shape = static_cast<uint32_t>(emitter.Shape);
+                gpuParams.coneAngleRad = glm::radians(emitter.ConeAngle);
+                gpuParams.localSpace = emitter.LocalSpace ? 1u : 0u;
+                gpuParams.shapeSize = emitter.ShapeSize * unit;
+                gpuParams.gravity = emitter.Gravity * 9.81f * unit;
+                gpuParams.velocity = emitter.Velocity * unit;
+                gpuParams.drag = std::max(emitter.Drag, 0.0f);
+                gpuParams.velocityRandom = emitter.VelocityRandom * unit;
+                gpuParams.lifetimeMin = std::max(emitter.LifetimeMin, 0.01f);
+                gpuParams.lifetimeMax = std::max(emitter.LifetimeMax, gpuParams.lifetimeMin);
+                gpuParams.spinMinRad = glm::radians(emitter.SpinMin);
+                gpuParams.spinMaxRad = glm::radians(emitter.SpinMax);
+                gpuParams.sizeStart = std::max(emitter.SizeStart, 0.0f) * unit;
+                gpuParams.sizeEnd = std::max(emitter.SizeEnd, 0.0f) * unit;
+                gpuParams.sizeRandom = std::clamp(emitter.SizeRandom, 0.0f, 1.0f);
+                gpuParams.intensity = std::max(emitter.Intensity, 0.0f);
+                gpuParams.flipbookCols = settings.FlipbookColumns;
+                gpuParams.flipbookRows = settings.FlipbookRows;
+                gpuParams.flipbookFPS = std::max(emitter.FlipbookFPS, 0.0f);
+                gpuParams.colorStart = emitter.ColorStart;
+                gpuParams.colorEnd = emitter.ColorEnd;
+
+                // Step V2 Niagara-style GPU modules.
+                uint32_t modFlags = 0u;
+                if (emitter.CurlNoiseEnabled)
+                {
+                    modFlags |= shaderio::VFX_MOD_CURL_NOISE;
+                    gpuParams.curlParams = glm::vec4(emitter.CurlNoiseStrength * unit,
+                                                     emitter.CurlNoiseFrequency / std::max(unit, 1e-4f),
+                                                     emitter.CurlNoiseScrollSpeed, 0.0f);
+                }
+                if (emitter.VortexEnabled)
+                {
+                    modFlags |= shaderio::VFX_MOD_VORTEX;
+                    glm::vec3 axis = emitter.VortexAxis;
+                    const float axisLen = glm::length(axis);
+                    axis = axisLen > 1e-4f ? (axis / axisLen) : glm::vec3(0.0f, 1.0f, 0.0f);
+                    if (!emitter.LocalSpace)
+                        axis = glm::normalize(basis * axis);
+                    gpuParams.vortexAxisAndStrength = glm::vec4(axis, emitter.VortexStrength * unit);
+                    gpuParams.vortexParams = glm::vec4(emitter.VortexRadialPull * unit, emitter.VortexRadius * unit, 0.0f, 0.0f);
+                }
+                if (emitter.AttractorEnabled)
+                {
+                    modFlags |= shaderio::VFX_MOD_ATTRACTOR;
+                    const glm::vec3 localOffset = emitter.AttractorOffset * unit;
+                    const glm::vec3 target = emitter.LocalSpace
+                        ? localOffset
+                        : (gpuParams.origin + basis * localOffset);
+                    gpuParams.attractorTargetAndStrength = glm::vec4(target, emitter.AttractorStrength * unit);
+                    gpuParams.attractorParams = glm::vec4(emitter.AttractorRadius * unit, emitter.AttractorKillRadius * unit, 0.0f, 0.0f);
+                }
+                if (emitter.DepthCollisionEnabled)
+                {
+                    modFlags |= shaderio::VFX_MOD_DEPTH_COLLISION;
+                    if (emitter.CollisionKillOnHit)
+                        modFlags |= shaderio::VFX_MOD_KILL_ON_COLLIDE;
+                    gpuParams.collisionParams = glm::vec4(std::clamp(emitter.CollisionRestitution, 0.0f, 1.0f),
+                                                          std::clamp(emitter.CollisionFriction, 0.0f, 1.0f),
+                                                          std::max(emitter.CollisionThickness, 0.02f) * unit, 0.0f);
+                }
+                if (emitter.Shape == ParticleShape::MeshSurface)
+                {
+                    modFlags |= shaderio::VFX_MOD_MESH_SURFACE;
+                    gpuParams.collisionParams2.y = emitter.MeshSurfaceNormalSpeed * unit;
+                }
+                if (emitter.ColorOverLife.size() >= 2 || emitter.SizeOverLife.size() >= 2)
+                {
+                    modFlags |= shaderio::VFX_MOD_CURVES;
+                    for (int k = 0; k < 16; ++k)
+                    {
+                        const float t = static_cast<float>(k) / 15.0f;
+                        gpuParams.colorCurveLut[k] = ParticleSystem::ColorOverLife(emitter, t);
+                        gpuParams.sizeCurveLut[k >> 2][k & 3] = std::max(ParticleSystem::SizeOverLife(emitter, t), 0.0f) * unit;
+                    }
+                }
+                gpuParams.moduleFlags = modFlags;
+
+                const uint64_t entityKey = m_Registry.all_of<IDComponent>(entity)
+                    ? static_cast<uint64_t>(m_Registry.get<IDComponent>(entity).ID)
+                    : static_cast<uint64_t>(entt::to_integral(entity));
+                const bool restart = emitter.Simulation.GpuNeedsReset;
+                emitter.Simulation.GpuNeedsReset = false;
+                m_renderer->SubmitGpuParticleEmitter(entityKey, settings, gpuParams, restart, static_cast<int32_t>(entt::to_integral(entity)));
+                continue;
+            }
 
             particles.clear();
             particles.reserve(emitter.Simulation.Particles.size());

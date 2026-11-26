@@ -121,8 +121,11 @@ void meshMain(
     uniform PushConstantParticles pushConstant
 )
 {
+    const uint totalCount = pushConstant.countersReference != 0
+        ? BufferRef<GpuVfxCounters>(pushConstant.countersReference)[0].aliveInCount
+        : pushConstant.particleCount;
     const uint groupFirst = groupID.x * ParticlesPerGroup;
-    const uint inGroup = pushConstant.particleCount > groupFirst ? min(pushConstant.particleCount - groupFirst, ParticlesPerGroup) : 0;
+    const uint inGroup = totalCount > groupFirst ? min(totalCount - groupFirst, ParticlesPerGroup) : 0;
     SetMeshOutputCounts(inGroup * 4, inGroup * 2);
     if (threadID >= inGroup)
         return;

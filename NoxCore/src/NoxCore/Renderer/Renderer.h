@@ -443,6 +443,10 @@ namespace Nox
             float SoftDistance = 0.0f;         // world units
         };
         void SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles);
+        // GPU Compute VFX emitter (docs/VFX_And_Volumes_Plan_2026-11.md step V1): simulated on the GPU in VfxPasses.cpp and drawn
+        // indirectly by Particles.slang (entityId keys its persistent GPU particle pool across frames).
+        void SubmitGpuParticleEmitter(uint64_t entityId, const ParticleBatchSettings& settings,
+                                      const shaderio::GpuVfxEmitterParams& params, bool restart, int32_t sceneEntityHandle = -1);
         void SubmitLight(const glm::dmat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const SpotLightComponent& light);
@@ -1271,6 +1275,8 @@ namespace Nox
         void createAutoExposurePipelines(bool forceCompile = false);
         void createColorPyramidPipelines(bool forceCompile = false);
         void createParticlePipeline(bool forceCompile = false);
+        void createVfxComputePipelines(bool forceCompile = false);
+        void addVfxSimulatePass();
         void createOITCompositePipeline(bool forceCompile = false);
         // Render graph texture inspection
         void createTextureInspectPipeline(bool forceCompile = false);
@@ -1682,7 +1688,41 @@ namespace Nox
             uint32_t First = 0;
             uint32_t Count = 0;
             float Distance = 0.0f; // of its center from the camera: emitters draw far to near
+            // Non-null for GPU-simulated VFX emitters (step V1): drawn via nri::drawMeshTasksIndirect.
+            uint64_t GpuRenderParticlesRef = 0;
+            uint64_t GpuCountersRef = 0;
+            const nri::Buffer* GpuIndirectBuffer = nullptr;
         };
+        struct GpuVfxPool
+        {
+            uint32_t Capacity = 0;
+            uint32_t PingPong = 0;
+            uint64_t LastUsedFrame = 0;
+            bool Initialized = false;
+            nri::Buffer Particles;
+            nri::Buffer RenderParticles;
+            nri::Buffer DeadList;
+            nri::Buffer AliveLists[2];
+            nri::Buffer Counters;
+            nri::Buffer IndirectArgs;
+            std::vector<nri::Buffer> ParamsBuffers;
+            std::vector<void*> ParamsMapped;
+        };
+        struct GpuVfxSubmission
+        {
+            uint64_t EntityId = 0;
+            int32_t SceneEntityHandle = -1;
+            ParticleBatchSettings Settings;
+            shaderio::GpuVfxEmitterParams Params{};
+            bool Restart = false;
+        };
+        std::unordered_map<uint64_t, std::unique_ptr<GpuVfxPool>> m_gpuVfxPools;
+        std::vector<GpuVfxSubmission> m_gpuVfxSubmissions;
+        nri::Pipeline m_vfxInitPipeline;
+        nri::Pipeline m_vfxSpawnPipeline;
+        nri::Pipeline m_vfxUpdatePipeline;
+        nri::Pipeline m_vfxFinalizePipeline;
+        uint64_t m_vfxFrameCounter = 0;
         std::vector<shaderio::GpuParticle> m_particles;
         std::vector<ParticleBatch> m_particleBatches;
         std::vector<nri::Buffer> m_particleBuffers;

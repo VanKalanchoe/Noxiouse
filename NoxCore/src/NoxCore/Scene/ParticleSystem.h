@@ -14,6 +14,8 @@ namespace Nox
         // Advances the emitter by `dt` seconds at its world transform: moves the particles (gravity, drag, spin), retires the old
         // ones, spawns new ones (the rate, a burst when a loop starts, Emit(count)).
         void Simulate(ParticleEmitterComponent& emitter, const glm::dmat4& world, float dt);
+        // Step V1: O(1) timeline advance for GPU-simulated emitters (computes PendingGpuSpawnCount with zero per-particle CPU work).
+        void StepGpuTimeline(ParticleEmitterComponent& emitter, float dt);
         // No particles, the timeline back at its start (the next update bursts again).
         void Restart(ParticleEmitterComponent& emitter);
 

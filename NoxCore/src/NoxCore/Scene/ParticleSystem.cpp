@@ -84,6 +84,7 @@ namespace Nox::ParticleSystem
                     break;
                 }
                 case ParticleShape::Point:
+                case ParticleShape::MeshSurface:
                     break;
                 }
                 velocity += glm::vec3(Signed(random), Signed(random), Signed(random)) * emitter.VelocityRandom;
@@ -118,6 +119,8 @@ namespace Nox::ParticleSystem
         simulation.SpawnCarry = 0.0f;
         simulation.BurstDone = false;
         simulation.Started = true;
+        simulation.PendingGpuSpawnCount = 0;
+        simulation.GpuNeedsReset = true;
         // Emitters differ (one sequence each), whatever their settings.
         simulation.Random = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&emitter) * 2654435761u) | 1u;
     }
@@ -196,6 +199,47 @@ namespace Nox::ParticleSystem
             simulation.Time = std::fmod(simulation.Time, duration);
             simulation.BurstDone = false;
         }
+    }
+
+    void StepGpuTimeline(ParticleEmitterComponent& emitter, float dt)
+    {
+        ParticleSimulation& simulation = emitter.Simulation;
+        simulation.BurstEvents = 0;
+        simulation.PendingGpuSpawnCount = 0;
+        if (dt <= 0.0f)
+            return;
+        dt = std::min(dt, 0.1f);
+        const float duration = std::max(emitter.Duration, 0.01f);
+        uint32_t toSpawn = 0;
+        if (simulation.PendingBurst > 0)
+        {
+            toSpawn += simulation.PendingBurst;
+            simulation.PendingBurst = 0;
+            simulation.BurstEvents += 1;
+        }
+        if (emitter.Emitting)
+        {
+            if (!simulation.BurstDone)
+            {
+                toSpawn += emitter.Burst;
+                simulation.BurstDone = true;
+                simulation.BurstEvents += emitter.Burst > 0 ? 1u : 0u;
+            }
+            if (emitter.Looping || simulation.Time < duration)
+            {
+                simulation.SpawnCarry += std::max(emitter.SpawnRate, 0.0f) * dt;
+                const float whole = std::floor(simulation.SpawnCarry);
+                simulation.SpawnCarry -= whole;
+                toSpawn += static_cast<uint32_t>(std::min(whole, 1.0e6f));
+            }
+            simulation.Time += dt;
+            if (emitter.Looping && simulation.Time >= duration)
+            {
+                simulation.Time = std::fmod(simulation.Time, duration);
+                simulation.BurstDone = false;
+            }
+        }
+        simulation.PendingGpuSpawnCount = std::min(toSpawn, std::max(emitter.MaxParticles, 1u));
     }
 
     namespace

@@ -641,6 +641,8 @@ namespace Nox
         watchShader("assets/shaders/AutoExposure.slang", "AutoExposure", [this]() { createAutoExposurePipelines(true); });
         watchShader("assets/shaders/ColorPyramid.slang", "ColorPyramid", [this]() { createColorPyramidPipelines(true); });
         watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); createAVBOITPipelines(true); });
+        watchShader("assets/shaders/VfxSimulate.slang", "VFX Simulate", [this]() { createVfxComputePipelines(true); });
+        watchShader("assets/shaders/VfxModules.slang", "VFX Modules", [this]() { createVfxComputePipelines(true); });
         watchShader("assets/shaders/OITComposite.slang", "OITComposite", [this]() { createOITCompositePipeline(true); });
         watchShader("assets/shaders/AVBOITBuild.slang", "AVBOITBuild", [this]() { createAVBOITPipelines(true); });
         // What every transparent shader includes (both OIT methods): those and AVBOIT's prepasses again.
@@ -903,6 +905,7 @@ namespace Nox
         createAutoExposurePipelines(false);
         createColorPyramidPipelines(false);
         createParticlePipeline(false);
+        createVfxComputePipelines(false);
         createOITCompositePipeline(false);
         createAVBOITPipelines(false);
         createTextureInspectPipeline(false);
@@ -5364,6 +5367,7 @@ namespace Nox
             addPreviousFrameCopyPass();
             addPathTracerPasses();
             addDeferredLightingPass();
+            addVfxSimulatePass(); // GPU compute particles (step V1): simulates and appends indirect batches before AVBOIT / Forward 3D / Particles
             addForward3DPass();
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
             addSSRHistoryPass(); // the lit scene the SSR reflect next frame
@@ -6521,6 +6525,7 @@ namespace Nox
         m_irradianceVolumeSubmission.Valid = false;
         m_particles.clear();
         m_particleBatches.clear();
+        m_gpuVfxSubmissions.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)

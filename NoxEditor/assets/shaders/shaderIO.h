@@ -2075,6 +2075,7 @@ struct PushConstantParticles
 {
     uint64_t matrixReference;
     uint64_t particlesReference;  // GpuParticle[]
+    uint64_t countersReference;   // 0 for CPU batches; non-zero: GpuVfxCounters[0].aliveInCount (VFX step V1)
     uint32_t firstParticle;
     uint32_t particleCount;
     uint32_t textureIndex;        // flipbook sheet slot (image heap offset added in the shader), 0xFFFFFFFF: a soft round dot
@@ -2083,6 +2084,128 @@ struct PushConstantParticles
     uint32_t flags;               // PARTICLE_*
     uint32_t depthTextureIndex;   // the scene depth (render resolution), image heap offset added in the shader
     float softDistance;           // world units
+};
+
+// GPU Compute VFX core (docs/VFX_And_Volumes_Plan_2026-11.md step V1): per-emitter GPU particle pool, dead/alive ping-pong lists,
+// atomic counters and indirect mesh-task dispatch arguments.
+struct GpuVfxParticle
+{
+    vec3 position;         // render-space world units (or emitter-local when localSpace != 0)
+    float age;             // seconds
+    vec3 velocity;         // world units / second
+    float lifetime;        // seconds
+    vec3 previousPosition; // render-space world units (for DLSS / TAA motion vectors)
+    float sizeRandom;      // 0..1 per-particle size multiplier
+    float rotation;        // radians
+    float spin;            // radians / second
+    uint32_t seed;         // per-particle RNG seed
+    uint32_t flags;
+};
+
+struct GpuVfxCounters
+{
+    uint32_t aliveInCount;  // alive particles entering updateMain (and rendered this frame)
+    uint32_t aliveOutCount; // surviving + newly spawned count written by updateMain
+    uint32_t deadCount;     // available indices in DeadList
+    uint32_t spawnActual;   // clamped spawn count for this frame
+};
+
+// Raw 3-uint dispatch arguments matching VkDrawMeshTasksIndirectCommandEXT / D3D12_DISPATCH_MESH_ARGUMENTS at offset 0
+// (unlike MeshTasksIndirectCommand, which has a leading drawID at offset 0 for drawMeshTasksIndirectCountWithDrawId).
+struct GpuVfxIndirectCommand
+{
+    uint32_t groupCountX;
+    uint32_t groupCountY;
+    uint32_t groupCountZ;
+    uint32_t pad0;
+};
+
+// GPU VFX Module Flags (docs/VFX_And_Volumes_Plan_2026-11.md step V2)
+STATIC_CONST uint32_t VFX_MOD_CURL_NOISE      = 1u << 0;
+STATIC_CONST uint32_t VFX_MOD_VORTEX          = 1u << 1;
+STATIC_CONST uint32_t VFX_MOD_ATTRACTOR       = 1u << 2;
+STATIC_CONST uint32_t VFX_MOD_DEPTH_COLLISION = 1u << 3;
+STATIC_CONST uint32_t VFX_MOD_CURVES          = 1u << 4;
+STATIC_CONST uint32_t VFX_MOD_MESH_SURFACE    = 1u << 5;
+STATIC_CONST uint32_t VFX_MOD_KILL_ON_COLLIDE = 1u << 6;
+
+struct GpuVfxEmitterParams
+{
+    vec3 origin;           // emitter world position relative to renderOrigin (world units)
+    float dt;              // frame delta time (seconds)
+    vec3 basisX;           // emitter right axis
+    float time;            // seconds
+    vec3 basisY;           // emitter up axis
+    uint32_t spawnCount;   // requested particles to spawn this frame
+    vec3 basisZ;           // emitter forward axis
+    uint32_t maxParticles; // pool capacity
+
+    uint32_t shape;        // 0 Point, 1 Sphere, 2 Box, 3 Cone, 4 MeshSurface
+    float coneAngleRad;    // radians
+    uint32_t frameSeed;    // per-frame RNG salt
+    uint32_t localSpace;   // 1: simulate in emitter space, transform on render write
+
+    vec3 shapeSize;        // world units
+    float gravity;         // world units / s^2 (already multiplied by 9.81 * unitsPerMeter)
+    vec3 velocity;         // world units / s
+    float drag;            // 1/s
+    vec3 velocityRandom;   // +/- world units / s per axis
+    float lifetimeMin;     // seconds
+
+    float lifetimeMax;     // seconds
+    float spinMinRad;      // radians / s
+    float spinMaxRad;      // radians / s
+    float sizeStart;       // world units
+
+    float sizeEnd;         // world units
+    float sizeRandom;      // 0..1 fraction
+    float intensity;       // HDR brightness multiplier
+    uint32_t flipbookCols;
+
+    uint32_t flipbookRows;
+    float flipbookFPS;
+    uint32_t pad0;
+    uint32_t pad1;
+
+    vec4 colorStart;       // linear rgba
+    vec4 colorEnd;         // linear rgba
+
+    // Step V2 Niagara-style GPU modules (all 16-byte aligned from offset 160 onward).
+    uint64_t matrixReference;          // UniformBufferObject (viewProj, invViewProj, cameraWorldPos)
+    uint64_t meshVertexReference;      // SkinnedVertex[] (meshIsSkinned=1) or Vertex[] (meshIsSkinned=0)
+    uint32_t moduleFlags;              // VFX_MOD_*
+    uint32_t depthTextureIndex;        // scene depth (image heap offset added in shader), 0xFFFFFFFF: none
+    uint32_t normalTextureIndex;       // G-buffer world normal (image heap offset added in shader), 0xFFFFFFFF: none
+    uint32_t meshVertexOffset;         // first vertex in meshVertexReference
+    uint32_t meshVertexCount;          // vertex count for mesh surface sampling
+    uint32_t meshIsSkinned;            // 1: SkinnedVertex, 0: static Vertex
+    uint32_t padVfx0;
+    uint32_t padVfx1;
+
+    vec4 curlParams;                   // x strength (wu/s^2), y frequency (1/wu), z scrollSpeed, w unused
+    vec4 vortexAxisAndStrength;        // xyz normalized world axis, w tangential strength (wu/s^2)
+    vec4 vortexParams;                 // x radialPull (wu/s^2), y radius (wu), z/w unused
+    vec4 attractorTargetAndStrength;   // xyz target position (render-space wu), w strength (wu/s^2)
+    vec4 attractorParams;              // x radius (wu), y killRadius (wu, 0=off), z/w unused
+    vec4 collisionParams;              // x restitution, y friction, z thickness (wu), w viewportWidth
+    vec4 collisionParams2;             // x viewportHeight, y meshSurfaceNormalSpeed (wu/s), z/w unused
+    mat4 meshModelMatrix;              // render-space model matrix for mesh surface sampling
+    vec4 colorCurveLut[16];            // 16-sample RGBA gradient over life [0..1]
+    vec4 sizeCurveLut[4];              // 16-sample size (world units) over life [0..1], packed 4 per vec4
+};
+
+struct PushConstantVfxSimulate
+{
+    uint64_t paramsReference;          // GpuVfxEmitterParams
+    uint64_t particlesReference;       // GpuVfxParticle[maxParticles]
+    uint64_t renderParticlesReference; // GpuParticle[maxParticles]
+    uint64_t deadListReference;        // uint32_t[maxParticles]
+    uint64_t aliveInReference;         // uint32_t[maxParticles]
+    uint64_t aliveOutReference;        // uint32_t[maxParticles]
+    uint64_t countersReference;        // GpuVfxCounters[1]
+    uint64_t indirectArgsReference;    // GpuVfxIndirectCommand[1]
+    uint32_t depthTextureIndex;        // RenderGraph scene depth slot (0xFFFFFFFF if unused)
+    uint32_t normalTextureIndex;       // RenderGraph G-buffer normal slot (0xFFFFFFFF if unused)
 };
 
 struct PushConstantDDGIRadiance

@@ -52844,6 +52844,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6026872225775129268
+    FilePath: Scenes/VFXTest.nox
+    SourceFilePath: Scenes/VFXTest.nox
+    Type: AssetType::Scene
   - Handle: 6029479182949583346
     FilePath: StreamingTest/Meshes/Tile_10_4.nsmesh
     Type: AssetType::StaticMesh

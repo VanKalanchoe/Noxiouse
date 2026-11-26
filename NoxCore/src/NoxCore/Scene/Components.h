@@ -722,9 +722,10 @@ namespace Nox
     enum class ParticleShape : uint8_t
     {
         Point,
-        Sphere, // inside a sphere of ShapeSize.x radius
-        Box,    // inside a box of ShapeSize half extents
-        Cone    // from a disc of ShapeSize.x radius, directions within ConeAngle of the emitter's +Y
+        Sphere,      // inside a sphere of ShapeSize.x radius
+        Box,         // inside a box of ShapeSize half extents
+        Cone,        // from a disc of ShapeSize.x radius, directions within ConeAngle of the emitter's +Y
+        MeshSurface  // GPU VFX (step V2): emit directly from the entity's static or animated skinned mesh vertices
     };
 
     enum class ParticleBlend : uint8_t
@@ -755,6 +756,9 @@ namespace Nox
         uint32_t PendingBurst = 0;      // Emit(count) from scripts, spawned on the next update
         uint32_t BurstEvents = 0;       // bursts spawned by the last Simulate (a loop's Burst, an Emit): the burst sound plays
         bool Started = false;
+        // GPU Compute VFX (VFX_And_Volumes_Plan_2026-11.md step V1): per-frame spawn count computed by StepGpuTimeline.
+        uint32_t PendingGpuSpawnCount = 0;
+        bool GpuNeedsReset = true;
         // Large world coordinates (Niagara's LWC tile): world-space particles are relative to this point in float. It follows the
         // emitter (ParticleSystem::Simulate), so their precision is that of a position near the emitter wherever it is.
         glm::dvec3 Origin{ 0.0 };
@@ -774,6 +778,7 @@ namespace Nox
 
     struct ParticleEmitterComponent
     {
+        bool GpuSimulated = false;      // step V1: simulate up to 250k particles on the GPU via VfxSimulate.slang + DrawMeshTasksIndirect
         bool Emitting = true;           // spawning (particles already out live on either way)
         bool Looping = true;            // spawn on after Duration, a new burst each loop; else a one-shot of Duration seconds
         float Duration = 5.0f;          // seconds
@@ -817,6 +822,32 @@ namespace Nox
         // A sound with every burst (Niagara's Play Audio on spawn burst): a loop's Burst and a script's Emit, at the emitter.
         AssetHandle BurstSound = 0;     // an AudioClip or an AudioGraph
         float BurstSoundVolume = 1.0f;
+
+        // GPU VFX Module Stack (docs/VFX_And_Volumes_Plan_2026-11.md step V2, active when GpuSimulated = true).
+        bool CurlNoiseEnabled = false;
+        float CurlNoiseStrength = 4.0f;      // m/s^2
+        float CurlNoiseFrequency = 1.5f;     // cycles per meter
+        float CurlNoiseScrollSpeed = 0.5f;   // cycles per second
+
+        bool VortexEnabled = false;
+        float VortexStrength = 8.0f;         // m/s^2 tangential swirl
+        float VortexRadialPull = 2.0f;       // m/s^2 inward pull
+        float VortexRadius = 4.0f;           // meters
+        glm::vec3 VortexAxis{ 0.0f, 1.0f, 0.0f };
+
+        bool AttractorEnabled = false;
+        glm::vec3 AttractorOffset{ 0.0f, 2.0f, 0.0f }; // meters relative to emitter
+        float AttractorStrength = 12.0f;     // m/s^2
+        float AttractorRadius = 6.0f;        // meters
+        float AttractorKillRadius = 0.0f;    // meters (0 = off)
+
+        bool DepthCollisionEnabled = false;
+        float CollisionRestitution = 0.55f;  // 0..1 bounciness
+        float CollisionFriction = 0.25f;     // 0..1 tangential damping on bounce
+        float CollisionThickness = 0.25f;    // meters behind surface that counts as a hit
+        bool CollisionKillOnHit = false;
+
+        float MeshSurfaceNormalSpeed = 0.5f; // m/s initial push along vertex normal when Shape == MeshSurface
 
         ParticleSimulation Simulation;
 

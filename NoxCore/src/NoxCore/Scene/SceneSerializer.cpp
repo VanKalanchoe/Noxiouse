@@ -996,9 +996,10 @@ namespace Nox
         if (entity.HasComponent<ParticleEmitterComponent>())
         {
             const auto& emitter = entity.GetComponent<ParticleEmitterComponent>();
-            static const char* shapeNames[] = { "Point", "Sphere", "Box", "Cone" };
+            static const char* shapeNames[] = { "Point", "Sphere", "Box", "Cone", "MeshSurface" };
             out << YAML::Key << "ParticleEmitterComponent";
             out << YAML::BeginMap;
+            out << YAML::Key << "GpuSimulated" << YAML::Value << emitter.GpuSimulated;
             out << YAML::Key << "Emitting" << YAML::Value << emitter.Emitting;
             out << YAML::Key << "Looping" << YAML::Value << emitter.Looping;
             out << YAML::Key << "Duration" << YAML::Value << emitter.Duration;
@@ -1050,6 +1051,40 @@ namespace Nox
                 out << YAML::Key << "BurstSound" << YAML::Value << emitter.BurstSound;
                 out << YAML::Key << "BurstSoundVolume" << YAML::Value << emitter.BurstSoundVolume;
             }
+            // Step V2 GPU VFX module stack
+            if (emitter.CurlNoiseEnabled)
+            {
+                out << YAML::Key << "CurlNoiseEnabled" << YAML::Value << emitter.CurlNoiseEnabled;
+                out << YAML::Key << "CurlNoiseStrength" << YAML::Value << emitter.CurlNoiseStrength;
+                out << YAML::Key << "CurlNoiseFrequency" << YAML::Value << emitter.CurlNoiseFrequency;
+                out << YAML::Key << "CurlNoiseScrollSpeed" << YAML::Value << emitter.CurlNoiseScrollSpeed;
+            }
+            if (emitter.VortexEnabled)
+            {
+                out << YAML::Key << "VortexEnabled" << YAML::Value << emitter.VortexEnabled;
+                out << YAML::Key << "VortexStrength" << YAML::Value << emitter.VortexStrength;
+                out << YAML::Key << "VortexRadialPull" << YAML::Value << emitter.VortexRadialPull;
+                out << YAML::Key << "VortexRadius" << YAML::Value << emitter.VortexRadius;
+                out << YAML::Key << "VortexAxis" << YAML::Value << emitter.VortexAxis;
+            }
+            if (emitter.AttractorEnabled)
+            {
+                out << YAML::Key << "AttractorEnabled" << YAML::Value << emitter.AttractorEnabled;
+                out << YAML::Key << "AttractorOffset" << YAML::Value << emitter.AttractorOffset;
+                out << YAML::Key << "AttractorStrength" << YAML::Value << emitter.AttractorStrength;
+                out << YAML::Key << "AttractorRadius" << YAML::Value << emitter.AttractorRadius;
+                out << YAML::Key << "AttractorKillRadius" << YAML::Value << emitter.AttractorKillRadius;
+            }
+            if (emitter.DepthCollisionEnabled)
+            {
+                out << YAML::Key << "DepthCollisionEnabled" << YAML::Value << emitter.DepthCollisionEnabled;
+                out << YAML::Key << "CollisionRestitution" << YAML::Value << emitter.CollisionRestitution;
+                out << YAML::Key << "CollisionFriction" << YAML::Value << emitter.CollisionFriction;
+                out << YAML::Key << "CollisionThickness" << YAML::Value << emitter.CollisionThickness;
+                out << YAML::Key << "CollisionKillOnHit" << YAML::Value << emitter.CollisionKillOnHit;
+            }
+            if (emitter.Shape == ParticleShape::MeshSurface)
+                out << YAML::Key << "MeshSurfaceNormalSpeed" << YAML::Value << emitter.MeshSurfaceNormalSpeed;
             out << YAML::EndMap;
         }
 
@@ -2682,6 +2717,7 @@ namespace Nox
                 if (particleEmitter[key])
                     value = particleEmitter[key].as<std::remove_reference_t<decltype(value)>>();
             };
+            read("GpuSimulated", emitter.GpuSimulated);
             read("Emitting", emitter.Emitting);
             read("Looping", emitter.Looping);
             read("Duration", emitter.Duration);
@@ -2691,7 +2727,11 @@ namespace Nox
             if (particleEmitter["Shape"])
             {
                 const std::string shape = particleEmitter["Shape"].as<std::string>();
-                emitter.Shape = shape == "Sphere" ? ParticleShape::Sphere : shape == "Box" ? ParticleShape::Box : shape == "Cone" ? ParticleShape::Cone : ParticleShape::Point;
+                emitter.Shape = shape == "Sphere" ? ParticleShape::Sphere
+                              : shape == "Box" ? ParticleShape::Box
+                              : shape == "Cone" ? ParticleShape::Cone
+                              : shape == "MeshSurface" ? ParticleShape::MeshSurface
+                              : ParticleShape::Point;
             }
             read("ShapeSize", emitter.ShapeSize);
             read("ConeAngle", emitter.ConeAngle);
@@ -2740,6 +2780,26 @@ namespace Nox
             read("LocalSpace", emitter.LocalSpace);
             read("BurstSound", emitter.BurstSound);
             read("BurstSoundVolume", emitter.BurstSoundVolume);
+            read("CurlNoiseEnabled", emitter.CurlNoiseEnabled);
+            read("CurlNoiseStrength", emitter.CurlNoiseStrength);
+            read("CurlNoiseFrequency", emitter.CurlNoiseFrequency);
+            read("CurlNoiseScrollSpeed", emitter.CurlNoiseScrollSpeed);
+            read("VortexEnabled", emitter.VortexEnabled);
+            read("VortexStrength", emitter.VortexStrength);
+            read("VortexRadialPull", emitter.VortexRadialPull);
+            read("VortexRadius", emitter.VortexRadius);
+            read("VortexAxis", emitter.VortexAxis);
+            read("AttractorEnabled", emitter.AttractorEnabled);
+            read("AttractorOffset", emitter.AttractorOffset);
+            read("AttractorStrength", emitter.AttractorStrength);
+            read("AttractorRadius", emitter.AttractorRadius);
+            read("AttractorKillRadius", emitter.AttractorKillRadius);
+            read("DepthCollisionEnabled", emitter.DepthCollisionEnabled);
+            read("CollisionRestitution", emitter.CollisionRestitution);
+            read("CollisionFriction", emitter.CollisionFriction);
+            read("CollisionThickness", emitter.CollisionThickness);
+            read("CollisionKillOnHit", emitter.CollisionKillOnHit);
+            read("MeshSurfaceNormalSpeed", emitter.MeshSurfaceNormalSpeed);
         }
 
         auto animatorComponent = entity["AnimatorComponent"];
