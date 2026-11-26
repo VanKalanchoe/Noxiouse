@@ -1,11 +1,84 @@
 Scene: Untitled
 Entities:
+  - Entity: 14842273627986004197
+    TagComponent:
+      Tag: ScreenSpaceDistortion
+    TransformComponent:
+      Translation: [0, 60.02885437011719, 177.18588256835938]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    DistortionComponent:
+      Enabled: true
+      Mode: PortalSwirl
+      Radius: 2.5
+      Strength: 0.04
+      RingWidth: 0.25
+      Speed: 1.5
+      ChromaticAberration: 0.25
+      RimTint: [0.4, 0.8, 1, 0.35]
+      CameraFacing: true
+  - Entity: 8128056638387387445
+    TagComponent:
+      Tag: Cube
+    TransformComponent:
+      Translation: [0, 50, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 11022713676092770360
+    TagComponent:
+      Tag: Projected Decal
+    Active: false
+    TransformComponent:
+      Translation: [4.8833160400390625, 30.585819244384766, 1.696075439453125]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    DecalComponent:
+      Enabled: true
+      Size: [3, 1.5, 3]
+      Color: [1, 0.55, 0.15, 1]
+      EmissiveIntensity: 4
+      Blend: Additive
+      Texture: 0
+      NormalFade: 0.35
+      EdgeFade: 0.15
+  - Entity: 6705288518334031356
+    TagComponent:
+      Tag: Beam
+    Active: false
+    TransformComponent:
+      Translation: [0, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    BeamRendererComponent:
+      Enabled: true
+      TargetOffset: [0, 0, 5]
+      TargetEntity: 0
+      LocalTarget: true
+      Segments: 24
+      WidthStart: 0.12
+      WidthEnd: 0.12
+      NoiseAmplitude: 0
+      NoiseFrequency: 2
+      NoiseSpeed: 18
+      ColorStart: [0.45, 0.85, 1, 1]
+      ColorEnd: [0.85, 0.95, 1, 1]
+      Intensity: 5
+      Blend: Additive
+      Texture: 0
+      TextureTileU: 1
+      TextureScrollU: -2
   - Entity: 14123991644088834448
     TagComponent:
       Tag: Floor
     TransformComponent:
       Translation: [0, 0, 0]
-      Rotation: [0, -0, 0]
+      Rotation: [0, 0, 0]
       Scale: [100, 1, 100]
     MeshComponent:
       MeshHandle: 10000201986349826000
@@ -16,6 +89,7 @@ Entities:
   - Entity: 5683023298584899068
     TagComponent:
       Tag: Particle
+    Active: false
     TransformComponent:
       Translation: [0, 150, 0]
       Rotation: [0, 0, 0]
@@ -25,9 +99,9 @@ Entities:
       Emitting: true
       Looping: true
       Duration: 5
-      SpawnRate: 15000
+      SpawnRate: 800
       Burst: 0
-      MaxParticles: 80000
+      MaxParticles: 5000
       Shape: Cone
       ShapeSize: [0.25, 0.25, 0.25]
       ConeAngle: 35
@@ -39,8 +113,8 @@ Entities:
       Drag: 0
       SpinMin: 0
       SpinMax: 0
-      SizeStart: 0.06
-      SizeEnd: 0.01
+      SizeStart: 0.18
+      SizeEnd: 0.04
       SizeRandom: 0
       ColorStart: [1, 0.627451, 0.15686274, 1]
       ColorEnd: [1, 0.15686274, 0.039215684, 0]
@@ -50,7 +124,7 @@ Entities:
       FlipbookRows: 1
       FlipbookFPS: 0
       Blend: Additive
-      Lit: false
+      Lit: true
       SoftParticles: true
       SoftDistance: 0.3
       LocalSpace: false
@@ -68,6 +142,9 @@ Entities:
       CollisionFriction: 0.2
       CollisionThickness: 0.3
       CollisionKillOnHit: false
+      RenderMode: Mesh
+      ParticleMesh: 0
+      AlignToVelocity: true
   - Entity: 11846806231363535392
     TagComponent:
       Tag: Enviroment
@@ -116,3 +193,26 @@ Entities:
       FogFromEnvironment: true
       FogSunScattering: 0.05
       FogSunExponent: 8
+  - Entity: 10146734232425244883
+    TagComponent:
+      Tag: Trail
+    Active: false
+    TransformComponent:
+      Translation: [54.12828063964844, 191.30210876464844, 23.175060272216797]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    TrailRendererComponent:
+      Emitting: true
+      Lifetime: 0.6
+      MinVertexDistance: 0.05
+      WidthStart: 0.3
+      WidthEnd: 0.02
+      ColorStart: [0.3, 0.75, 1, 1]
+      ColorEnd: [0.1, 0.25, 1, 0]
+      Intensity: 4
+      Blend: Additive
+      Texture: 0
+      TextureTileU: 1
+      TextureScrollU: 0
+      SoftEdges: true
+      SoftDistance: 0.2

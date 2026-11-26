@@ -679,6 +679,22 @@ namespace Nox
                          args.Out[0] = Constant("i.pixelDepth", 1);
                          return true;
                      });
+            // VFX Input Nodes (docs/VFX_And_Volumes_Plan_2026-11.md step V3b)
+            Register("Particle Age", "VFX", {},
+                     { V("Age", "Normalized particle lifetime in [0, 1] (0 on non-particle meshes)") }, {},
+                     [](EmitArgs& args) { args.Out[0] = Constant("i.particleAge", 1); return true; });
+            Register("Particle Color", "VFX", {},
+                     { V("Color", "Per-particle linear HDR RGBA color (white on non-particle meshes)") }, {},
+                     [](EmitArgs& args) { args.Out[0] = Constant("(i.hasParticleData != 0u ? i.particleColor : float4(1.0, 1.0, 1.0, 1.0))", 4); return true; });
+            Register("Particle Random", "VFX", {},
+                     { V("Random", "Per-particle random seed in [0, 1] (0 on non-particle meshes)") }, {},
+                     [](EmitArgs& args) { args.Out[0] = Constant("i.particleRandom", 1); return true; });
+            Register("Particle Velocity", "VFX", {},
+                     { V("Velocity", "Per-particle world-space velocity in world units/s (Float3)") }, {},
+                     [](EmitArgs& args) { args.Out[0] = Constant("i.particleVelocity", 3); return true; });
+            Register("Ribbon UV", "VFX", {},
+                     { V("UV", "Ribbon/beam UV: u along length [0..1], v across width [0..1] (defaults to UV0 on meshes)") }, {},
+                     [](EmitArgs& args) { args.Out[0] = Constant("(i.hasParticleData != 0u ? i.ribbonUV : i.uv0)", 2); return true; });
             auto simple = [](const char* name, const char* code, int components, const char* tooltip)
             {
                 Register(name, "Inputs", {}, { V(name == std::string("Vertex Color") ? "Color" : "Value", tooltip) }, {},

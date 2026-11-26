@@ -445,8 +445,33 @@ namespace Nox
         void SubmitParticles(const ParticleBatchSettings& settings, std::span<const shaderio::GpuParticle> particles);
         // GPU Compute VFX emitter (docs/VFX_And_Volumes_Plan_2026-11.md step V1): simulated on the GPU in VfxPasses.cpp and drawn
         // indirectly by Particles.slang (entityId keys its persistent GPU particle pool across frames).
+        struct VfxMeshParticleOptions
+        {
+            bool Enabled;
+            bool AlignToVelocity;
+            uint32_t VerticesOffset;
+            uint32_t IndicesOffset;
+            uint32_t TriangleCount; // 0: built-in 8-tri procedural crystal shard
+            constexpr VfxMeshParticleOptions()
+                : Enabled(false), AlignToVelocity(false), VerticesOffset(0), IndicesOffset(0), TriangleCount(0) {}
+        };
         void SubmitGpuParticleEmitter(uint64_t entityId, const ParticleBatchSettings& settings,
-                                      const shaderio::GpuVfxEmitterParams& params, bool restart, int32_t sceneEntityHandle = -1);
+                                      const shaderio::GpuVfxEmitterParams& params, bool restart, int32_t sceneEntityHandle = -1,
+                                      const VfxMeshParticleOptions& meshOptions = VfxMeshParticleOptions());
+
+        struct VfxRibbonSettings
+        {
+            uint32_t TextureSlot = 0xFFFFFFFFu;
+            bool Additive = true;
+            bool Soft = true;
+            bool Beam = false;
+            float SoftDistance = 0.0f; // world units
+            float UvTileU = 1.0f;
+            float UvScrollU = 0.0f;
+        };
+        void SubmitVfxRibbon(const VfxRibbonSettings& settings, std::span<const shaderio::GpuVfxRibbonNode> nodes);
+        void SubmitVfxDecal(const shaderio::GpuVfxDecal& decal);
+        void SubmitVfxDistortion(const shaderio::GpuVfxDistortion& distortion);
         void SubmitLight(const glm::dmat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const SpotLightComponent& light);
@@ -1715,6 +1740,7 @@ namespace Nox
             ParticleBatchSettings Settings;
             shaderio::GpuVfxEmitterParams Params{};
             bool Restart = false;
+            VfxMeshParticleOptions MeshOptions;
         };
         std::unordered_map<uint64_t, std::unique_ptr<GpuVfxPool>> m_gpuVfxPools;
         std::vector<GpuVfxSubmission> m_gpuVfxSubmissions;
@@ -1723,6 +1749,52 @@ namespace Nox
         nri::Pipeline m_vfxUpdatePipeline;
         nri::Pipeline m_vfxFinalizePipeline;
         uint64_t m_vfxFrameCounter = 0;
+
+        // VFX Ribbons / Trails / Beams & Projected Decals (step V3a)
+        struct VfxRibbonBatch
+        {
+            VfxRibbonSettings Settings;
+            uint32_t FirstNode = 0;
+            uint32_t NodeCount = 0;
+        };
+        std::vector<shaderio::GpuVfxRibbonNode> m_vfxRibbonNodes;
+        std::vector<VfxRibbonBatch> m_vfxRibbonBatches;
+        std::vector<nri::Buffer> m_vfxRibbonBuffers;
+        std::vector<void*> m_vfxRibbonBuffersMapped;
+        uint64_t m_vfxRibbonBufferCapacity = 0;
+        nri::Pipeline m_vfxRibbonPipeline;
+
+        std::vector<shaderio::GpuVfxDecal> m_vfxDecals;
+        std::vector<nri::Buffer> m_vfxDecalBuffers;
+        std::vector<void*> m_vfxDecalBuffersMapped;
+        uint64_t m_vfxDecalBufferCapacity = 0;
+        nri::Pipeline m_vfxDecalPipeline;
+
+        // GPU Mesh Particles & Screen-Space Distortion (step V3b)
+        struct GpuVfxMeshBatch
+        {
+            ParticleBatchSettings Settings;
+            VfxMeshParticleOptions MeshOptions;
+            uint64_t ParticlesRef = 0;
+            uint64_t RenderParticlesRef = 0;
+            uint64_t AliveListRef = 0;
+            uint64_t CountersRef = 0;
+            const nri::Buffer* IndirectBuffer = nullptr;
+        };
+        std::vector<GpuVfxMeshBatch> m_vfxMeshBatches;
+        nri::Pipeline m_vfxMeshParticlePipeline;
+
+        std::vector<shaderio::GpuVfxDistortion> m_vfxDistortions;
+        std::vector<nri::Buffer> m_vfxDistortionBuffers;
+        std::vector<void*> m_vfxDistortionBuffersMapped;
+        uint64_t m_vfxDistortionBufferCapacity = 0;
+        nri::Pipeline m_vfxDistortionPipeline;
+
+        void createVfxGraphicsPipelines(bool forceCompile = false);
+        void addVfxDecalPass();
+        void addVfxMeshParticlePass();
+        void addVfxRibbonPass();
+        void addVfxDistortionPass();
         std::vector<shaderio::GpuParticle> m_particles;
         std::vector<ParticleBatch> m_particleBatches;
         std::vector<nri::Buffer> m_particleBuffers;

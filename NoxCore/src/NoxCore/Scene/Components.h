@@ -734,6 +734,12 @@ namespace Nox
         Alpha     // covering (smoke, dust): sorted back to front
     };
 
+    enum class ParticleRenderMode : uint8_t
+    {
+        Sprite = 0, // camera-facing billboard quads (Particles.slang)
+        Mesh   = 1  // GPU-instanced 3D mesh particles (VfxMeshParticle.slang, step V3b)
+    };
+
     // What an emitter is doing (runtime only, never saved).
     struct ParticleSimulation
     {
@@ -849,10 +855,118 @@ namespace Nox
 
         float MeshSurfaceNormalSpeed = 0.5f; // m/s initial push along vertex normal when Shape == MeshSurface
 
+        // GPU Mesh Particles (docs/VFX_And_Volumes_Plan_2026-11.md step V3b, active when GpuSimulated = true).
+        ParticleRenderMode RenderMode = ParticleRenderMode::Sprite;
+        AssetHandle ParticleMesh = 0;        // optional Mesh asset (0: procedural 3D crystal shard)
+        bool AlignToVelocity = false;        // orient mesh particles along their flight direction
+
         ParticleSimulation Simulation;
 
         ParticleEmitterComponent() = default;
         ParticleEmitterComponent(const ParticleEmitterComponent&) = default;
+    };
+
+    // Runtime-only ring buffer for TrailRendererComponent (never saved).
+    struct TrailSimulation
+    {
+        struct Node
+        {
+            glm::dvec3 Position{ 0.0 };
+            float Age = 0.0f;
+        };
+        std::vector<Node> Nodes;
+        float Time = 0.0f;
+    };
+
+    // Camera-facing Ribbon / Trail VFX (docs/VFX_And_Volumes_Plan_2026-11.md step V3a): sword slashes, projectile trails, magic ribbons.
+    struct TrailRendererComponent
+    {
+        bool Emitting = true;
+        float Lifetime = 0.5f;          // seconds each trail point stays alive
+        float MinVertexDistance = 0.05f;// meters before emitting a new ribbon node
+        float WidthStart = 0.25f;       // meters at head
+        float WidthEnd = 0.02f;         // meters at tail
+        glm::vec4 ColorStart{ 0.3f, 0.75f, 1.0f, 1.0f };
+        glm::vec4 ColorEnd{ 0.1f, 0.25f, 1.0f, 0.0f };
+        float Intensity = 3.0f;         // HDR brightness multiplier
+        ParticleBlend Blend = ParticleBlend::Additive;
+        AssetHandle Texture = 0;        // 0: procedural glowing ribbon
+        float TextureTileU = 1.0f;
+        float TextureScrollU = 0.0f;
+        bool SoftEdges = true;
+        float SoftDistance = 0.2f;      // meters
+
+        TrailSimulation Simulation;
+
+        TrailRendererComponent() = default;
+        TrailRendererComponent(const TrailRendererComponent&) = default;
+    };
+
+    // A -> B Lightning Bolt / Laser Beam VFX (docs/VFX_And_Volumes_Plan_2026-11.md step V3a).
+    struct BeamRendererComponent
+    {
+        bool Enabled = true;
+        glm::vec3 TargetOffset{ 0.0f, 0.0f, 5.0f }; // meters relative to emitter (local or world)
+        uint64_t TargetEntity = 0;                  // optional UUID of target entity (overrides TargetOffset when valid)
+        bool LocalTarget = true;
+        uint32_t Segments = 24;                     // 4..128 beam subdivisions
+        float WidthStart = 0.12f;                   // meters
+        float WidthEnd = 0.12f;                     // meters
+        float NoiseAmplitude = 0.25f;               // meters of jagged lightning jitter (0 = straight laser)
+        float NoiseFrequency = 2.0f;
+        float NoiseSpeed = 12.0f;
+        glm::vec4 ColorStart{ 0.45f, 0.85f, 1.0f, 1.0f };
+        glm::vec4 ColorEnd{ 0.85f, 0.95f, 1.0f, 1.0f };
+        float Intensity = 5.0f;                     // HDR brightness multiplier
+        ParticleBlend Blend = ParticleBlend::Additive;
+        AssetHandle Texture = 0;                    // 0: procedural electric core
+        float TextureTileU = 1.0f;
+        float TextureScrollU = -2.0f;
+        float Time = 0.0f;                          // runtime animation clock
+
+        BeamRendererComponent() = default;
+        BeamRendererComponent(const BeamRendererComponent&) = default;
+    };
+
+    // Projected Decal VFX (docs/VFX_And_Volumes_Plan_2026-11.md step V3a): ground runes, scorch marks, magic circles.
+    // Projects along the entity's local -Y axis onto any solid surface inside its Size box.
+    struct DecalComponent
+    {
+        bool Enabled = true;
+        glm::vec3 Size{ 2.0f, 1.0f, 2.0f };         // meters (box full extents)
+        glm::vec4 Color{ 1.0f, 0.55f, 0.15f, 1.0f };
+        float EmissiveIntensity = 3.0f;             // HDR glow multiplier (0 = non-emissive)
+        ParticleBlend Blend = ParticleBlend::Additive;
+        AssetHandle Texture = 0;                    // 0: procedural glowing magic rune circle
+        float NormalFade = 0.35f;                   // 0..1 angle threshold to prevent stretching on steep walls
+        float EdgeFade = 0.15f;                     // 0..0.5 fade near box top/bottom
+
+        DecalComponent() = default;
+        DecalComponent(const DecalComponent&) = default;
+    };
+
+    enum class DistortionMode : uint8_t
+    {
+        ShockwaveRing = 0, // expanding radial shockwave ripple
+        HeatHaze      = 1, // rising turbulent curl heat distortion
+        PortalSwirl   = 2  // swirling lens vortex distortion
+    };
+
+    // Screen-Space Distortion VFX (docs/VFX_And_Volumes_Plan_2026-11.md step V3b): shockwaves, heat haze, portal warping.
+    struct DistortionComponent
+    {
+        bool Enabled = true;
+        DistortionMode Mode = DistortionMode::ShockwaveRing;
+        float Radius = 2.5f;              // meters
+        float Strength = 0.04f;           // screen UV warp magnitude
+        float RingWidth = 0.25f;          // 0.05..1.0 radial ring thickness (Shockwave)
+        float Speed = 1.5f;               // animation rate
+        float ChromaticAberration = 0.25f;// 0..1 RGB prism split
+        glm::vec4 RimTint{ 0.4f, 0.8f, 1.0f, 0.35f };
+        bool CameraFacing = true;         // true: billboarded; false: lies in entity XZ plane
+
+        DistortionComponent() = default;
+        DistortionComponent(const DistortionComponent&) = default;
     };
 
     struct SpriteRendererComponent
@@ -1315,7 +1429,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

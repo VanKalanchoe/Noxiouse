@@ -1085,6 +1085,93 @@ namespace Nox
             }
             if (emitter.Shape == ParticleShape::MeshSurface)
                 out << YAML::Key << "MeshSurfaceNormalSpeed" << YAML::Value << emitter.MeshSurfaceNormalSpeed;
+            if (emitter.RenderMode == ParticleRenderMode::Mesh)
+            {
+                out << YAML::Key << "RenderMode" << YAML::Value << "Mesh";
+                out << YAML::Key << "ParticleMesh" << YAML::Value << emitter.ParticleMesh;
+                out << YAML::Key << "AlignToVelocity" << YAML::Value << emitter.AlignToVelocity;
+            }
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<TrailRendererComponent>())
+        {
+            const auto& trail = entity.GetComponent<TrailRendererComponent>();
+            out << YAML::Key << "TrailRendererComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Emitting" << YAML::Value << trail.Emitting;
+            out << YAML::Key << "Lifetime" << YAML::Value << trail.Lifetime;
+            out << YAML::Key << "MinVertexDistance" << YAML::Value << trail.MinVertexDistance;
+            out << YAML::Key << "WidthStart" << YAML::Value << trail.WidthStart;
+            out << YAML::Key << "WidthEnd" << YAML::Value << trail.WidthEnd;
+            out << YAML::Key << "ColorStart" << YAML::Value << trail.ColorStart;
+            out << YAML::Key << "ColorEnd" << YAML::Value << trail.ColorEnd;
+            out << YAML::Key << "Intensity" << YAML::Value << trail.Intensity;
+            out << YAML::Key << "Blend" << YAML::Value << (trail.Blend == ParticleBlend::Additive ? "Additive" : "Alpha");
+            out << YAML::Key << "Texture" << YAML::Value << trail.Texture;
+            out << YAML::Key << "TextureTileU" << YAML::Value << trail.TextureTileU;
+            out << YAML::Key << "TextureScrollU" << YAML::Value << trail.TextureScrollU;
+            out << YAML::Key << "SoftEdges" << YAML::Value << trail.SoftEdges;
+            out << YAML::Key << "SoftDistance" << YAML::Value << trail.SoftDistance;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<BeamRendererComponent>())
+        {
+            const auto& beam = entity.GetComponent<BeamRendererComponent>();
+            out << YAML::Key << "BeamRendererComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << beam.Enabled;
+            out << YAML::Key << "TargetOffset" << YAML::Value << beam.TargetOffset;
+            out << YAML::Key << "TargetEntity" << YAML::Value << beam.TargetEntity;
+            out << YAML::Key << "LocalTarget" << YAML::Value << beam.LocalTarget;
+            out << YAML::Key << "Segments" << YAML::Value << beam.Segments;
+            out << YAML::Key << "WidthStart" << YAML::Value << beam.WidthStart;
+            out << YAML::Key << "WidthEnd" << YAML::Value << beam.WidthEnd;
+            out << YAML::Key << "NoiseAmplitude" << YAML::Value << beam.NoiseAmplitude;
+            out << YAML::Key << "NoiseFrequency" << YAML::Value << beam.NoiseFrequency;
+            out << YAML::Key << "NoiseSpeed" << YAML::Value << beam.NoiseSpeed;
+            out << YAML::Key << "ColorStart" << YAML::Value << beam.ColorStart;
+            out << YAML::Key << "ColorEnd" << YAML::Value << beam.ColorEnd;
+            out << YAML::Key << "Intensity" << YAML::Value << beam.Intensity;
+            out << YAML::Key << "Blend" << YAML::Value << (beam.Blend == ParticleBlend::Additive ? "Additive" : "Alpha");
+            out << YAML::Key << "Texture" << YAML::Value << beam.Texture;
+            out << YAML::Key << "TextureTileU" << YAML::Value << beam.TextureTileU;
+            out << YAML::Key << "TextureScrollU" << YAML::Value << beam.TextureScrollU;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<DecalComponent>())
+        {
+            const auto& decal = entity.GetComponent<DecalComponent>();
+            out << YAML::Key << "DecalComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << decal.Enabled;
+            out << YAML::Key << "Size" << YAML::Value << decal.Size;
+            out << YAML::Key << "Color" << YAML::Value << decal.Color;
+            out << YAML::Key << "EmissiveIntensity" << YAML::Value << decal.EmissiveIntensity;
+            out << YAML::Key << "Blend" << YAML::Value << (decal.Blend == ParticleBlend::Additive ? "Additive" : "Alpha");
+            out << YAML::Key << "Texture" << YAML::Value << decal.Texture;
+            out << YAML::Key << "NormalFade" << YAML::Value << decal.NormalFade;
+            out << YAML::Key << "EdgeFade" << YAML::Value << decal.EdgeFade;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<DistortionComponent>())
+        {
+            static const char* modeNames[] = { "ShockwaveRing", "HeatHaze", "PortalSwirl" };
+            const auto& dist = entity.GetComponent<DistortionComponent>();
+            out << YAML::Key << "DistortionComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << dist.Enabled;
+            out << YAML::Key << "Mode" << YAML::Value << modeNames[static_cast<int>(dist.Mode)];
+            out << YAML::Key << "Radius" << YAML::Value << dist.Radius;
+            out << YAML::Key << "Strength" << YAML::Value << dist.Strength;
+            out << YAML::Key << "RingWidth" << YAML::Value << dist.RingWidth;
+            out << YAML::Key << "Speed" << YAML::Value << dist.Speed;
+            out << YAML::Key << "ChromaticAberration" << YAML::Value << dist.ChromaticAberration;
+            out << YAML::Key << "RimTint" << YAML::Value << dist.RimTint;
+            out << YAML::Key << "CameraFacing" << YAML::Value << dist.CameraFacing;
             out << YAML::EndMap;
         }
 
@@ -2800,6 +2887,91 @@ namespace Nox
             read("CollisionThickness", emitter.CollisionThickness);
             read("CollisionKillOnHit", emitter.CollisionKillOnHit);
             read("MeshSurfaceNormalSpeed", emitter.MeshSurfaceNormalSpeed);
+            if (particleEmitter["RenderMode"])
+                emitter.RenderMode = particleEmitter["RenderMode"].as<std::string>() == "Mesh" ? ParticleRenderMode::Mesh : ParticleRenderMode::Sprite;
+            read("ParticleMesh", emitter.ParticleMesh);
+            read("AlignToVelocity", emitter.AlignToVelocity);
+        }
+
+        if (auto trailNode = entity["TrailRendererComponent"])
+        {
+            auto& trail = deserializedEntity.AddComponent<TrailRendererComponent>();
+            auto read = [&](const char* key, auto& val) { if (trailNode[key]) val = trailNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Emitting", trail.Emitting);
+            read("Lifetime", trail.Lifetime);
+            read("MinVertexDistance", trail.MinVertexDistance);
+            read("WidthStart", trail.WidthStart);
+            read("WidthEnd", trail.WidthEnd);
+            read("ColorStart", trail.ColorStart);
+            read("ColorEnd", trail.ColorEnd);
+            read("Intensity", trail.Intensity);
+            if (trailNode["Blend"])
+                trail.Blend = trailNode["Blend"].as<std::string>() == "Alpha" ? ParticleBlend::Alpha : ParticleBlend::Additive;
+            read("Texture", trail.Texture);
+            read("TextureTileU", trail.TextureTileU);
+            read("TextureScrollU", trail.TextureScrollU);
+            read("SoftEdges", trail.SoftEdges);
+            read("SoftDistance", trail.SoftDistance);
+        }
+
+        if (auto beamNode = entity["BeamRendererComponent"])
+        {
+            auto& beam = deserializedEntity.AddComponent<BeamRendererComponent>();
+            auto read = [&](const char* key, auto& val) { if (beamNode[key]) val = beamNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Enabled", beam.Enabled);
+            read("TargetOffset", beam.TargetOffset);
+            read("TargetEntity", beam.TargetEntity);
+            read("LocalTarget", beam.LocalTarget);
+            read("Segments", beam.Segments);
+            read("WidthStart", beam.WidthStart);
+            read("WidthEnd", beam.WidthEnd);
+            read("NoiseAmplitude", beam.NoiseAmplitude);
+            read("NoiseFrequency", beam.NoiseFrequency);
+            read("NoiseSpeed", beam.NoiseSpeed);
+            read("ColorStart", beam.ColorStart);
+            read("ColorEnd", beam.ColorEnd);
+            read("Intensity", beam.Intensity);
+            if (beamNode["Blend"])
+                beam.Blend = beamNode["Blend"].as<std::string>() == "Alpha" ? ParticleBlend::Alpha : ParticleBlend::Additive;
+            read("Texture", beam.Texture);
+            read("TextureTileU", beam.TextureTileU);
+            read("TextureScrollU", beam.TextureScrollU);
+        }
+
+        if (auto decalNode = entity["DecalComponent"])
+        {
+            auto& decal = deserializedEntity.AddComponent<DecalComponent>();
+            auto read = [&](const char* key, auto& val) { if (decalNode[key]) val = decalNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Enabled", decal.Enabled);
+            read("Size", decal.Size);
+            read("Color", decal.Color);
+            read("EmissiveIntensity", decal.EmissiveIntensity);
+            if (decalNode["Blend"])
+                decal.Blend = decalNode["Blend"].as<std::string>() == "Alpha" ? ParticleBlend::Alpha : ParticleBlend::Additive;
+            read("Texture", decal.Texture);
+            read("NormalFade", decal.NormalFade);
+            read("EdgeFade", decal.EdgeFade);
+        }
+
+        if (auto distNode = entity["DistortionComponent"])
+        {
+            auto& dist = deserializedEntity.AddComponent<DistortionComponent>();
+            auto read = [&](const char* key, auto& val) { if (distNode[key]) val = distNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Enabled", dist.Enabled);
+            if (distNode["Mode"])
+            {
+                const std::string m = distNode["Mode"].as<std::string>();
+                dist.Mode = m == "HeatHaze" ? DistortionMode::HeatHaze
+                          : m == "PortalSwirl" ? DistortionMode::PortalSwirl
+                          : DistortionMode::ShockwaveRing;
+            }
+            read("Radius", dist.Radius);
+            read("Strength", dist.Strength);
+            read("RingWidth", dist.RingWidth);
+            read("Speed", dist.Speed);
+            read("ChromaticAberration", dist.ChromaticAberration);
+            read("RimTint", dist.RimTint);
+            read("CameraFacing", dist.CameraFacing);
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

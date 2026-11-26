@@ -2664,6 +2664,11 @@ namespace Nox
                          c.AddBool("Lit", &comp.Lit);
                          c.AddBool("Soft Particles", &comp.SoftParticles);
                          c.AddBool("Local Space", &comp.LocalSpace);
+                         c.AddEnum("Render Mode", { "Sprite", "Mesh" }, static_cast<int>(comp.RenderMode),
+                             [&comp](int i) { comp.RenderMode = static_cast<ParticleRenderMode>(i); });
+                         c.AddAssetSlot("Particle Mesh", comp.ParticleMesh, { AssetType::StaticMesh, AssetType::Mesh },
+                             [&comp](AssetHandle h) { comp.ParticleMesh = h; }, "Crystal Shard");
+                         c.AddBool("Align To Velocity", &comp.AlignToVelocity);
                          c.AddAssetSlot("Texture", comp.Texture, { AssetType::Texture2D }, [&comp](AssetHandle h) { comp.Texture = h; }, "Soft Dot");
 
                          // GPU VFX Module Stack (Step V2)
@@ -2689,6 +2694,101 @@ namespace Nox
                          c.AddFloat("Bounce Friction", &comp.CollisionFriction, 0.02f, 0.0f, 1.0f);
                          c.AddFloat("Collision Thickness (m)", &comp.CollisionThickness, 0.02f, 0.02f, 5.0f);
                          c.AddBool("Kill On Collision", &comp.CollisionKillOnHit);
+                     });
+        }
+
+        if (entity.HasComponent<TrailRendererComponent>())
+        {
+            makeCard("Trail Renderer", true,
+                     [entity]() mutable { entity.GetComponent<TrailRendererComponent>() = TrailRendererComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<TrailRendererComponent>(); },
+                     [entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<TrailRendererComponent>();
+                         c.AddBool("Emitting", &comp.Emitting);
+                         c.AddFloat("Lifetime (s)", &comp.Lifetime, 0.05f, 0.02f, 30.0f);
+                         c.AddFloat("Min Vertex Distance (m)", &comp.MinVertexDistance, 0.01f, 0.005f, 5.0f);
+                         c.AddFloat("Width Start (m)", &comp.WidthStart, 0.02f, 0.005f, 20.0f);
+                         c.AddFloat("Width End (m)", &comp.WidthEnd, 0.02f, 0.0f, 20.0f);
+                         c.AddColor4("Color Start", &comp.ColorStart);
+                         c.AddColor4("Color End", &comp.ColorEnd);
+                         c.AddFloat("Intensity (HDR)", &comp.Intensity, 0.1f, 0.0f, 50.0f);
+                         c.AddEnum("Blend", { "Additive", "Alpha" }, static_cast<int>(comp.Blend),
+                             [&comp](int i) { comp.Blend = static_cast<ParticleBlend>(i); });
+                         c.AddBool("Soft Edges", &comp.SoftEdges);
+                         c.AddFloat("Soft Distance (m)", &comp.SoftDistance, 0.02f, 0.0f, 5.0f);
+                         c.AddFloat("UV Tile U", &comp.TextureTileU, 0.1f, 0.05f, 50.0f);
+                         c.AddFloat("UV Scroll U", &comp.TextureScrollU, 0.1f, -50.0f, 50.0f);
+                         c.AddAssetSlot("Texture", comp.Texture, { AssetType::Texture2D }, [&comp](AssetHandle h) { comp.Texture = h; }, "Glow Core");
+                     });
+        }
+
+        if (entity.HasComponent<BeamRendererComponent>())
+        {
+            makeCard("Beam Renderer", true,
+                     [entity]() mutable { entity.GetComponent<BeamRendererComponent>() = BeamRendererComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<BeamRendererComponent>(); },
+                     [entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<BeamRendererComponent>();
+                         c.AddBool("Enabled", &comp.Enabled);
+                         c.AddVec3("Target Offset (m)", &comp.TargetOffset, 0.1f);
+                         c.AddBool("Local Target", &comp.LocalTarget);
+                         c.AddUInt32("Segments", &comp.Segments, 4, 128);
+                         c.AddFloat("Width Start (m)", &comp.WidthStart, 0.01f, 0.005f, 10.0f);
+                         c.AddFloat("Width End (m)", &comp.WidthEnd, 0.01f, 0.005f, 10.0f);
+                         c.AddFloat("Noise Amplitude (m)", &comp.NoiseAmplitude, 0.02f, 0.0f, 10.0f);
+                         c.AddFloat("Noise Frequency", &comp.NoiseFrequency, 0.1f, 0.1f, 20.0f);
+                         c.AddFloat("Noise Speed", &comp.NoiseSpeed, 0.5f, 0.0f, 60.0f);
+                         c.AddColor4("Color Start", &comp.ColorStart);
+                         c.AddColor4("Color End", &comp.ColorEnd);
+                         c.AddFloat("Intensity (HDR)", &comp.Intensity, 0.1f, 0.0f, 50.0f);
+                         c.AddEnum("Blend", { "Additive", "Alpha" }, static_cast<int>(comp.Blend),
+                             [&comp](int i) { comp.Blend = static_cast<ParticleBlend>(i); });
+                         c.AddFloat("UV Tile U", &comp.TextureTileU, 0.1f, 0.05f, 50.0f);
+                         c.AddFloat("UV Scroll U", &comp.TextureScrollU, 0.1f, -50.0f, 50.0f);
+                         c.AddAssetSlot("Texture", comp.Texture, { AssetType::Texture2D }, [&comp](AssetHandle h) { comp.Texture = h; }, "Electric Core");
+                     });
+        }
+
+        if (entity.HasComponent<DecalComponent>())
+        {
+            makeCard("Projected Decal", true,
+                     [entity]() mutable { entity.GetComponent<DecalComponent>() = DecalComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<DecalComponent>(); },
+                     [entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<DecalComponent>();
+                         c.AddBool("Enabled", &comp.Enabled);
+                         c.AddVec3("Size (m)", &comp.Size, 0.1f);
+                         c.AddColor4("Color", &comp.Color);
+                         c.AddFloat("Emissive Intensity", &comp.EmissiveIntensity, 0.1f, 0.0f, 50.0f);
+                         c.AddEnum("Blend", { "Additive", "Alpha" }, static_cast<int>(comp.Blend),
+                             [&comp](int i) { comp.Blend = static_cast<ParticleBlend>(i); });
+                         c.AddFloat("Normal Fade", &comp.NormalFade, 0.02f, 0.0f, 1.0f);
+                         c.AddFloat("Edge Fade", &comp.EdgeFade, 0.02f, 0.0f, 0.5f);
+                         c.AddAssetSlot("Texture", comp.Texture, { AssetType::Texture2D }, [&comp](AssetHandle h) { comp.Texture = h; }, "Arcane Rune");
+                     });
+        }
+
+        if (entity.HasComponent<DistortionComponent>())
+        {
+            makeCard("Screen-Space Distortion", true,
+                     [entity]() mutable { entity.GetComponent<DistortionComponent>() = DistortionComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<DistortionComponent>(); },
+                     [entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<DistortionComponent>();
+                         c.AddBool("Enabled", &comp.Enabled);
+                         c.AddEnum("Mode", { "Shockwave Ring", "Heat Haze", "Portal Swirl" }, static_cast<int>(comp.Mode),
+                             [&comp](int i) { comp.Mode = static_cast<DistortionMode>(i); });
+                         c.AddFloat("Radius (m)", &comp.Radius, 0.1f, 0.05f, 100.0f);
+                         c.AddFloat("Strength", &comp.Strength, 0.002f, 0.0f, 0.3f);
+                         c.AddFloat("Ring Width", &comp.RingWidth, 0.02f, 0.04f, 1.0f);
+                         c.AddFloat("Speed", &comp.Speed, 0.05f, 0.0f, 20.0f);
+                         c.AddFloat("Chromatic Aberration", &comp.ChromaticAberration, 0.02f, 0.0f, 1.0f);
+                         c.AddColor4("Rim Tint", &comp.RimTint);
+                         c.AddBool("Camera Facing", &comp.CameraFacing);
                      });
         }
 
@@ -2786,6 +2886,10 @@ namespace Nox
             addEntry.template operator()<SpriteRendererComponent>("Sprite Renderer"),
             addEntry.template operator()<CircleRendererComponent>("Circle Renderer"),
             addEntry.template operator()<ParticleEmitterComponent>("Particle Emitter"),
+            addEntry.template operator()<TrailRendererComponent>("Trail Renderer"),
+            addEntry.template operator()<BeamRendererComponent>("Beam Renderer"),
+            addEntry.template operator()<DecalComponent>("Projected Decal"),
+            addEntry.template operator()<DistortionComponent>("Screen-Space Distortion"),
             addEntry.template operator()<TextComponent>("Text Renderer"),
             addEntry.template operator()<PostProcessVolumeComponent>("Post Process Volume")
         };

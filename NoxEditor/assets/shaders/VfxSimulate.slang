@@ -315,9 +315,18 @@ void finalizeMain(uniform PushConstantVfxSimulate pushConstant)
 
     RWBufferRef<GpuVfxIndirectCommand> indirect = RWBufferRef<GpuVfxIndirectCommand>(pushConstant.indirectArgsReference);
     GpuVfxIndirectCommand cmd;
-    cmd.groupCountX = (alive + 31u) / 32u;
-    cmd.groupCountY = 1u;
-    cmd.groupCountZ = 1u;
+    if (params.meshRenderChunkCount > 0u)
+    {
+        cmd.groupCountX = params.meshRenderChunkCount;
+        cmd.groupCountY = min(alive, 65535u);
+        cmd.groupCountZ = 1u;
+    }
+    else
+    {
+        cmd.groupCountX = (alive + 31u) / 32u;
+        cmd.groupCountY = 1u;
+        cmd.groupCountZ = 1u;
+    }
     cmd.pad0 = 0u;
     indirect[0] = cmd;
 }

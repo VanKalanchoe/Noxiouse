@@ -1387,7 +1387,7 @@ namespace Nox
             [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities); });
         // Particles spawn where their emitter is now: after propagation.
         m_UpdateSystems.AddSystem("Particles",
-            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent>(),
+            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent>(),
             [this]() { UpdateParticles(); });
 
         // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
@@ -1400,7 +1400,7 @@ namespace Nox
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
             [this]() { Submit2D(); });
         m_SubmitSystems.AddSystem("Submit Particles",
-            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent>().Write<ParticleSubmission>(),
+            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent>().Write<ParticleSubmission>(),
             [this]() { SubmitParticles(); });
         m_SubmitSystems.AddSystem("Submit Post Process",
             ComponentAccess().Read<WorldTransformComponent, PostProcessVolumeComponent>().Write<PostProcessSubmission>(),
@@ -1809,6 +1809,66 @@ namespace Nox
 
     void Scene::UpdateParticles()
     {
+        const float dt = std::clamp(m_FrameInput.Timestep, 0.0f, 0.1f);
+        const float unit = WorldUnits::PerMeter();
+
+        // Update TrailRendererComponent (even when paused in Editor so dragging an entity paints live trails).
+        auto trailView = m_Registry.view<TrailRendererComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : trailView)
+        {
+            auto [trail, world] = trailView.get<TrailRendererComponent, WorldTransformComponent>(entity);
+            const float life = std::max(trail.Lifetime, 0.02f);
+            trail.Simulation.Time += dt;
+            for (auto& node : trail.Simulation.Nodes)
+                node.Age += dt;
+            std::erase_if(trail.Simulation.Nodes, [life](const TrailSimulation::Node& n) { return n.Age >= life; });
+
+            if (trail.Emitting)
+            {
+                const glm::dvec3 headPos(world.WorldMatrix[3]);
+                const double minDist = static_cast<double>(std::max(trail.MinVertexDistance, 0.005f) * unit);
+                if (trail.Simulation.Nodes.empty())
+                {
+                    trail.Simulation.Nodes.push_back({ headPos, 0.0f });
+                }
+                else if (trail.Simulation.Nodes.size() == 1u)
+                {
+                    if (glm::length(headPos - trail.Simulation.Nodes[0].Position) >= minDist)
+                        trail.Simulation.Nodes.push_back({ headPos, 0.0f });
+                }
+                else
+                {
+                    // Measure distance from the last anchored node (size - 2), keeping back() as the live head.
+                    const double dist = glm::length(headPos - trail.Simulation.Nodes[trail.Simulation.Nodes.size() - 2u].Position);
+                    if (dist >= minDist)
+                    {
+                        // Lock the current live head in place (already near minDist from size-2) only if it's distinct from headPos,
+                        // otherwise just append headPos so we never emit a zero-length segment at the front.
+                        if (glm::length(headPos - trail.Simulation.Nodes.back().Position) > 1e-4 * unit)
+                        {
+                            trail.Simulation.Nodes.push_back({ headPos, 0.0f });
+                            if (trail.Simulation.Nodes.size() > 512u)
+                                trail.Simulation.Nodes.erase(trail.Simulation.Nodes.begin());
+                        }
+                        else
+                        {
+                            trail.Simulation.Nodes.back().Position = headPos;
+                            trail.Simulation.Nodes.back().Age = 0.0f;
+                        }
+                    }
+                    else
+                    {
+                        trail.Simulation.Nodes.back().Position = headPos;
+                        trail.Simulation.Nodes.back().Age = 0.0f;
+                    }
+                }
+            }
+        }
+
+        auto beamView = m_Registry.view<BeamRendererComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : beamView)
+            beamView.get<BeamRendererComponent>(entity).Time += dt;
+
         if (!m_FrameInput.StepAnimation)
             return;
         auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
@@ -1973,12 +2033,45 @@ namespace Nox
                 }
                 gpuParams.moduleFlags = modFlags;
 
+                Renderer::VfxMeshParticleOptions meshOpts{};
+                if (emitter.RenderMode == ParticleRenderMode::Mesh)
+                {
+                    meshOpts.Enabled = true;
+                    meshOpts.AlignToVelocity = emitter.AlignToVelocity;
+                    if (emitter.ParticleMesh != 0)
+                    {
+                        const MeshHandle* sub = nullptr;
+                        if (const StaticMesh* sm = AssetManager::FindLoadedAsset<StaticMesh>(emitter.ParticleMesh))
+                        {
+                            if (sm->GetSubMeshCount() > 0)
+                                sub = &sm->GetSubMesh(0);
+                        }
+                        else if (const Mesh* m = AssetManager::FindLoadedAsset<Mesh>(emitter.ParticleMesh))
+                        {
+                            if (m->GetSubMeshCount() > 0)
+                                sub = &m->GetSubMesh(0);
+                        }
+                        else
+                        {
+                            missingAssets.push_back(emitter.ParticleMesh);
+                        }
+                        if (sub && sub->IsValid() && sub->rtIndices.count >= 3u)
+                        {
+                            meshOpts.VerticesOffset = sub->vertices.offset;
+                            meshOpts.IndicesOffset = sub->rtIndices.offset;
+                            meshOpts.TriangleCount = sub->rtIndices.count / 3u;
+                        }
+                    }
+                    const uint32_t triCount = meshOpts.TriangleCount > 0u ? meshOpts.TriangleCount : 8u;
+                    gpuParams.meshRenderChunkCount = (triCount + 31u) / 32u;
+                }
+
                 const uint64_t entityKey = m_Registry.all_of<IDComponent>(entity)
                     ? static_cast<uint64_t>(m_Registry.get<IDComponent>(entity).ID)
                     : static_cast<uint64_t>(entt::to_integral(entity));
                 const bool restart = emitter.Simulation.GpuNeedsReset;
                 emitter.Simulation.GpuNeedsReset = false;
-                m_renderer->SubmitGpuParticleEmitter(entityKey, settings, gpuParams, restart, static_cast<int32_t>(entt::to_integral(entity)));
+                m_renderer->SubmitGpuParticleEmitter(entityKey, settings, gpuParams, restart, static_cast<int32_t>(entt::to_integral(entity)), meshOpts);
                 continue;
             }
 
@@ -2000,6 +2093,208 @@ namespace Nox
                 particles.push_back(gpu);
             }
             m_renderer->SubmitParticles(settings, particles);
+        }
+
+        // Step V3a: Submit TrailRendererComponent ribbons.
+        const float unit = WorldUnits::PerMeter();
+        const glm::dvec3 renderOrigin = m_renderer->GetRenderOrigin();
+        std::vector<shaderio::GpuVfxRibbonNode> ribbonNodes;
+
+        auto trailView = m_Registry.view<TrailRendererComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : trailView)
+        {
+            const auto& trail = trailView.get<TrailRendererComponent>(entity);
+            const auto& nodes = trail.Simulation.Nodes;
+            if (nodes.size() < 2u)
+                continue;
+
+            Renderer::VfxRibbonSettings settings;
+            if (trail.Texture != 0)
+            {
+                if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(trail.Texture))
+                    settings.TextureSlot = tex->GetDescriptorIndexSlot();
+                else
+                    missingAssets.push_back(trail.Texture);
+            }
+            settings.Additive = trail.Blend == ParticleBlend::Additive;
+            settings.Soft = trail.SoftEdges;
+            settings.Beam = false;
+            settings.SoftDistance = std::max(trail.SoftDistance, 0.0f) * unit;
+            settings.UvTileU = trail.TextureTileU;
+            settings.UvScrollU = trail.TextureScrollU;
+
+            const float life = std::max(trail.Lifetime, 0.02f);
+            const float intensity = std::max(trail.Intensity, 0.0f);
+            ribbonNodes.clear();
+            ribbonNodes.reserve(nodes.size());
+            // Nodes are stored oldest -> newest; u = 0 at head (newest), u = 1 at tail (oldest).
+            for (size_t idx = nodes.size(); idx-- > 0;)
+            {
+                const float t = glm::clamp(nodes[idx].Age / life, 0.0f, 1.0f);
+                const glm::vec4 col = glm::mix(trail.ColorStart, trail.ColorEnd, t);
+                shaderio::GpuVfxRibbonNode gpu{};
+                gpu.position = glm::vec3(nodes[idx].Position - renderOrigin);
+                gpu.width = std::max(glm::mix(trail.WidthStart, trail.WidthEnd, t), 0.0f) * unit;
+                gpu.color = glm::vec4(glm::vec3(col) * intensity, glm::clamp(col.a, 0.0f, 1.0f));
+                gpu.u = t;
+                ribbonNodes.push_back(gpu);
+            }
+            m_renderer->SubmitVfxRibbon(settings, ribbonNodes);
+        }
+
+        // Step V3a: Submit BeamRendererComponent lightning bolts / lasers.
+        auto beamView = m_Registry.view<BeamRendererComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : beamView)
+        {
+            const auto [beam, world] = beamView.get<BeamRendererComponent, WorldTransformComponent>(entity);
+            if (!beam.Enabled)
+                continue;
+
+            const glm::dvec3 startWorld(world.WorldMatrix[3]);
+            glm::dvec3 endWorld = startWorld;
+            bool foundTarget = false;
+            if (beam.TargetEntity != 0)
+            {
+                auto it = m_EntityMap.find(UUID(beam.TargetEntity));
+                if (it != m_EntityMap.end() && m_Registry.valid(it->second) && m_Registry.all_of<WorldTransformComponent>(it->second))
+                {
+                    endWorld = glm::dvec3(m_Registry.get<WorldTransformComponent>(it->second).WorldMatrix[3]);
+                    foundTarget = true;
+                }
+            }
+            if (!foundTarget)
+            {
+                const glm::vec3 offsetWU = beam.TargetOffset * unit;
+                if (beam.LocalTarget)
+                {
+                    glm::mat3 basis(glm::mat4(world.WorldMatrix));
+                    for (int col = 0; col < 3; ++col)
+                    {
+                        const float len = glm::length(basis[col]);
+                        if (len > 1e-6f)
+                            basis[col] /= len;
+                    }
+                    endWorld = startWorld + glm::dvec3(basis * offsetWU);
+                }
+                else
+                {
+                    endWorld = startWorld + glm::dvec3(offsetWU);
+                }
+            }
+
+            const glm::vec3 startRender = glm::vec3(startWorld - renderOrigin);
+            const glm::vec3 endRender = glm::vec3(endWorld - renderOrigin);
+            const glm::vec3 delta = endRender - startRender;
+            const float beamLen = glm::length(delta);
+            if (beamLen < 1e-4f)
+                continue;
+
+            const glm::vec3 dir = delta / beamLen;
+            const glm::vec3 refUp = std::abs(dir.y) < 0.95f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+            const glm::vec3 perpA = glm::normalize(glm::cross(dir, refUp));
+            const glm::vec3 perpB = glm::cross(dir, perpA);
+
+            const uint32_t segments = std::clamp(beam.Segments, 4u, 128u);
+            const float amp = beam.NoiseAmplitude * unit;
+            const float freq = beam.NoiseFrequency;
+            const float phase = beam.Time * beam.NoiseSpeed;
+            const float intensity = std::max(beam.Intensity, 0.0f);
+
+            ribbonNodes.clear();
+            ribbonNodes.reserve(segments + 1u);
+            for (uint32_t s = 0; s <= segments; ++s)
+            {
+                const float u = static_cast<float>(s) / static_cast<float>(segments);
+                glm::vec3 pos = glm::mix(startRender, endRender, u);
+                if (amp > 1e-5f && s > 0u && s < segments)
+                {
+                    const float envelope = std::sin(u * 3.14159265f);
+                    const float j1 = std::sin(u * freq * 11.3f + phase) * 0.6f + std::sin(u * freq * 27.1f - phase * 1.7f) * 0.4f;
+                    const float j2 = std::cos(u * freq * 13.7f - phase * 1.3f) * 0.6f + std::sin(u * freq * 31.9f + phase * 2.1f) * 0.4f;
+                    pos += (perpA * j1 + perpB * j2) * (amp * envelope);
+                }
+                const glm::vec4 col = glm::mix(beam.ColorStart, beam.ColorEnd, u);
+                shaderio::GpuVfxRibbonNode gpu{};
+                gpu.position = pos;
+                gpu.width = std::max(glm::mix(beam.WidthStart, beam.WidthEnd, u), 0.0f) * unit;
+                gpu.color = glm::vec4(glm::vec3(col) * intensity, glm::clamp(col.a, 0.0f, 1.0f));
+                gpu.u = u;
+                ribbonNodes.push_back(gpu);
+            }
+
+            Renderer::VfxRibbonSettings settings;
+            if (beam.Texture != 0)
+            {
+                if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(beam.Texture))
+                    settings.TextureSlot = tex->GetDescriptorIndexSlot();
+                else
+                    missingAssets.push_back(beam.Texture);
+            }
+            settings.Additive = beam.Blend == ParticleBlend::Additive;
+            settings.Soft = false;
+            settings.Beam = true;
+            settings.UvTileU = beam.TextureTileU;
+            settings.UvScrollU = beam.TextureScrollU;
+            m_renderer->SubmitVfxRibbon(settings, ribbonNodes);
+        }
+
+        // Step V3a: Submit DecalComponent projected decals.
+        auto decalView = m_Registry.view<DecalComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : decalView)
+        {
+            const auto [decal, world] = decalView.get<DecalComponent, WorldTransformComponent>(entity);
+            if (!decal.Enabled)
+                continue;
+
+            const glm::vec3 sizeWU = glm::max(decal.Size, glm::vec3(0.01f)) * unit;
+            const glm::mat4 model = Math::RelativeTo(world.WorldMatrix, renderOrigin) * glm::scale(glm::mat4(1.0f), sizeWU);
+            shaderio::GpuVfxDecal gpu{};
+            gpu.model = model;
+            gpu.invModel = glm::inverse(model);
+            gpu.color = decal.Color;
+            gpu.textureIndex = 0xFFFFFFFFu;
+            if (decal.Texture != 0)
+            {
+                if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(decal.Texture))
+                    gpu.textureIndex = tex->GetDescriptorIndexSlot();
+                else
+                    missingAssets.push_back(decal.Texture);
+            }
+            gpu.emissiveIntensity = std::max(decal.EmissiveIntensity, 0.0f);
+            gpu.normalFade = glm::clamp(decal.NormalFade, 0.0f, 1.0f);
+            gpu.edgeFade = glm::clamp(decal.EdgeFade, 0.0f, 0.5f);
+            gpu.flags = decal.Blend == ParticleBlend::Additive ? 1u : 0u;
+            m_renderer->SubmitVfxDecal(gpu);
+        }
+
+        // Step V3b: Submit DistortionComponent screen-space shockwaves / heat haze / portals.
+        auto distView = m_Registry.view<DistortionComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : distView)
+        {
+            const auto [dist, world] = distView.get<DistortionComponent, WorldTransformComponent>(entity);
+            if (!dist.Enabled)
+                continue;
+
+            glm::mat3 basis(glm::mat4(world.WorldMatrix));
+            for (int col = 0; col < 3; ++col)
+            {
+                const float len = glm::length(basis[col]);
+                if (len > 1e-6f)
+                    basis[col] /= len;
+            }
+            shaderio::GpuVfxDistortion gpu{};
+            gpu.position = glm::vec3(glm::dvec3(world.WorldMatrix[3]) - renderOrigin);
+            gpu.radius = std::max(dist.Radius, 0.05f) * unit;
+            gpu.right = basis[0];
+            gpu.strength = dist.Strength;
+            gpu.up = basis[2]; // entity XZ plane when CameraFacing == false
+            gpu.ringWidth = glm::clamp(dist.RingWidth, 0.04f, 1.0f);
+            gpu.rimTint = dist.RimTint;
+            gpu.mode = static_cast<uint32_t>(dist.Mode);
+            gpu.speed = dist.Speed;
+            gpu.chromaticAberration = glm::clamp(dist.ChromaticAberration, 0.0f, 1.0f);
+            gpu.cameraFacing = dist.CameraFacing ? 1u : 0u;
+            m_renderer->SubmitVfxDistortion(gpu);
         }
     }
 
@@ -3605,7 +3900,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -4198,6 +4493,26 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<ParticleEmitterComponent>(Entity entity, ParticleEmitterComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<TrailRendererComponent>(Entity entity, TrailRendererComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<BeamRendererComponent>(Entity entity, BeamRendererComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<DecalComponent>(Entity entity, DecalComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<DistortionComponent>(Entity entity, DistortionComponent& component)
     {
     }
 

@@ -2179,7 +2179,7 @@ struct GpuVfxEmitterParams
     uint32_t meshVertexOffset;         // first vertex in meshVertexReference
     uint32_t meshVertexCount;          // vertex count for mesh surface sampling
     uint32_t meshIsSkinned;            // 1: SkinnedVertex, 0: static Vertex
-    uint32_t padVfx0;
+    uint32_t meshRenderChunkCount;     // 0: Sprite mode ((alive+31)/32, 1, 1); >0: Mesh Particle mode (chunks, min(alive,65535), 1)
     uint32_t padVfx1;
 
     vec4 curlParams;                   // x strength (wu/s^2), y frequency (1/wu), z scrollSpeed, w unused
@@ -2206,6 +2206,111 @@ struct PushConstantVfxSimulate
     uint64_t indirectArgsReference;    // GpuVfxIndirectCommand[1]
     uint32_t depthTextureIndex;        // RenderGraph scene depth slot (0xFFFFFFFF if unused)
     uint32_t normalTextureIndex;       // RenderGraph G-buffer normal slot (0xFFFFFFFF if unused)
+};
+
+// VFX Ribbons, Trails & Beams (docs/VFX_And_Volumes_Plan_2026-11.md step V3a)
+struct GpuVfxRibbonNode
+{
+    vec3 position; // render-space world units
+    float width;   // world units
+    vec4 color;    // linear HDR rgba
+    float u;       // normalized ribbon U in [0..1] (0 head -> 1 tail)
+    float pad0;
+    float pad1;
+    float pad2;
+};
+
+STATIC_CONST uint32_t VFX_RIBBON_SOFT     = 1u << 0;
+STATIC_CONST uint32_t VFX_RIBBON_ADDITIVE = 1u << 1;
+STATIC_CONST uint32_t VFX_RIBBON_BEAM     = 1u << 2;
+
+struct PushConstantVfxRibbon
+{
+    uint64_t matrixReference;
+    uint64_t nodesReference;     // GpuVfxRibbonNode[]
+    uint32_t firstNode;
+    uint32_t nodeCount;
+    uint32_t textureIndex;       // 0xFFFFFFFF: procedural glowing ribbon/beam
+    uint32_t depthTextureIndex;  // scene depth slot
+    uint32_t flags;              // VFX_RIBBON_*
+    float softDistance;          // world units
+    float uvTileU;
+    float uvScrollU;
+};
+
+// VFX Projected Decals (docs/VFX_And_Volumes_Plan_2026-11.md step V3a)
+struct GpuVfxDecal
+{
+    mat4 model;                  // unit cube [-0.5, 0.5]^3 -> render space
+    mat4 invModel;               // render space -> unit cube [-0.5, 0.5]^3
+    vec4 color;                  // linear RGBA
+    uint32_t textureIndex;       // 0xFFFFFFFF: procedural arcane rune ring
+    float emissiveIntensity;     // HDR multiplier
+    float normalFade;            // min dot(surfaceNormal, decalUp)
+    float edgeFade;              // vertical fade near box faces
+    uint32_t flags;              // bit 0: additive
+    uint32_t pad0;
+    uint32_t pad1;
+    uint32_t pad2;
+};
+
+struct PushConstantVfxDecal
+{
+    uint64_t matrixReference;
+    uint64_t decalsReference;    // GpuVfxDecal[]
+    uint32_t decalIndex;
+    uint32_t depthTextureIndex;
+    uint32_t normalTextureIndex;
+    uint32_t pad0;
+    vec2 viewportSize;
+};
+
+// GPU Mesh Particles (docs/VFX_And_Volumes_Plan_2026-11.md step V3b)
+STATIC_CONST uint32_t VFX_MESH_ALIGN_VELOCITY = 1u << 4;
+
+struct PushConstantVfxMeshParticle
+{
+    uint64_t matrixReference;
+    uint64_t particlesReference;       // GpuVfxParticle[]
+    uint64_t renderParticlesReference; // GpuParticle[]
+    uint64_t aliveListReference;       // uint32_t[] (indices into GpuVfxParticle[])
+    uint64_t countersReference;        // GpuVfxCounters[1]
+    uint64_t verticesReference;        // PackedVertex[] (0: built-in procedural crystal shard)
+    uint64_t indicesReference;         // uint32_t[]
+    uint32_t verticesOffset;
+    uint32_t indicesOffset;
+    uint32_t triangleCount;
+    uint32_t textureIndex;             // 0xFFFFFFFF: untextured
+    uint32_t depthTextureIndex;        // scene depth (for soft/depth test)
+    uint32_t flags;                    // PARTICLE_LIT | PARTICLE_ADDITIVE | VFX_MESH_ALIGN_VELOCITY
+    float roughness;
+    float metallic;
+};
+
+// Screen-Space Distortion (docs/VFX_And_Volumes_Plan_2026-11.md step V3b): shockwave rings, heat haze, portal warping.
+struct GpuVfxDistortion
+{
+    vec3 position;         // render-space world units
+    float radius;          // world units
+    vec3 right;            // entity basis X (when cameraFacing == 0)
+    float strength;        // screen UV warp scale
+    vec3 up;               // entity basis Z (when cameraFacing == 0)
+    float ringWidth;       // normalized ring thickness
+    vec4 rimTint;          // optional energy crest tint (rgb * a)
+    uint32_t mode;         // 0 ShockwaveRing, 1 HeatHaze, 2 PortalSwirl
+    float speed;
+    float chromaticAberration;
+    uint32_t cameraFacing; // 1: billboard, 0: oriented quad
+};
+
+struct PushConstantVfxDistortion
+{
+    uint64_t matrixReference;
+    uint64_t distortionsReference; // GpuVfxDistortion[]
+    uint32_t distortionIndex;
+    uint32_t sceneColorIndex;      // copied HDRScene
+    uint32_t depthTextureIndex;    // scene depth (Reverse-Z occlusion & foreground anti-bleed)
+    uint32_t pad0;
 };
 
 struct PushConstantDDGIRadiance

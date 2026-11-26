@@ -643,6 +643,10 @@ namespace Nox
         watchShader("assets/shaders/Particles.slang", "Particles", [this]() { createParticlePipeline(true); createAVBOITPipelines(true); });
         watchShader("assets/shaders/VfxSimulate.slang", "VFX Simulate", [this]() { createVfxComputePipelines(true); });
         watchShader("assets/shaders/VfxModules.slang", "VFX Modules", [this]() { createVfxComputePipelines(true); });
+        watchShader("assets/shaders/VfxRibbonBeam.slang", "VFX Ribbon/Beam", [this]() { createVfxGraphicsPipelines(true); });
+        watchShader("assets/shaders/VfxDecal.slang", "VFX Decal", [this]() { createVfxGraphicsPipelines(true); });
+        watchShader("assets/shaders/VfxMeshParticle.slang", "VFX Mesh Particle", [this]() { createVfxGraphicsPipelines(true); });
+        watchShader("assets/shaders/VfxDistortion.slang", "VFX Distortion", [this]() { createVfxGraphicsPipelines(true); });
         watchShader("assets/shaders/OITComposite.slang", "OITComposite", [this]() { createOITCompositePipeline(true); });
         watchShader("assets/shaders/AVBOITBuild.slang", "AVBOITBuild", [this]() { createAVBOITPipelines(true); });
         // What every transparent shader includes (both OIT methods): those and AVBOIT's prepasses again.
@@ -906,6 +910,7 @@ namespace Nox
         createColorPyramidPipelines(false);
         createParticlePipeline(false);
         createVfxComputePipelines(false);
+        createVfxGraphicsPipelines(false);
         createOITCompositePipeline(false);
         createAVBOITPipelines(false);
         createTextureInspectPipeline(false);
@@ -5367,9 +5372,13 @@ namespace Nox
             addPreviousFrameCopyPass();
             addPathTracerPasses();
             addDeferredLightingPass();
+            addVfxDecalPass(); // Projected VFX decals (step V3a) onto opaque surfaces before transparents & particles
             addVfxSimulatePass(); // GPU compute particles (step V1): simulates and appends indirect batches before AVBOIT / Forward 3D / Particles
             addForward3DPass();
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
+            addVfxMeshParticlePass(); // GPU-instanced 3D mesh particles (step V3b)
+            addVfxRibbonPass(); // Camera-facing VFX ribbons, trails & lightning beams (step V3a)
+            addVfxDistortionPass(); // Screen-space shockwaves, heat haze & portal warping (step V3b)
             addSSRHistoryPass(); // the lit scene the SSR reflect next frame
             addSceneOutlinePass(); // outlines (Post Process Volume) into the lit scene, before TAA / DLSS smooth them
             addDLSSPass();
@@ -6526,6 +6535,11 @@ namespace Nox
         m_particles.clear();
         m_particleBatches.clear();
         m_gpuVfxSubmissions.clear();
+        m_vfxMeshBatches.clear();
+        m_vfxRibbonNodes.clear();
+        m_vfxRibbonBatches.clear();
+        m_vfxDecals.clear();
+        m_vfxDistortions.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)

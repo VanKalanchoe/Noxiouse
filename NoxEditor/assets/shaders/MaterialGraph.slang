@@ -37,6 +37,13 @@ struct MaterialGraphInputs
     float3 objectBoundsMin;      // mesh local-space AABB min
     float3 objectBoundsMax;      // mesh local-space AABB max
     float4 vertexInterp[4];      // Vertex Interpolator slots 0..3 (step 4f)
+    // VFX Input Nodes (VFX_And_Volumes_Plan_2026-11.md step V3b): populated by VfxMeshParticle / VfxRibbonBeam.
+    uint hasParticleData;        // 1: particleColor / ribbonUV are live VFX values; 0: regular mesh defaults
+    float particleAge;           // 0..1 normalized lifetime
+    float particleRandom;        // 0..1 per-particle seed
+    float3 particleVelocity;     // world units / second
+    float4 particleColor;        // linear HDR RGBA
+    float2 ribbonUV;             // u along length, v across width
     float4 vertexInterpDx[4];
     float4 vertexInterpDy[4];
     float4 vertexColor;
