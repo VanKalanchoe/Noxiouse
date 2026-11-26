@@ -1802,13 +1802,25 @@ namespace Nox
         uint64_t m_vfxDistortionBufferCapacity = 0;
         nri::Pipeline m_vfxDistortionPipeline;
 
-        // Heterogeneous Volumes (step N2)
-        struct GpuVolumeChannelSlot
+        // Heterogeneous Volumes (step N2 — hardware Texture3D + async frame prefetch)
+        struct GpuVolumeTexSlot
         {
-            nri::Buffer Staging; // Host-mapped upload staging buffer (NRI_BUFFER_USAGE_UNIFORM)
-            nri::Buffer Device;  // VRAM-resident storage buffer (NRI_BUFFER_USAGE_STORAGE_STATIC)
+            Ref<Texture2D> VolumeTex; // Hardware Texture3D (R16G16_SFLOAT: r=density, g=max(temp,flame))
+            nri::Buffer Staging;      // Host-mapped upload staging buffer (NRI_BUFFER_USAGE_UNIFORM)
             void* Mapped = nullptr;
-            uint64_t Capacity = 0;
+            uint64_t StagingCapacity = 0;
+            uint32_t Width = 0;
+            uint32_t Height = 0;
+            uint32_t Depth = 0;
+        };
+        struct PrefetchedVolumeFrame
+        {
+            uint32_t FrameIndex = ~0u;
+            uint32_t DimX = 0;
+            uint32_t DimY = 0;
+            uint32_t DimZ = 0;
+            uint32_t Flags = 0;
+            std::vector<uint16_t> PackedRG16F;
         };
         struct GpuVolumeStream
         {
@@ -1819,10 +1831,16 @@ namespace Nox
             std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotDimY{};
             std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotDimZ{};
             std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotChannelFlags{};
-            std::array<GpuVolumeChannelSlot, MAX_FRAMES_IN_FLIGHT> Density;
-            std::array<GpuVolumeChannelSlot, MAX_FRAMES_IN_FLIGHT> Temperature;
-            std::array<GpuVolumeChannelSlot, MAX_FRAMES_IN_FLIGHT> Flame;
+            std::array<GpuVolumeTexSlot, MAX_FRAMES_IN_FLIGHT> Slots;
+            std::future<PrefetchedVolumeFrame> PrefetchFuture;
+            uint32_t PrefetchRequestedFrame = ~0u;
+            PrefetchedVolumeFrame PrefetchReady;
             GpuVolumeStream() { SlotFrame.fill(~0u); }
+            ~GpuVolumeStream()
+            {
+                if (PrefetchFuture.valid())
+                    PrefetchFuture.wait();
+            }
         };
         std::unordered_map<uint64_t, std::unique_ptr<GpuVolumeStream>> m_vfxVolumeStreams;
         std::vector<GpuVolumeSubmission> m_vfxVolumeSubmissions;

@@ -185,55 +185,42 @@ float vol_sample_fp16_nearest(uint64_t bufRef, float3 uvw, uint3 dims)
     return vol_load_fp16(bufRef, uint3(idx), dims);
 }
 
-float vol_sample_density_fast(GpuHeterogeneousVolume vol, float3 uvw, float time)
+float vol_sample_density_fast(UniformBufferObject ubo, GpuHeterogeneousVolume vol, float3 uvw, float time)
 {
-    if ((vol.flags & VOLUME_FLAG_PROCEDURAL) != 0u)
+    if ((vol.flags & VOLUME_FLAG_PROCEDURAL) != 0u || vol.volumeTextureIndex == 0xFFFFFFFFu)
     {
         float d, t;
         vol_sample_procedural(uvw, time, true, d, t);
         return d;
     }
-    const uint3 dims = uint3(vol.dimX, vol.dimY, vol.dimZ);
-    if ((vol.flags & VOLUME_FLAG_HAS_DENSITY) != 0u)
-        return vol_sample_fp16_nearest(vol.densityBufferRef, uvw, dims) * vol.marchParams.z;
-    if ((vol.flags & VOLUME_FLAG_HAS_TEMPERATURE) != 0u)
-        return vol_sample_fp16_nearest(vol.temperatureBufferRef, uvw, dims) * vol.marchParams.w;
-    if ((vol.flags & VOLUME_FLAG_HAS_FLAME) != 0u)
-        return vol_sample_fp16_nearest(vol.flameBufferRef, uvw, dims) * vol.marchParams.w;
-    return 0.0;
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+        return 0.0;
+    Texture3D volTex = Texture3D.Handle(uint2(ubo.imageHeapIndexOffset + vol.volumeTextureIndex, 0));
+    SamplerState linSamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+    const float2 rg = volTex.SampleLevel(linSamp, uvw, 0).rg;
+    return (vol.flags & VOLUME_FLAG_HAS_DENSITY) != 0u ? (rg.x * vol.marchParams.z) : (rg.y * vol.marchParams.w);
 }
 
-void vol_eval_fields(GpuHeterogeneousVolume vol, float3 uvw, float time, bool needTemp, out float density, out float temperature)
+void vol_eval_fields(UniformBufferObject ubo, GpuHeterogeneousVolume vol, float3 uvw, float time, bool needTemp, out float density, out float temperature)
 {
-    if ((vol.flags & VOLUME_FLAG_PROCEDURAL) != 0u)
+    if ((vol.flags & VOLUME_FLAG_PROCEDURAL) != 0u || vol.volumeTextureIndex == 0xFFFFFFFFu)
     {
         vol_sample_procedural(uvw, time, false, density, temperature);
         return;
     }
-    const uint3 dims = uint3(vol.dimX, vol.dimY, vol.dimZ);
-    density = 0.0;
-    temperature = 0.0;
-
-    // Fast 1-tap empty-space skip when only density is present: avoids 7 wasted loads in empty air.
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        density = 0.0;
+        temperature = 0.0;
+        return;
+    }
+    // Single hardware 3D trilinear fetch (R16G16_SFLOAT: r = density, g = max(temperature, flame)).
+    Texture3D volTex = Texture3D.Handle(uint2(ubo.imageHeapIndexOffset + vol.volumeTextureIndex, 0));
+    SamplerState linSamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+    const float2 rg = volTex.SampleLevel(linSamp, uvw, 0).rg;
     const bool hasDensity = (vol.flags & VOLUME_FLAG_HAS_DENSITY) != 0u;
-    const bool hasTemp = (vol.flags & VOLUME_FLAG_HAS_TEMPERATURE) != 0u;
-    const bool hasFlame = (vol.flags & VOLUME_FLAG_HAS_FLAME) != 0u;
-
-    if (hasDensity)
-    {
-        const float coarseD = vol_sample_fp16_nearest(vol.densityBufferRef, uvw, dims);
-        if (coarseD > 1e-5)
-            density = vol_sample_fp16(vol.densityBufferRef, uvw, dims) * vol.marchParams.z;
-    }
-
-    if (needTemp || !hasDensity)
-    {
-        float temp = hasTemp ? vol_sample_fp16(vol.temperatureBufferRef, uvw, dims) * vol.marchParams.w : 0.0;
-        float flame = hasFlame ? vol_sample_fp16(vol.flameBufferRef, uvw, dims) * vol.marchParams.w : 0.0;
-        temperature = max(temp, flame);
-        if (!hasDensity)
-            density = temperature;
-    }
+    density = hasDensity ? (rg.x * vol.marchParams.z) : (rg.y * vol.marchParams.w);
+    temperature = needTemp ? (rg.y * vol.marchParams.w) : 0.0;
 }
 
 [shader("fragment")]
@@ -335,7 +322,7 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
         const float3 uvw = rayOriginL + rayDirL * t;
 
         float rawDensity, rawTemp;
-        vol_eval_fields(vol, uvw, ubo.timeSeconds, emissionScale > 0.0, rawDensity, rawTemp);
+        vol_eval_fields(ubo, vol, uvw, ubo.timeSeconds, emissionScale > 0.0, rawDensity, rawTemp);
 
         const float sigmaT = rawDensity * densityScale;
         if (sigmaT > 1e-4 || rawTemp > 1e-3)
@@ -357,7 +344,7 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
                         const float mid = 0.5 * (f0 * f0 + f1 * f1) * sFar;
                         const float segLen = (f1 * f1 - f0 * f0) * sFar;
                         const float3 suvw = uvw + sunDirL * mid;
-                        const float sd = vol_sample_density_fast(vol, suvw, ubo.timeSeconds);
+                        const float sd = vol_sample_density_fast(ubo, vol, suvw, ubo.timeSeconds);
                         shadowOpticalDepth += sd * densityScale * (segLen * sunDirLen);
                     }
                     // 3-octave energy-conserving multi-scattering (Wrenninge / UE5 Heterogeneous Volumes)

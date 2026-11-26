@@ -7,6 +7,7 @@
 #include "Panels/InspectorWidgets.h"
 #include "Panels/AnimationClipEditor.h"
 #include "Panels/TimelineEditor.h"
+#include "Panels/VfxEditor.h"
 #include "Panels/MaterialEditor.h"
 #include "Panels/MaterialEdits.h"
 
@@ -4588,6 +4589,12 @@ namespace Nox
             timelineHooks.Editing = [this]() { return m_SceneState == SceneState::Edit; };
             timelineHooks.Selected = [this]() { return m_Selection.GetPrimary(); };
             return std::make_unique<TimelineEditor>(handle, std::move(timelineHooks));
+        });
+        registry.Register(AssetType::Vfx, [this](AssetHandle handle) -> std::unique_ptr<AssetEditor>
+        {
+            VfxEditor::Hooks vfxHooks;
+            vfxHooks.ActiveScene = [this]() { return m_ActiveScene; };
+            return std::make_unique<VfxEditor>(handle, std::move(vfxHooks));
         });
 
         AssetEditorManager::Hooks hooks;

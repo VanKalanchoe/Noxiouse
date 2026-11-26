@@ -39,3 +39,16 @@ public sealed class VfxComponent : Component
     public void SetColor(string name, float r, float g, float b, float a = 1.0f) =>
         InternalCalls.SetVfxColor(EntityID, name, r, g, b, a);
 }
+
+/// <summary>Static helper for one-liner VFX spawning from C# gameplay scripts.</summary>
+public static class Vfx
+{
+    /// <summary>Spawns an entity playing the given .nvfx asset at <paramref name="position"/>.</summary>
+    public static VfxComponent? Spawn(string assetPath, Vector3d position, float scale = 1.0f)
+    {
+        ulong id = InternalCalls.SpawnVfx(assetPath, position, scale);
+        if (id == 0)
+            return null;
+        return new Entity(id).GetComponent<VfxComponent>();
+    }
+}

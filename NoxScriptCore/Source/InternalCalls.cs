@@ -81,6 +81,7 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, NativeString, float, void> Vfx_SetFloat;
     private static delegate*<ulong, NativeString, float, float, float, void> Vfx_SetVec3;
     private static delegate*<ulong, NativeString, float, float, float, float, void> Vfx_SetColor;
+    private static delegate*<NativeString, double, double, double, float, ulong> Vfx_Spawn;
     private static delegate*<ulong, NativeString, float, void> Mesh_SetMorphWeight;
     private static delegate*<ulong, NativeString, float> Mesh_GetMorphWeight;
     private static delegate*<ulong, NativeString, void> Mesh_ClearMorphWeight;
@@ -492,6 +493,12 @@ internal static unsafe class InternalCalls
     {
         using NativeString nativeName = new(name);
         Vfx_SetColor(entityID, nativeName, r, g, b, a);
+    }
+
+    internal static ulong SpawnVfx(string assetPath, Vector3d position, float scale)
+    {
+        using NativeString nativePath = new(assetPath);
+        return Vfx_Spawn(nativePath, position.X, position.Y, position.Z, scale);
     }
 
     internal static void PlayOneShot(string clipPath, Vector3d position, float volume, bool spatial, string bus)

@@ -607,6 +607,28 @@ namespace Nox
                 vfx->Runtime.ColorParams[std::string(name)] = { r, g, b, a };
         }
 
+        uint64_t VfxSpawn(Coral::String assetPath, double x, double y, double z, float scale)
+        {
+            if (!s_Scene)
+                return 0;
+            const std::string pathStr(assetPath);
+            AssetHandle handle = 0;
+            if (Project::GetActive())
+            {
+                if (auto mgr = Project::GetActive()->GetEditorAssetManager())
+                    handle = mgr->FindHandleByPath(pathStr, AssetType::Vfx);
+            }
+            Entity entity = s_Scene->CreateEntity("VFX");
+            auto& tc = entity.GetComponent<TransformComponent>();
+            tc.Translation = { x, y, z };
+            auto& vfx = entity.AddComponent<VfxComponent>();
+            vfx.Vfx = handle;
+            vfx.Playing = true;
+            vfx.Scale = std::max(scale, 0.01f);
+            vfx.Runtime.NeedsRestart = true;
+            return static_cast<uint64_t>(entity.GetUUID());
+        }
+
         // Nox.RigidBody3DComponent: forces and velocities of the entity's physics body (Play / Simulate only).
         template <typename Function>
         void WithRigidBody(uint64_t entityID, Function function)
@@ -1892,6 +1914,7 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetFloat", reinterpret_cast<void*>(&VfxSetFloat));
         assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetVec3", reinterpret_cast<void*>(&VfxSetVec3));
         assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetColor", reinterpret_cast<void*>(&VfxSetColor));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_Spawn", reinterpret_cast<void*>(&VfxSpawn));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMorphWeight", reinterpret_cast<void*>(&MeshSetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetMorphWeight", reinterpret_cast<void*>(&MeshGetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearMorphWeight", reinterpret_cast<void*>(&MeshClearMorphWeight));

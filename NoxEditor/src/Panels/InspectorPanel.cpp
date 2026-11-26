@@ -2878,6 +2878,14 @@ namespace Nox
                              : nullptr;
                          if (asset)
                          {
+                             auto openBtn = NoxUI::Button("Open VFX Editor", [this, handle = comp.Vfx]()
+                             {
+                                 if (m_OnOpenAsset)
+                                     m_OnOpenAsset(handle);
+                             });
+                             openBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                             ctrlRow->AddChild(openBtn);
+
                              auto saveBtn = NoxUI::Button("Save .nvfx", [asset, handle = comp.Vfx]()
                              {
                                  std::filesystem::path savePath = asset->FilePath;

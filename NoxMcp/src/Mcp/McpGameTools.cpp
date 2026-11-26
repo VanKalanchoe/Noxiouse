@@ -16,6 +16,8 @@
 
 #include "stb_image_write.h"
 
+#include "NoxCore/Asset/EditorAssetManager.h"
+#include "NoxCore/Asset/VfxAsset.h"
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Input.h"
 #include "NoxCore/Core/Log.h"
@@ -786,6 +788,54 @@ namespace Nox::Mcp
                     driver->Polling = false;
                     return true;
                 });
+            };
+            tools.push_back(std::move(tool));
+        }
+
+        // --------------------------------------------------------------------------------------------------------------- create_vfx
+        {
+            Tool tool;
+            tool.Name = "create_vfx";
+            tool.Title = "Create a multi-layer .nvfx VFX asset";
+            tool.Description = "Creates a reusable multi-layer .nvfx asset in the project's Assets folder from a preset ('Teleport', 'Fireball', or 'Lightning') and registers it in the Asset Registry.";
+            tool.InputSchema = Json{
+                { "type", "object" },
+                { "properties", {
+                    { "path", { { "type", "string" }, { "description", "Relative path under Assets/, e.g. 'VFX/Portal.nvfx'." } } },
+                    { "preset", { { "type", "string" }, { "description", "Preset name: Teleport, Fireball, or Lightning." } } }
+                } },
+                { "required", Json::array({ "path" }) }
+            };
+            tool.Access = NoxMcp::ToolAccess::Write;
+            tool.Handler = [](const Json& arguments, ToolDone done)
+            {
+                if (!Project::GetActive())
+                {
+                    done(ToolResult::Error("No active project"));
+                    return;
+                }
+                std::filesystem::path relPath = arguments.value("path", std::string("NewVfx.nvfx"));
+                if (relPath.extension() != ".nvfx")
+                    relPath += ".nvfx";
+                const std::string preset = arguments.value("preset", std::string("Teleport"));
+                const std::filesystem::path absPath = Project::GetAssetFileSystemPath(relPath);
+                VfxAsset vfx;
+                vfx.LoadPreset(preset);
+                vfx.Name = relPath.stem().string();
+                if (!vfx.Save(absPath))
+                {
+                    done(ToolResult::Error("Failed to save .nvfx file"));
+                    return;
+                }
+                AssetHandle handle = 0;
+                if (auto mgr = Project::GetActive()->GetEditorAssetManager())
+                    handle = mgr->RegisterExistingFile(relPath, AssetType::Vfx);
+                done(ToolResult::Data(Json{
+                    { "path", relPath.generic_string() },
+                    { "preset", preset },
+                    { "handle", static_cast<uint64_t>(handle) },
+                    { "layers", vfx.Layers.size() }
+                }));
             };
             tools.push_back(std::move(tool));
         }

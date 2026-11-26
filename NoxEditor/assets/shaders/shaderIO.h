@@ -2248,6 +2248,8 @@ struct PushConstantVfxRibbon
     float softDistance;          // world units
     float uvTileU;
     float uvScrollU;
+    uint32_t materialSlot;       // 0xFFFFFFFF: built-in shading; otherwise GpuMaterial index for .nmatgraph
+    uint32_t padRibbon0;
 };
 
 // VFX Projected Decals (docs/VFX_And_Volumes_Plan_2026-11.md step V3a)
@@ -2297,6 +2299,8 @@ struct PushConstantVfxMeshParticle
     uint32_t flags;                    // PARTICLE_LIT | PARTICLE_ADDITIVE | VFX_MESH_ALIGN_VELOCITY
     float roughness;
     float metallic;
+    uint32_t materialSlot;             // 0xFFFFFFFF: built-in shading; otherwise GpuMaterial index for .nmatgraph
+    uint32_t padMesh0;
 };
 
 // Screen-Space Distortion (docs/VFX_And_Volumes_Plan_2026-11.md step V3b): shockwave rings, heat haze, portal warping.
@@ -2344,7 +2348,7 @@ struct GpuHeterogeneousVolume
     uint32_t dimY;
     uint32_t dimZ;
     uint32_t flags;                // VOLUME_FLAG_*
-    uint32_t padVol0;
+    uint32_t volumeTextureIndex;   // Bindless hardware Texture3D (R16G16_SFLOAT: r=density, g=temp/flame); 0xFFFFFFFF = procedural
     uint32_t padVol1;
     vec4 albedoAndDensity;         // rgb = smoke scatter albedo, w = densityScale
     vec4 emissionParams;           // x = emissionScale, y = blackbodyKelvin, z = anisotropy g, w = ambientStrength

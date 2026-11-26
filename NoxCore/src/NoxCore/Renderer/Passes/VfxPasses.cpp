@@ -565,6 +565,7 @@ namespace Nox
                     push.softDistance = batch.Settings.SoftDistance;
                     push.uvTileU = batch.Settings.UvTileU;
                     push.uvScrollU = batch.Settings.UvScrollU;
+                    push.materialSlot = 0xFFFFFFFFu;
                     cmd.pushData(&push, sizeof(push));
                     cmd.draw((batch.NodeCount - 1u) * 6u, 1u, 0u, 0u);
                 }
@@ -643,6 +644,7 @@ namespace Nox
                                  (batch.MeshOptions.AlignToVelocity ? shaderio::VFX_MESH_ALIGN_VELOCITY : 0u);
                     push.roughness = 0.35f;
                     push.metallic = 0.1f;
+                    push.materialSlot = 0xFFFFFFFFu;
                     cmd.pushData(&push, sizeof(push));
                     nri::drawMeshTasksIndirect(cmd, *batch.IndirectBuffer, 0, 1, 12u);
                 }
@@ -753,11 +755,20 @@ namespace Nox
         // Evict idle volume streams after 120 frames.
         auto releaseStream = [&](GpuVolumeStream& s)
         {
+            if (s.PrefetchFuture.valid())
+                s.PrefetchFuture.wait();
             for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
             {
-                if (s.Density[i].Device) releaseBufferRefs(s.Density[i].Device.handle());
-                if (s.Temperature[i].Device) releaseBufferRefs(s.Temperature[i].Device.handle());
-                if (s.Flame[i].Device) releaseBufferRefs(s.Flame[i].Device.handle());
+                if (s.Slots[i].VolumeTex)
+                {
+                    deferAssetRelease(s.Slots[i].VolumeTex);
+                    s.Slots[i].VolumeTex = nullptr;
+                }
+                if (s.Slots[i].Staging)
+                {
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(s.Slots[i].Staging) });
+                }
             }
         };
         for (auto it = m_vfxVolumeStreams.begin(); it != m_vfxVolumeStreams.end(); )
@@ -779,52 +790,56 @@ namespace Nox
         if (!resources.HDRScene.IsValid() || !resources.Depth.IsValid())
             return;
 
-        struct VolumeCopyOp
+        // Pack density + max(temperature, flame) into interleaved FP16 RG pairs for a single hardware Texture3D.
+        auto packFrameRG16F = [](const VolumeAsset* asset, uint32_t fIdx) -> PrefetchedVolumeFrame
         {
-            NriBuffer Src = nullptr;
-            NriBuffer Dst = nullptr;
-            uint64_t Size = 0;
-        };
-        std::vector<VolumeCopyOp> pendingCopies;
+            PrefetchedVolumeFrame out{};
+            out.FrameIndex = fIdx;
+            const VolumeFrameRecord& rec = asset->GetFrame(fIdx);
+            out.DimX = std::max(rec.DimX, 1u);
+            out.DimY = std::max(rec.DimY, 1u);
+            out.DimZ = std::max(rec.DimZ, 1u);
+            const size_t voxelCount = static_cast<size_t>(out.DimX) * out.DimY * out.DimZ;
+            out.PackedRG16F.assign(voxelCount * 2u, 0u);
 
-        auto uploadChannel = [&](GpuVolumeChannelSlot& slot, const std::vector<uint8_t>& bytes, uint64_t minCap) -> uint64_t
-        {
-            if (bytes.empty())
-                return 0ull;
-            // Pad to 4-byte multiple so uint32_t FP16 pair loads never read past the end.
-            const uint64_t padded = (bytes.size() + 3ull) & ~3ull;
-            if (padded > slot.Capacity || !slot.Staging || !slot.Device)
+            std::vector<uint8_t> densBytes, tempBytes, flameBytes;
+            const bool hasD = asset->ReadFrameChannel(fIdx, VolumeChannel::Density, densBytes);
+            const bool hasT = asset->ReadFrameChannel(fIdx, VolumeChannel::Temperature, tempBytes);
+            const bool hasF = asset->ReadFrameChannel(fIdx, VolumeChannel::Flame, flameBytes);
+            if (hasD) out.Flags |= shaderio::VOLUME_FLAG_HAS_DENSITY;
+            if (hasT) out.Flags |= shaderio::VOLUME_FLAG_HAS_TEMPERATURE;
+            if (hasF) out.Flags |= shaderio::VOLUME_FLAG_HAS_FLAME;
+
+            const uint16_t* dPtr = hasD && densBytes.size() >= voxelCount * 2u ? reinterpret_cast<const uint16_t*>(densBytes.data()) : nullptr;
+            const uint16_t* tPtr = hasT && tempBytes.size() >= voxelCount * 2u ? reinterpret_cast<const uint16_t*>(tempBytes.data()) : nullptr;
+            const uint16_t* fPtr = hasF && flameBytes.size() >= voxelCount * 2u ? reinterpret_cast<const uint16_t*>(flameBytes.data()) : nullptr;
+
+            for (size_t i = 0; i < voxelCount; ++i)
             {
-                if (slot.Device)
-                {
-                    releaseBufferRefs(slot.Device.handle());
-                    std::scoped_lock lock(m_deferredReleasesMutex);
-                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Device) });
-                }
-                if (slot.Staging)
-                {
-                    std::scoped_lock lock(m_deferredReleasesMutex);
-                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Staging) });
-                }
-                slot.Capacity = std::max<uint64_t>({ padded, minCap, 4096ull });
-                slot.Staging = m_device.createBuffer(nri::BufferDesc{ .size = slot.Capacity, .usage = NRI_BUFFER_USAGE_UNIFORM });
-                slot.Mapped = slot.Staging.map(0, slot.Capacity);
-                slot.Device = m_device.createBuffer(nri::BufferDesc{ .size = slot.Capacity, .usage = NRI_BUFFER_USAGE_STORAGE_STATIC });
+                const uint16_t d = dPtr ? dPtr[i] : 0u;
+                // Positive IEEE-754 FP16 values preserve ordering as uint16_t!
+                const uint16_t t = tPtr ? tPtr[i] : 0u;
+                const uint16_t f = fPtr ? fPtr[i] : 0u;
+                out.PackedRG16F[i * 2u + 0u] = d;
+                out.PackedRG16F[i * 2u + 1u] = std::max(t, f);
             }
-            std::memcpy(slot.Mapped, bytes.data(), bytes.size());
-            if (padded > bytes.size())
-                std::memset(static_cast<uint8_t*>(slot.Mapped) + bytes.size(), 0, padded - bytes.size());
-            pendingCopies.push_back({ slot.Staging.handle(), slot.Device.handle(), padded });
-            return bufferReadRef(slot.Device);
+            return out;
         };
+
+        struct VolumeTexUploadOp
+        {
+            NriTexture DstTexture = nullptr;
+            NriBuffer SrcStaging = nullptr;
+        };
+        std::vector<VolumeTexUploadOp> pendingUploads;
 
         std::vector<shaderio::GpuHeterogeneousVolume> gpuVolumes;
         gpuVolumes.reserve(m_vfxVolumeSubmissions.size());
-        std::vector<uint8_t> scratchBytes;
 
         for (const GpuVolumeSubmission& sub : m_vfxVolumeSubmissions)
         {
             shaderio::GpuHeterogeneousVolume gpu = sub.Params;
+            gpu.volumeTextureIndex = 0xFFFFFFFFu;
             if (sub.Asset && sub.Asset->IsValid())
             {
                 auto& streamPtr = m_vfxVolumeStreams[sub.EntityId];
@@ -835,59 +850,107 @@ namespace Nox
 
                 if (stream.AssetHandle != static_cast<uint64_t>(sub.Asset->Handle))
                 {
+                    if (stream.PrefetchFuture.valid())
+                        stream.PrefetchFuture.wait();
                     stream.AssetHandle = static_cast<uint64_t>(sub.Asset->Handle);
                     stream.SlotFrame.fill(~0u);
+                    stream.PrefetchRequestedFrame = ~0u;
+                    stream.PrefetchReady = {};
                 }
 
-                const uint32_t fIdx = sub.FrameIndex % sub.Asset->GetFrameCount();
-                if (stream.SlotFrame[frameIndex] != fIdx)
+                // Harvest completed async prefetch if ready.
+                if (stream.PrefetchFuture.valid() &&
+                    stream.PrefetchFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
                 {
-                    // Pre-size channel buffers to the sequence maximum so they never reallocate mid-playback.
-                    uint64_t maxDens = 0, maxTemp = 0, maxFlame = 0;
-                    for (uint32_t fi = 0; fi < sub.Asset->GetFrameCount(); ++fi)
-                    {
-                        const VolumeFrameRecord& fr = sub.Asset->GetFrame(fi);
-                        maxDens = std::max(maxDens, (fr.DensityBytes + 3ull) & ~3ull);
-                        maxTemp = std::max(maxTemp, (fr.TemperatureBytes + 3ull) & ~3ull);
-                        maxFlame = std::max(maxFlame, (fr.FlameBytes + 3ull) & ~3ull);
-                    }
-
-                    const VolumeFrameRecord& rec = sub.Asset->GetFrame(fIdx);
-                    stream.SlotFrame[frameIndex] = fIdx;
-                    stream.SlotDimX[frameIndex] = rec.DimX;
-                    stream.SlotDimY[frameIndex] = rec.DimY;
-                    stream.SlotDimZ[frameIndex] = rec.DimZ;
-                    uint32_t flags = 0u;
-
-                    if (sub.Asset->ReadFrameChannel(fIdx, VolumeChannel::Density, scratchBytes))
-                    {
-                        uploadChannel(stream.Density[frameIndex], scratchBytes, maxDens);
-                        flags |= shaderio::VOLUME_FLAG_HAS_DENSITY;
-                    }
-                    if (sub.Asset->ReadFrameChannel(fIdx, VolumeChannel::Temperature, scratchBytes))
-                    {
-                        uploadChannel(stream.Temperature[frameIndex], scratchBytes, maxTemp);
-                        flags |= shaderio::VOLUME_FLAG_HAS_TEMPERATURE;
-                    }
-                    if (sub.Asset->ReadFrameChannel(fIdx, VolumeChannel::Flame, scratchBytes))
-                    {
-                        uploadChannel(stream.Flame[frameIndex], scratchBytes, maxFlame);
-                        flags |= shaderio::VOLUME_FLAG_HAS_FLAME;
-                    }
-                    stream.SlotChannelFlags[frameIndex] = flags;
+                    stream.PrefetchReady = stream.PrefetchFuture.get();
                 }
 
-                const uint32_t flags = stream.SlotChannelFlags[frameIndex];
-                gpu.densityBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_DENSITY) && stream.Density[frameIndex].Device
-                    ? bufferReadRef(stream.Density[frameIndex].Device) : 0ull;
-                gpu.temperatureBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_TEMPERATURE) && stream.Temperature[frameIndex].Device
-                    ? bufferReadRef(stream.Temperature[frameIndex].Device) : 0ull;
-                gpu.flameBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_FLAME) && stream.Flame[frameIndex].Device
-                    ? bufferReadRef(stream.Flame[frameIndex].Device) : 0ull;
+                const uint32_t frameCount = std::max(sub.Asset->GetFrameCount(), 1u);
+                const uint32_t fIdx = sub.FrameIndex % frameCount;
+                GpuVolumeTexSlot& slot = stream.Slots[frameIndex];
+
+                if (stream.SlotFrame[frameIndex] != fIdx || !slot.VolumeTex)
+                {
+                    PrefetchedVolumeFrame frameData{};
+                    if (stream.PrefetchReady.FrameIndex == fIdx && !stream.PrefetchReady.PackedRG16F.empty())
+                    {
+                        frameData = std::move(stream.PrefetchReady);
+                        stream.PrefetchReady = {};
+                    }
+                    else if (stream.PrefetchFuture.valid() && stream.PrefetchRequestedFrame == fIdx)
+                    {
+                        frameData = stream.PrefetchFuture.get();
+                    }
+                    else
+                    {
+                        frameData = packFrameRG16F(sub.Asset, fIdx);
+                    }
+
+                    // Recreate hardware Texture3D only if dimensions changed (typically once per stream).
+                    if (!slot.VolumeTex || slot.Width != frameData.DimX || slot.Height != frameData.DimY || slot.Depth != frameData.DimZ)
+                    {
+                        if (slot.VolumeTex)
+                            deferAssetRelease(slot.VolumeTex);
+                        slot.VolumeTex = CreateRef<Texture2D>(m_device.createTexture(nri::TextureDesc{
+                            .width = frameData.DimX,
+                            .height = frameData.DimY,
+                            .arrayLayers = 1,
+                            .isCubeMap = false,
+                            .mipLevels = 1,
+                            .sampleCount = 1,
+                            .usage = NRI_TEXTURE_USAGE_SHADER_RESOURCE,
+                            .format = NRI_FORMAT_R16G16_SFLOAT,
+                            .sharedAcrossQueues = false,
+                            .depth = std::max(frameData.DimZ, 2u)
+                        }));
+                        m_resourceHeap.registerTexture(*slot.VolumeTex, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
+                        slot.Width = frameData.DimX;
+                        slot.Height = frameData.DimY;
+                        slot.Depth = frameData.DimZ;
+                    }
+
+                    const uint64_t uploadBytes = static_cast<uint64_t>(frameData.PackedRG16F.size()) * sizeof(uint16_t);
+                    if (uploadBytes > slot.StagingCapacity || !slot.Staging)
+                    {
+                        if (slot.Staging)
+                        {
+                            std::scoped_lock lock(m_deferredReleasesMutex);
+                            m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Staging) });
+                        }
+                        slot.StagingCapacity = std::max<uint64_t>(uploadBytes, 4096ull);
+                        slot.Staging = m_device.createBuffer(nri::BufferDesc{ .size = slot.StagingCapacity, .usage = NRI_BUFFER_USAGE_UNIFORM });
+                        slot.Mapped = slot.Staging.map(0, slot.StagingCapacity);
+                    }
+                    std::memcpy(slot.Mapped, frameData.PackedRG16F.data(), uploadBytes);
+
+                    pendingUploads.push_back({ slot.VolumeTex->GetHandle(), slot.Staging.handle() });
+                    stream.SlotFrame[frameIndex] = fIdx;
+                    stream.SlotDimX[frameIndex] = frameData.DimX;
+                    stream.SlotDimY[frameIndex] = frameData.DimY;
+                    stream.SlotDimZ[frameIndex] = frameData.DimZ;
+                    stream.SlotChannelFlags[frameIndex] = frameData.Flags;
+
+                    // Kick off async background prefetch for the next frame in the sequence.
+                    if (frameCount > 1u && !stream.PrefetchFuture.valid())
+                    {
+                        const uint32_t nextIdx = (fIdx + 1u) % frameCount;
+                        if (stream.PrefetchReady.FrameIndex != nextIdx)
+                        {
+                            stream.PrefetchRequestedFrame = nextIdx;
+                            Ref<VolumeAsset> keepAlive(const_cast<VolumeAsset*>(sub.Asset));
+                            stream.PrefetchFuture = std::async(std::launch::async, [packFrameRG16F, keepAlive = std::move(keepAlive), nextIdx]()
+                            {
+                                return packFrameRG16F(keepAlive.get(), nextIdx);
+                            });
+                        }
+                    }
+                }
+
+                gpu.volumeTextureIndex = slot.VolumeTex ? slot.VolumeTex->GetDescriptorIndexSlot() : 0xFFFFFFFFu;
                 gpu.dimX = stream.SlotDimX[frameIndex];
                 gpu.dimY = stream.SlotDimY[frameIndex];
                 gpu.dimZ = stream.SlotDimZ[frameIndex];
-                gpu.flags = flags;
+                gpu.flags = stream.SlotChannelFlags[frameIndex];
             }
             else
             {
@@ -929,26 +992,19 @@ namespace Nox
         const uint32_t curFrame = static_cast<uint32_t>(m_vfxFrameCounter);
         const glm::vec2 viewportSize(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
 
-        if (!pendingCopies.empty())
+        if (!pendingUploads.empty())
         {
             m_renderGraph.AddPass("Heterogeneous Volume Upload", RGPassFlags::NeverCull,
                 [](RGBuilder&) {},
-                [copies = std::move(pendingCopies)](RGPassContext& context)
+                [uploads = std::move(pendingUploads)](RGPassContext& context)
                 {
                     nri::CommandBuffer& cmd = context.Cmd();
-                    std::vector<nri::BufferBarrierDesc> barriers;
-                    barriers.reserve(copies.size());
-                    for (const VolumeCopyOp& op : copies)
+                    const size_t mip0 = 0;
+                    for (const VolumeTexUploadOp& op : uploads)
                     {
-                        const nri::BufferCopyRegion region{ .srcOffset = 0, .dstOffset = 0, .size = op.Size };
-                        nriCmdCopyBuffer(cmd.handle(), op.Src, op.Dst, &region);
-                        barriers.push_back(nri::BufferBarrierDesc{
-                            op.Dst,
-                            { nri::AccessBits::TransferWrite, nri::StageBits::Transfer },
-                            { nri::AccessBits::ShaderRead, nri::StageBits::Fragment }
-                        });
+                        nriTextureRecordUpload(op.DstTexture, cmd.handle(), op.SrcStaging, 0, &mip0, 1);
                     }
-                    cmd.resourceBarriers({}, std::span<const nri::BufferBarrierDesc>(barriers));
+                    cmd.executionBarrier();
                 });
         }
 

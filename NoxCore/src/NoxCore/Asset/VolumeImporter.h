@@ -13,7 +13,7 @@ namespace Nox
     struct VolumeCookOptions
     {
         bool IncludeSequence = true;   // auto-detect numbered siblings (e.g. tornado_0000.vdb .. tornado_0199.vdb)
-        uint32_t MaxDimension = 96u;   // max voxels along the longest axis per frame (keeps cooking & streaming fast)
+        uint32_t MaxDimension = 128u;  // max voxels along the longest axis per frame (up to 256 supported for hardware Texture3D)
         uint32_t MaxFrames = 0u;       // 0 = cook every frame in the sequence (preserves seamless looping!)
         float Fps = 24.0f;
     };

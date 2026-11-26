@@ -835,6 +835,19 @@ namespace Nox
         // which asserts on s_Instance and queues its geometry, so this drains in rounds -- clearing the vector in place
         // would push into it while its elements are being destroyed.
         m_device.waitIdle();
+        // Wait for any async volume frame prefetch and release all VFX GPU pools/textures before device & heap teardown.
+        m_vfxVolumeStreams.clear();
+        m_gpuVfxPools.clear();
+        m_vfxVolumeBuffers.clear();
+        m_vfxVolumeBuffersMapped.clear();
+        m_localFogVolumeBuffers.clear();
+        m_localFogVolumeBuffersMapped.clear();
+        m_vfxRibbonBuffers.clear();
+        m_vfxRibbonBuffersMapped.clear();
+        m_vfxDecalBuffers.clear();
+        m_vfxDecalBuffersMapped.clear();
+        m_vfxDistortionBuffers.clear();
+        m_vfxDistortionBuffersMapped.clear();
         // Page and tile reads write into staging: done before anything goes.
         m_geometryStreamer.Shutdown();
         m_virtualTextures.Shutdown();

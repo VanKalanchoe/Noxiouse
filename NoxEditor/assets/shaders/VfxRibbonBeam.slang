@@ -112,11 +112,47 @@ float4 fragMain(RibbonVSOut inVert, uniform PushConstantVfxRibbon pushConstant) 
         texColor = float4(1.0 + hotCore * (isBeam ? 1.8 : 0.7), 1.0 + hotCore * (isBeam ? 1.8 : 0.7), 1.0 + hotCore * (isBeam ? 1.8 : 0.7), edgeMask * endFade);
     }
 
-    const float alpha = saturate(inVert.color.a * texColor.a * softFade);
+    float alpha = saturate(inVert.color.a * texColor.a * softFade);
+    float3 rgb = inVert.color.rgb * texColor.rgb;
+
+#ifdef NOX_MATERIAL_GRAPH
+    if (pushConstant.materialSlot != 0xFFFFFFFFu && ubo.materialDataReference != 0)
+    {
+        const GpuMaterial mat = BufferRef<GpuMaterial>(ubo.materialDataReference)[pushConstant.materialSlot];
+        if (mat.graphSlot != 0xFFFFFFFFu)
+        {
+            MaterialGraphInputs gi = (MaterialGraphInputs)0;
+            gi.uv0 = inVert.uv;
+            gi.uv0Dx = ddx(inVert.uv);
+            gi.uv0Dy = ddy(inVert.uv);
+            gi.position = inVert.worldPos + ubo.renderOrigin;
+            gi.view = normalize(ubo.cameraWorldPos.xyz - inVert.worldPos);
+            gi.normal = gi.view;
+            gi.time = ubo.timeSeconds;
+            gi.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
+            gi.vertexColor = inVert.color;
+            gi.hasParticleData = 1u;
+            gi.particleAge = inVert.uv.x;
+            gi.particleColor = inVert.color;
+            gi.ribbonUV = inVert.uv;
+            gi.material = mat;
+            gi.ubo = ubo;
+
+            MaterialGraphOutputs go = (MaterialGraphOutputs)0;
+            go.baseColor = rgb;
+            go.emissive = float3(0.0);
+            go.opacity = alpha;
+            material_graph_surface(mat.graphSlot, gi, go);
+            rgb = go.baseColor + go.emissive;
+            alpha = saturate(go.opacity * softFade);
+        }
+    }
+#endif
+
     if (alpha <= 1e-4)
         discard;
 
     // Premultiplied output matching Particles pass blend equations (Additive: ONE/ONE; Alpha: ONE/ONE_MINUS_SRC_ALPHA).
-    const float3 rgb = inVert.color.rgb * texColor.rgb * alpha;
+    rgb *= alpha;
     return float4(rgb, (pushConstant.flags & VFX_RIBBON_ADDITIVE) != 0u ? 0.0 : alpha);
 }

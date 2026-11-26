@@ -14,6 +14,7 @@ struct MeshParticleVertex
     nointerpolation float4 color : TEXCOORD3;
     nointerpolation float age : TEXCOORD4;
     nointerpolation float randomVal : TEXCOORD5;
+    nointerpolation float3 velocity : TEXCOORD6;
 };
 
 // Built-in 8-triangle 3D crystal/octahedron shard (used when ParticleMesh == 0).
@@ -140,6 +141,7 @@ void meshMain(
         outV.color = gp.color;
         outV.age = ageNorm;
         outV.randomVal = rand01;
+        outV.velocity = vp.velocity;
         vertices[threadID * 3u + k] = outV;
     }
     triangles[threadID] = uint3(threadID * 3u, threadID * 3u + 1u, threadID * 3u + 2u);
@@ -169,7 +171,53 @@ float4 fragMain(MeshParticleVertex inVert, uniform PushConstantVfxMeshParticle p
 
     const float3 N = normalize(inVert.worldNormal);
     const float3 V = normalize(ubo.cameraWorldPos.xyz - inVert.worldPos);
-    float3 shaded = inVert.color.rgb * texCol.rgb;
+    float3 baseCol = inVert.color.rgb * texCol.rgb;
+    float3 emissiveCol = float3(0.0);
+    float rough = pushConstant.roughness;
+    float alpha = saturate(inVert.color.a * texCol.a);
+
+#ifdef NOX_MATERIAL_GRAPH
+    if (pushConstant.materialSlot != 0xFFFFFFFFu && ubo.materialDataReference != 0)
+    {
+        const GpuMaterial mat = BufferRef<GpuMaterial>(ubo.materialDataReference)[pushConstant.materialSlot];
+        if (mat.graphSlot != 0xFFFFFFFFu)
+        {
+            MaterialGraphInputs gi = (MaterialGraphInputs)0;
+            gi.uv0 = inVert.uv;
+            gi.uv0Dx = ddx(inVert.uv);
+            gi.uv0Dy = ddy(inVert.uv);
+            gi.position = inVert.worldPos + ubo.renderOrigin;
+            gi.positionDx = ddx(inVert.worldPos);
+            gi.positionDy = ddy(inVert.worldPos);
+            gi.normal = N;
+            gi.view = V;
+            gi.time = ubo.timeSeconds;
+            gi.cameraPosition = ubo.cameraWorldPos.xyz + ubo.renderOrigin;
+            gi.vertexColor = inVert.color;
+            gi.hasParticleData = 1u;
+            gi.particleAge = inVert.age;
+            gi.particleRandom = inVert.randomVal;
+            gi.particleVelocity = inVert.velocity;
+            gi.particleColor = inVert.color;
+            gi.ribbonUV = inVert.uv;
+            gi.material = mat;
+            gi.ubo = ubo;
+
+            MaterialGraphOutputs go = (MaterialGraphOutputs)0;
+            go.baseColor = baseCol;
+            go.roughness = rough;
+            go.emissive = float3(0.0);
+            go.opacity = alpha;
+            material_graph_surface(mat.graphSlot, gi, go);
+            baseCol = go.baseColor;
+            emissiveCol = go.emissive;
+            rough = saturate(go.roughness);
+            alpha = saturate(go.opacity);
+        }
+    }
+#endif
+
+    float3 shaded = baseCol;
 
     if ((pushConstant.flags & PARTICLE_LIT) != 0u)
     {
@@ -193,21 +241,20 @@ float4 fragMain(MeshParticleVertex inVert, uniform PushConstantVfxMeshParticle p
             if (ndotl > 0.0)
             {
                 const float3 H = normalize(L + V);
-                const float spec = pow(saturate(dot(N, H)), lerp(64.0, 6.0, pushConstant.roughness)) * (1.0 - pushConstant.roughness * 0.7);
+                const float spec = pow(saturate(dot(N, H)), lerp(64.0, 6.0, rough)) * (1.0 - rough * 0.7);
                 direct += light.color.rgb * light.color.a * (ndotl / 3.14159265 + spec * 0.35);
             }
         }
-        shaded = shaded * (ambient + direct);
+        shaded = shaded * (ambient + direct) + emissiveCol;
     }
     else
     {
         // Unlit/emissive 3D shards get a subtle normal-based facet contrast + Fresnel edge boost so 3D form reads crisply.
         const float fresnel = pow(1.0 - saturate(abs(dot(N, V))), 2.5);
         const float facet = 0.65 + 0.35 * saturate(N.y * 0.5 + 0.5);
-        shaded = shaded * (facet + fresnel * 0.6);
+        shaded = shaded * (facet + fresnel * 0.6) + emissiveCol;
     }
 
-    const float alpha = saturate(inVert.color.a * texCol.a);
     if (alpha <= 1e-4)
         discard;
 
