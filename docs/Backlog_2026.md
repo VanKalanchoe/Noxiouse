@@ -18,7 +18,7 @@ tested since 2026-11-15 moved to "Closed" (the 2026-11-26 entry).
 | R12 | **Cook text assets at packaging** (saved 2026-11-14): scenes and prefabs cooked to binary the way world partition cells are (measure the start scene's YAML parse in a packaged build first) | Only world partition cells are cooked (`.noxcell.cooked`); scenes, prefabs, graphs, timelines and the mixer ship as YAML |
 | M1 | **Material blend modes Additive and Dithered** (`Stylized_Rendering_And_Material_Graph_Plan_2026-11.md` §7: Opaque / Masked / Dithered / Translucent / Additive) | `AlphaMode` is Opaque / Mask / Blend; VFX renderers have their own additive mode, a mesh material cannot be additive |
 | M2 | **Post Process Volume extras** (plan §9b): blending between overlapping volumes (weight, blend radius, priority), a C# API for the volume, the LUT file packaged with the game | One volume replaces the editor's settings; no blending, no script API |
-| VX | **Voxels** (`Voxel_Plan_2026-11.md`, planned 2026-11-26): MagicaVoxel `.vox` models as meshes (props) and a 10 cm brick map for the world you dig, build and generate (voxel pass into the G-buffer: raster first, ray tracing later). Phases VX0 `.vox` import -> VX1 brick map -> VX2 voxel pass -> VX3 raster preset coverage -> VX4 brushes / edits -> VX5 streaming + LOD -> VX6 collision -> VX7 RT preset | Nothing voxel in the code yet besides `DynamicMeshes` (runtime meshes) and the HLOD voxelizer |
+| VX | **Voxels** (`Voxel_Plan_2026-11.md`, planned 2026-11-26): MagicaVoxel `.vox` models as meshes (props) and a 10 cm brick map for the world you dig, build and generate (voxel pass into the G-buffer: raster first, ray tracing later). Phases VX0 `.vox` import -> VX1 brick map CPU -> VX2 voxel pass (both visibility candidates) -> VX3 raster preset coverage -> VX4 collision -> VX5 brushes / network -> VX6 streaming + LOD -> VX7 RT preset | **VX0 built 2026-11-26, waiting for the user's test** (`Voxel/VoxReader`, `VoxMesher`, `Asset/VoxImporter`; Import Voxel Model dialog; 31 offline checks). Open: VX1 onward |
 | M3 | **Material Shader extras** (plan §9c): parameters by name in a hand-written Material Shader (only Parameter 1-4 today; graphs have named parameters), Custom Lit together with OIT | Not in the code |
 
 ### Open -- waiting for something from the user
@@ -177,6 +177,13 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   - A ball on a dynamic box settles.
 
 ## Done (recent)
+
+- 2026-11-26 (waiting for the user's test): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
+  `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette
+  textures and metal / glass / emissive materials; scene graph placement, hot reload from MagicaVoxel, MCP `import_asset` with
+  `voxel_size_cm`. Fixed on the way: re-importing a model through the dialog now cooks the same asset again (was a second entry with
+  the old cook, glTF too); `ReimportAsset` no longer deletes a `.ntex` that is its own source; NoxToolsTest compiles again (`fresnel`
+  declared twice). Offline: `Tests/VoxTests.inl` 31 checks; 59 real `.vox` files read and meshed closed.
 
 - 2026-11-12 (waiting for the user's test): **Project Manager** (`NoxEditor/src/ProjectManager/`): the editor opens with it when no
   project is given -- recent projects (+ the Facerun sample), New Project (name, location, world units, render quality, C# scripts

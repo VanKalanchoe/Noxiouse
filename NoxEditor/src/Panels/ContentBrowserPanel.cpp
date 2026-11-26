@@ -21,10 +21,13 @@
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TimelineImporter.h"
+#include "NoxCore/Asset/MeshImporter.h"
+#include "NoxCore/Asset/VoxImporter.h"
 #include "NoxCore/Asset/VfxAsset.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
+#include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
@@ -2259,7 +2262,7 @@ namespace Nox
     void ContentBrowserPanel::PickAndImport()
     {
         // SDL's dialog takes extensions without "*." (it refuses a filter that has them).
-        static constexpr char filter[] = "Models, textures, sounds, fonts, scenes\0gltf;glb;png;jpg;jpeg;tga;hdr;wav;ogg;flac;mp3;ttf;otf;nox\0";
+        static constexpr char filter[] = "Models, textures, sounds, fonts, scenes\0gltf;glb;vox;png;jpg;jpeg;tga;hdr;wav;ogg;flac;mp3;ttf;otf;nox\0";
         Utility::OpenFileAsync(filter, [this](std::string file) // (the editor keeps running while the dialog is open)
         {
             if (!file.empty())
@@ -2288,8 +2291,8 @@ namespace Nox
         const bool insideProject = !relativeToRoot.empty() && relativeToRoot != "." && relativeToRoot.generic_string().rfind("..", 0) != 0;
         const std::string extension = ToLower(path.extension().string());
 
-        // A model: the import dialog (the files are copied only when it is confirmed, so Cancel leaves nothing behind).
-        if (extension == ".gltf" || extension == ".glb")
+        // A model (glTF, MagicaVoxel .vox): the import dialog (the files are copied only when it is confirmed, so Cancel leaves nothing behind).
+        if (extension == ".gltf" || extension == ".glb" || extension == ".vox")
         {
             if (insideProject)
                 OpenModelImportDialog(relativeToRoot, {});
@@ -2341,6 +2344,17 @@ namespace Nox
         };
         auto state = std::make_shared<ImportState>();
         state->FileName = relativeSource.stem().string() + ".nmesh";
+        // A MagicaVoxel file: static meshes only, sized by the voxel size (VoxImporter).
+        const bool vox = VoxImporter::IsVoxFile(relativeSource);
+        float voxelCentimeters = 10.0f;
+        if (vox)
+        {
+            state->FileName = relativeSource.stem().string() + ".nsmesh";
+            state->Settings.ImportSkeletalMeshes = false;
+            state->Settings.ImportAnimations = false;
+            state->Settings.StaticCombine = MeshCombineMode::CombineAll;
+            state->Settings.ImportScale = WorldUnits::FromCentimeters(voxelCentimeters);
+        }
 
         Ref<NoxUI::UIStackBox> content(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 8.0f));
         auto note = [&content](const std::string& text)
@@ -2380,6 +2394,59 @@ namespace Nox
             row(name, dropdown);
         };
 
+        if (vox)
+        {
+            // What the file holds (read now; small), so the voxel size can be judged.
+            const std::filesystem::path absolute = externalSource.empty() ? m_BaseDirectory / relativeSource : externalSource;
+            const MeshImporter::GltfContent voxContent = MeshImporter::InspectGltf(absolute);
+            if (!voxContent.HasStaticMeshes)
+            {
+                Notify(NoxUI::UINotificationSeverity::Error, "Not imported", relativeSource.filename().string() + " has no visible voxels or cannot be read -- see the Output Log.");
+                return;
+            }
+            const glm::vec3 size = voxContent.BoundsMax - voxContent.BoundsMin;
+            note(std::format("Importing {} (MagicaVoxel): {} {}, {:.0f} x {:.0f} x {:.0f} voxels (width x height x depth). Colours, roughness, metal, "
+                             "glass and emission come from its palette.", relativeSource.filename().string(), voxContent.StaticMeshCount,
+                             voxContent.StaticMeshCount == 1 ? "model" : "models", size.x, size.y, size.z));
+
+            auto sizeNote = std::make_shared<Ref<NoxUI::UILabel>>();
+            auto describeSize = [size](float centimeters)
+            {
+                return std::format("Size in the world: {} x {} x {}", WorldUnits::Format(WorldUnits::FromCentimeters(size.x * centimeters)),
+                                   WorldUnits::Format(WorldUnits::FromCentimeters(size.y * centimeters)),
+                                   WorldUnits::Format(WorldUnits::FromCentimeters(size.z * centimeters)));
+            };
+            Ref<NoxUI::UIDragScalar> voxelSize(new NoxUI::UIDragScalar(voxelCentimeters, 0.1f, [state, sizeNote, describeSize](float centimeters)
+            {
+                state->Settings.ImportScale = WorldUnits::FromCentimeters(centimeters);
+                if (*sizeNote)
+                    (*sizeNote)->Text = describeSize(centimeters);
+            }));
+            voxelSize->Min = 0.5f;
+            voxelSize->Max = 100.0f;
+            voxelSize->Format = "{:.1f}";
+            voxelSize->TrimZeros = true;
+            voxelSize->Tooltip = "The edge of one voxel in the world. 10 cm is the voxel plan's default; 100 cm makes Minecraft-sized blocks.";
+            row("Voxel Size (cm)", voxelSize);
+            Ref<NoxUI::UILabel> sizeLabel(new NoxUI::UILabel(describeSize(voxelCentimeters), 13.5f));
+            sizeLabel->WidthMode = NoxUI::UISizeMode::Fill;
+            sizeLabel->UseColorOverride = true;
+            sizeLabel->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.62f, 0.66f, 0.74f, 1.0f });
+            content->AddChild(sizeLabel);
+            *sizeNote = sizeLabel;
+
+            Ref<NoxUI::UIDropdown> pivot(new NoxUI::UIDropdown(ctx, { "Bottom Center", "Center", "File Origin" }, static_cast<int>(state->Settings.VoxelOrigin),
+                [state](int index) { state->Settings.VoxelOrigin = static_cast<VoxelPivot>(index); }));
+            pivot->Tooltip = "Where the mesh's origin sits. Bottom Center: it stands on the ground where you drop it. File Origin: MagicaVoxel's own "
+                             "coordinates (pieces built to line up keep lining up).";
+            row("Pivot", pivot);
+            check("Merge Faces", state->Settings.VoxelMergeFaces, "Faces of one colour in one plane merged into rectangles (far fewer triangles). "
+                                                              "Off: one quad per voxel face.");
+            combine("Combine Models", state->Settings.StaticCombine, "A scene with several models: one mesh with them all, placed as in MagicaVoxel "
+                                                                     "(Combine), or a mesh per model (Do Not Combine).");
+        }
+        else
+        {
         note("Importing " + relativeSource.filename().string() + ". Skinned meshes become a skeletal mesh with its skeleton and clips, the rest static meshes.");
         check("Import Static Meshes", state->Settings.ImportStaticMeshes, "Meshes that are not skinned (level geometry, props).");
         combine("Combine Static Meshes", state->Settings.StaticCombine, "Merge static meshes into one per material, node transforms baked in: fewer draw calls.");
@@ -2394,6 +2461,7 @@ namespace Nox
         scale->TrimZeros = true;
         scale->Tooltip = "glTF is in meters; a model authored in centimetres claims meters too and comes in 100x too big: 0.01 fixes it.";
         row("Import Scale", scale);
+        }
 
         Ref<NoxUI::UITextInput> name(new NoxUI::UITextInput(state->FileName, "File name"));
         name->OnChanged = [state](const std::string& text) { state->FileName = text; };
@@ -2413,16 +2481,22 @@ namespace Nox
             }
             if (!externalSource.empty())
             {
-                // The file and what sits beside it (its .bin, its textures) come into a folder of their own.
+                // The file and what sits beside it (its .bin, its textures) come into a folder of their own; a .vox holds everything
+                // itself, so only it is copied.
                 std::error_code error;
                 const std::filesystem::path packageDirectory = m_BaseDirectory / relativeSource.parent_path();
                 std::filesystem::create_directories(packageDirectory, error);
-                for (const auto& dependency : std::filesystem::directory_iterator(externalSource.parent_path(), error))
+                if (VoxImporter::IsVoxFile(externalSource))
+                    std::filesystem::copy_file(externalSource, packageDirectory / externalSource.filename(), std::filesystem::copy_options::overwrite_existing, error);
+                else
                 {
-                    std::filesystem::copy(dependency.path(), packageDirectory / dependency.path().filename(),
-                                          std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, error);
-                    if (error)
-                        break;
+                    for (const auto& dependency : std::filesystem::directory_iterator(externalSource.parent_path(), error))
+                    {
+                        std::filesystem::copy(dependency.path(), packageDirectory / dependency.path().filename(),
+                                              std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, error);
+                        if (error)
+                            break;
+                    }
                 }
                 if (error)
                 {
@@ -2430,9 +2504,10 @@ namespace Nox
                     return;
                 }
             }
-            std::string fileName = state->FileName.empty() ? relativeSource.stem().string() + ".nmesh" : state->FileName;
+            const char* defaultExtension = VoxImporter::IsVoxFile(relativeSource) ? ".nsmesh" : ".nmesh";
+            std::string fileName = state->FileName.empty() ? relativeSource.stem().string() + defaultExtension : state->FileName;
             if (std::filesystem::path(fileName).extension().empty())
-                fileName += ".nmesh";
+                fileName += defaultExtension;
             const std::filesystem::path destination = relativeSource.parent_path() / "Meshes" / fileName;
             if (!assets->ImportModel(relativeSource, destination, state->Settings))
             {
@@ -2444,7 +2519,7 @@ namespace Nox
             Refresh();
         }, true });
         buttons.push_back({ "Cancel", {}, false });
-        NoxUI::UIModal::ShowCustom(*ctx, "Import Model", content, std::move(buttons), 520.0f);
+        NoxUI::UIModal::ShowCustom(*ctx, vox ? "Import Voxel Model" : "Import Model", content, std::move(buttons), 520.0f);
     }
 
     std::vector<NoxUI::UIMenuItem> ContentBrowserPanel::BuildAddMenu()

@@ -46,6 +46,14 @@ namespace Nox
         CombineAll
     };
 
+    // Where a MagicaVoxel import (VoxImporter) puts the origin of each mesh and of the file's scene.
+    enum class VoxelPivot : uint8_t
+    {
+        BottomCenter = 0, // the centre of the voxels' bounds, at their bottom: stands on the ground where it is placed
+        Center,           // the centre of the voxels' bounds
+        FileOrigin        // MagicaVoxel's own: each model at the centre of its box, the scene at the file's origin
+    };
+
     // What a glTF import brings in (Unreal Interchange's Import Static Meshes / Skeletal Meshes / Animations).
     struct MeshImportSettings
     {
@@ -66,6 +74,10 @@ namespace Nox
         // this import, not a property of the assets, so it is not saved with them.
         bool ImportIntoLevel = false;
         int32_t SourceMeshIndex = -1;
+        // A .vox import (VoxImporter): ImportScale is the voxel size (world units per voxel); where the origin sits; whether the faces
+        // of one palette entry in one plane merge into rectangles (off: a quad per voxel face).
+        VoxelPivot VoxelOrigin = VoxelPivot::BottomCenter;
+        bool VoxelMergeFaces = true;
         // file's materials): the whole-file mesh path; empty = this asset's own path.
         std::filesystem::path MaterialBasePath;
     };

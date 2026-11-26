@@ -518,6 +518,21 @@ namespace Nox
         return saved;
     }
 
+    bool TextureImporter::SaveExactTexture(const TextureData& cpuData, const std::filesystem::path& cookedPath)
+    {
+        if (cpuData.Width == 0 || cpuData.Height == 0 || cpuData.MipLevels != 1 || cpuData.Data.Size < static_cast<uint64_t>(cpuData.Width) * cpuData.Height * 4 ||
+            (cpuData.Format != NRI_FORMAT_SRGBA8 && cpuData.Format != NRI_FORMAT_RGBA8))
+            return false;
+        std::error_code error;
+        std::filesystem::create_directories(cookedPath.parent_path(), error);
+        if (!SaveNTEX(cookedPath, cpuData))
+        {
+            NOX_CORE_ERROR("TextureImporter::SaveExactTexture - could not write {}", cookedPath.string());
+            return false;
+        }
+        return true;
+    }
+
     bool TextureImporter::DecodeSTB(const std::filesystem::path& path, const TextureSpecification& spec, TextureData& cpuData)
     {
         stbi_set_flip_vertically_on_load_thread(spec.flip);

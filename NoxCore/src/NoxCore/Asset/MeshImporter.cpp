@@ -36,6 +36,7 @@
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Asset/MeshSerializer.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
+#include "NoxCore/Asset/VoxImporter.h"
 #include "NoxCore/Utils/Utils.h"
 
 #include <yaml-cpp/yaml.h>
@@ -885,6 +886,8 @@ namespace Nox
 
     MeshImporter::GltfContent MeshImporter::InspectGltf(const std::filesystem::path& sourcePath)
     {
+        if (VoxImporter::IsVoxFile(sourcePath))
+            return VoxImporter::Inspect(sourcePath);
         GltfContent content;
         std::unordered_set<int32_t> skinnedMeshes;
         std::unordered_set<int32_t> staticMeshes;
@@ -1598,7 +1601,7 @@ namespace Nox
     {
         const std::filesystem::path cookedPath = assetDirectory / metadata.FilePath;
         const std::filesystem::path sourcePath = assetDirectory / metadata.SourceFilePath;
-        NOX_CORE_INFO("Cooking GLTF from {} to {}", sourcePath.string(), cookedPath.string());
+        NOX_CORE_INFO("Cooking {} from {} to {}", VoxImporter::IsVoxFile(sourcePath) ? "MagicaVoxel" : "GLTF", sourcePath.string(), cookedPath.string());
 
         std::vector<MaterialData> materialDataList;
         std::vector<LightNodeData> lightDataList;
@@ -1608,8 +1611,12 @@ namespace Nox
         std::vector<Ref<AnimationSequence>> extractedAnimations;
 
         std::vector<PendingGeometry> pendingGeometry; // clusters are built below, after the import settings picked and merged the meshes
-        std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
-                                                                 lightDataList, nodeDataList, cameraDataList, &pendingGeometry);
+        // A .vox gives what the glTF parser gives (static meshes and nodes only); its palette textures are named after the materials.
+        const std::filesystem::path materialBase = metadata.MeshSettings.MaterialBasePath.empty() ? metadata.FilePath : metadata.MeshSettings.MaterialBasePath;
+        std::vector<MeshData> meshDataList = VoxImporter::IsVoxFile(sourcePath)
+            ? VoxImporter::ParseToMeshData(sourcePath, assetDirectory, materialBase, metadata.MeshSettings, materialDataList, nodeDataList, pendingGeometry)
+            : ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList, nodeDataList, cameraDataList,
+                                  &pendingGeometry);
         if (meshDataList.empty())
         {
             NOX_CORE_WARN("MeshImporter::CookMesh - Failed to load or empty mesh at source path: {}", sourcePath.string());
@@ -1710,7 +1717,7 @@ namespace Nox
             ReplaceClipManifest(cookedPath, clips);
         }
 
-        WriteMaterials(assetDirectory, importSettings.MaterialBasePath.empty() ? metadata.FilePath : importSettings.MaterialBasePath, subset);
+        WriteMaterials(assetDirectory, materialBase, subset);
 
         // Last: an interrupted cook leaves no hash, so the model is cooked again.
         Utility::saveHashToFile(cookedPath.string() + ".hash", Utility::calcul_hash_streaming(sourcePath.string()));
@@ -1731,8 +1738,10 @@ namespace Nox
         Skeleton extractedSkeleton;
         std::vector<Ref<AnimationSequence>> extractedAnimations;
         std::vector<PendingGeometry> pendingGeometry;
-        std::vector<MeshData> meshDataList = ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations,
-                                                                 lightDataList, nodeDataList, cameraDataList, &pendingGeometry);
+        std::vector<MeshData> meshDataList = VoxImporter::IsVoxFile(sourcePath)
+            ? VoxImporter::ParseToMeshData(sourcePath, assetDirectory, wholeFile.FilePath, wholeFile.MeshSettings, materialDataList, nodeDataList, pendingGeometry)
+            : ParseGltfToMeshData(sourcePath, materialDataList, extractedSkeleton, extractedAnimations, lightDataList, nodeDataList, cameraDataList,
+                                  &pendingGeometry);
 
         if (!wholeFile.MeshSettings.ImportSkinWeights)
             ConvertSkinnedToStatic(nodeDataList, pendingGeometry);

@@ -14,6 +14,7 @@
 #include "AssetImporter.h"
 #include "MeshImporter.h"
 #include "MeshSerializer.h"
+#include "VoxImporter.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/Scene/Scene.h"
 #include "NoxCore/Scene/Entity.h"
@@ -126,6 +127,7 @@ namespace Nox
         { ".ntex", AssetType::Texture2D },
         { ".gltf", AssetType::MeshSource },
         { ".glb", AssetType::MeshSource },
+        { ".vox", AssetType::MeshSource }, // MagicaVoxel (VoxImporter)
         { ".nmesh", AssetType::Mesh },
         { ".nsmesh", AssetType::StaticMesh },
         { ".nmat", AssetType::Material },
@@ -438,8 +440,10 @@ namespace Nox
                     std::filesystem::remove(cookedPath.string() + ".hash");
             }
         }
-        else if (metadata.Type == AssetType::Texture2D)
+        else if (metadata.Type == AssetType::Texture2D && metadata.FilePath.lexically_normal() != metadata.SourceFilePath.lexically_normal())
         {
+            // (A .ntex that is its own source -- a .vox's palette textures, generated textures -- is read again as it is: deleting it
+            // would delete the texture.)
             auto cookedPath = Project::GetActiveAssetDirectory() / metadata.FilePath;
             if (cookedPath.extension() == ".ntex" && std::filesystem::exists(cookedPath))
             {
@@ -620,8 +624,25 @@ namespace Nox
             std::unordered_map<int32_t, AssetHandle> handleOfMesh;
             for (const MeshImporter::SplitMesh& mesh : meshes)
             {
+                const AssetType meshType = it->Skinned ? AssetType::Mesh : AssetType::StaticMesh;
+                // Imported before (the dialog again): the same asset with the new settings, reloaded from the fresh cook.
+                if (const AssetHandle existing = FindHandleByPath(mesh.FilePath, meshType); existing != 0)
+                {
+                    AssetMetadata& entry = m_AssetRegistry.at(existing);
+                    entry.SourceFilePath = it->MaterialBase.SourceFilePath;
+                    entry.MeshSettings.SourceMeshIndex = mesh.MeshIndex;
+                    entry.MeshSettings.MaterialBasePath = it->MaterialBase.FilePath;
+                    entry.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
+                    entry.MeshSettings.VoxelOrigin = it->MaterialBase.MeshSettings.VoxelOrigin;
+                    entry.MeshSettings.VoxelMergeFaces = it->MaterialBase.MeshSettings.VoxelMergeFaces;
+                    handleOfMesh[mesh.MeshIndex] = existing;
+                    registryChanged = true;
+                    if (m_LoadedAssets.contains(existing))
+                        ReimportAsset(existing, true);
+                    continue;
+                }
                 AssetMetadata metadata;
-                metadata.Type = it->Skinned ? AssetType::Mesh : AssetType::StaticMesh;
+                metadata.Type = meshType;
                 metadata.FilePath = mesh.FilePath;
                 metadata.SourceFilePath = it->MaterialBase.SourceFilePath;
                 metadata.MeshSettings.ImportStaticMeshes = !it->Skinned;
@@ -630,6 +651,8 @@ namespace Nox
                 metadata.MeshSettings.SourceMeshIndex = mesh.MeshIndex;
                 metadata.MeshSettings.MaterialBasePath = it->MaterialBase.FilePath;
                 metadata.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
+                metadata.MeshSettings.VoxelOrigin = it->MaterialBase.MeshSettings.VoxelOrigin;
+                metadata.MeshSettings.VoxelMergeFaces = it->MaterialBase.MeshSettings.VoxelMergeFaces;
                 handleOfMesh[mesh.MeshIndex] = RegisterAsset(metadata);
                 registryChanged = true;
             }
@@ -702,6 +725,26 @@ namespace Nox
             metadata.FilePath.replace_extension(extension);
             metadata.SourceFilePath = sourcePath;
             metadata.MeshSettings = assetSettings;
+            // Imported before (the dialog again, other settings -- a .vox's voxel size, a glTF's scale): the same asset, cooked again
+            // with the new settings. A second entry for the file would keep using the old cook (its source did not change).
+            if (const AssetHandle existing = FindHandleByPath(metadata.FilePath, type); existing != 0)
+            {
+                AssetMetadata& entry = m_AssetRegistry.at(existing);
+                entry.SourceFilePath = sourcePath;
+                entry.MeshSettings = assetSettings;
+                SerializeAssetRegistry();
+                if (m_LoadedAssets.contains(existing))
+                    ReimportAsset(existing, true); // deletes the cook, cooks again, swaps the loaded asset
+                else
+                {
+                    std::error_code error;
+                    const std::filesystem::path cooked = Project::GetActiveAssetDirectory() / metadata.FilePath;
+                    std::filesystem::remove(cooked, error);
+                    std::filesystem::remove(cooked.string() + ".hash", error);
+                    RequestAsset(existing);
+                }
+                return existing;
+            }
             const AssetHandle handle = RegisterAsset(metadata);
             SerializeAssetRegistry();
             RequestAsset(handle);
@@ -2269,6 +2312,11 @@ namespace Nox
             out << YAML::Key << "SkeletalCombine" << YAML::Value << static_cast<int>(metadata.MeshSettings.SkeletalCombine);
             out << YAML::Key << "SourceMeshIndex" << YAML::Value << metadata.MeshSettings.SourceMeshIndex;
             out << YAML::Key << "ImportScale" << YAML::Value << metadata.MeshSettings.ImportScale;
+            if (VoxImporter::IsVoxFile(metadata.SourceFilePath))
+            {
+                out << YAML::Key << "VoxelOrigin" << YAML::Value << static_cast<int>(metadata.MeshSettings.VoxelOrigin);
+                out << YAML::Key << "VoxelMergeFaces" << YAML::Value << metadata.MeshSettings.VoxelMergeFaces;
+            }
             if (!metadata.MeshSettings.MaterialBasePath.empty())
                 out << YAML::Key << "MaterialBasePath" << YAML::Value << metadata.MeshSettings.MaterialBasePath.generic_string();
             out << YAML::EndMap;
@@ -2554,6 +2602,10 @@ namespace Nox
                     metadata.MeshSettings.ImportScale = settingsNode["ImportScale"].as<float>();
                 if (settingsNode["MaterialBasePath"])
                     metadata.MeshSettings.MaterialBasePath = settingsNode["MaterialBasePath"].as<std::string>();
+                if (settingsNode["VoxelOrigin"])
+                    metadata.MeshSettings.VoxelOrigin = static_cast<VoxelPivot>(std::clamp(settingsNode["VoxelOrigin"].as<int>(), 0, 2));
+                if (settingsNode["VoxelMergeFaces"])
+                    metadata.MeshSettings.VoxelMergeFaces = settingsNode["VoxelMergeFaces"].as<bool>();
             }
         }
 

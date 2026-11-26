@@ -12,6 +12,7 @@
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
+#include "NoxCore/Asset/VoxImporter.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
@@ -696,7 +697,8 @@ namespace Nox::Mcp
             tool.Title = "Bring a file into the project";
             tool.Description = "Imports a file from this computer into the project's asset folder and registers it: a glTF model (.gltf with "
                                "its buffers and images, or .glb) is copied and cooked into meshes, materials, a skeleton and animations (big "
-                               "models: the answer waits for the cook; place one with place_model); a texture (.png, .jpg, .ktx2), a sound (.wav, .ogg, .flac, .mp3) or a "
+                               "models: the answer waits for the cook; place one with place_model); a MagicaVoxel model (.vox) is cooked into static meshes "
+                               "with its palette as textures (voxel_size_cm, voxel_pivot); a texture (.png, .jpg, .ktx2), a sound (.wav, .ogg, .flac, .mp3) or a "
                                "font (.ttf, .otf) is copied as it is. A file already under the asset folder is registered where it is. Answers "
                                "the assets it created.";
             tool.InputSchema = Schema()
@@ -705,7 +707,9 @@ namespace Nox::Mcp
                                    .Enum("source_unit", "Models: the unit the file's numbers mean (default meters, glTF's; the import dialog's Source Unit)",
                                          { "meters", "centimeters", "millimeters", "inches", "feet" })
                                    .Number("import_scale", "Models: a custom scale in world units per file unit, instead of source_unit's", false, 1e-6, 1e6)
-                                   .Boolean("animations", "Models: also import its animation clips (default true)");
+                                   .Boolean("animations", "Models: also import its animation clips (default true)")
+                                   .Number("voxel_size_cm", ".vox models: the edge of one voxel in centimetres (default 10)", false, 0.5, 100.0)
+                                   .Enum("voxel_pivot", ".vox models: the mesh's origin (default bottom_center)", { "bottom_center", "center", "file_origin" });
             tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
@@ -730,7 +734,7 @@ namespace Nox::Mcp
                 const AssetType type = EditorAssetManager::GetAssetTypeFromExtension(extension);
                 if (type != AssetType::MeshSource && type != AssetType::Texture2D && type != AssetType::AudioClip && type != AssetType::Font)
                 {
-                    done(ToolResult::Error(std::format("'{}' files are not imported this way (models .gltf / .glb, textures .png / .jpg / .ktx2, "
+                    done(ToolResult::Error(std::format("'{}' files are not imported this way (models .gltf / .glb / .vox, textures .png / .jpg / .ktx2, "
                                                        "sounds .wav / .ogg / .flac / .mp3, fonts .ttf / .otf)", extension)));
                     return;
                 }
@@ -801,7 +805,18 @@ namespace Nox::Mcp
                                                                                     : WorldUnits::SourceUnit::Meters;
                     settings.ImportScale = arguments.contains("import_scale") ? arguments["import_scale"].get<float>() : WorldUnits::PerSourceUnit(sourceUnit);
                     settings.ImportAnimations = arguments.value("animations", true);
-                    const std::filesystem::path destination = relativeSource.parent_path() / "Meshes" / (relativeSource.stem().string() + ".nmesh");
+                    std::filesystem::path destination = relativeSource.parent_path() / "Meshes" / (relativeSource.stem().string() + ".nmesh");
+                    if (VoxImporter::IsVoxFile(relativeSource))
+                    {
+                        // The voxel import dialog's defaults: static meshes, the models combined, 10 cm voxels.
+                        settings.ImportSkeletalMeshes = false;
+                        settings.ImportAnimations = false;
+                        settings.StaticCombine = MeshCombineMode::CombineAll;
+                        settings.ImportScale = WorldUnits::FromCentimeters(arguments.value("voxel_size_cm", 10.0f));
+                        const std::string pivot = arguments.value("voxel_pivot", std::string("bottom_center"));
+                        settings.VoxelOrigin = pivot == "center" ? VoxelPivot::Center : pivot == "file_origin" ? VoxelPivot::FileOrigin : VoxelPivot::BottomCenter;
+                        destination.replace_extension(".nsmesh");
+                    }
                     if (!manager->ImportModel(relativeSource, destination, settings))
                     {
                         done(ToolResult::Error(std::format("{} could not be imported (read_log tells why)", relativeSource.generic_string())));

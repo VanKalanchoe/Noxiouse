@@ -1,5 +1,5 @@
-// NoxToolsTest: the engine console's registry (docs/MCP_Plan_2026-11.md §4) and, from MCP0, the MCP protocol layer -- without a
-// window, GPU or editor. Exit code 0 when every check passed.
+// NoxToolsTest: the engine console's registry (docs/MCP_Plan_2026-11.md §4), from MCP0 the MCP protocol layer, and the MagicaVoxel
+// reader / mesher (VoxTests.inl, docs/Voxel_Plan_2026-11.md) -- without a window, GPU or editor. Exit code 0 when every check passed.
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
@@ -31,6 +31,7 @@ namespace
 #ifdef NOX_TOOLS_TEST_MCP
 #include "McpTests.inl"
 #endif
+#include "VoxTests.inl"
 
 using namespace Nox;
 
@@ -576,14 +577,14 @@ static void TestMaterialGraph()
     NodeGraph pixelInputsGraph = CreateEmptyMaterialGraph();
     const uint32_t normalTex = node(pixelInputsGraph, "Texture Sample", { { "Normal Map", true } });
     const uint32_t pixNorm = node(pixelInputsGraph, "Pixel Normal");
-    const uint32_t fresnel = node(pixelInputsGraph, "Fresnel");
+    const uint32_t pixelFresnel = node(pixelInputsGraph, "Fresnel");
     const uint32_t depthFade = node(pixelInputsGraph, "Depth Fade", { { "Fade Distance", 50.0f } });
     const uint32_t sceneDepth = node(pixelInputsGraph, "Scene Depth");
     const uint32_t pixelDepth = node(pixelInputsGraph, "Pixel Depth");
     const uint32_t depthSub = node(pixelInputsGraph, "Subtract");
     link(pixelInputsGraph, normalTex, 0, pixelInputsGraph.OutputNode, 3);    // Normal
-    link(pixelInputsGraph, pixNorm, 0, fresnel, 2);                          // Fresnel.Normal <- Pixel Normal
-    link(pixelInputsGraph, fresnel, 0, pixelInputsGraph.OutputNode, 4);      // Emissive
+    link(pixelInputsGraph, pixNorm, 0, pixelFresnel, 2);                     // Fresnel.Normal <- Pixel Normal
+    link(pixelInputsGraph, pixelFresnel, 0, pixelInputsGraph.OutputNode, 4); // Emissive
     link(pixelInputsGraph, depthFade, 0, pixelInputsGraph.OutputNode, 6);    // Opacity
     link(pixelInputsGraph, sceneDepth, 0, depthSub, 0);
     link(pixelInputsGraph, pixelDepth, 0, depthSub, 1);
@@ -741,6 +742,8 @@ int main()
     TestCustomLitShaders();
     TestMaterialGraph();
     TestEntityGraphParameters();
+    TestVoxReader();
+    TestVoxMesher();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
     TestMcpValidation();

@@ -97,6 +97,9 @@ namespace Nox
         // `cookedPath` (absolute) with a mip chain: BC7, or BC1 with `fast` (several times smaller to encode, 4 bits a texel).
         // Registered with that .ntex as its FilePath and no source, the file is its own cook.
         static bool CookGeneratedTexture(TextureData& cpuData, const std::filesystem::path& cookedPath, bool fast);
+        // Any thread. The same, kept exact: one level, uncompressed (RGBA8 / SRGBA8), no mips -- data a shader reads texel by texel
+        // (a .vox's palette textures, VoxImporter). cpuData is not released.
+        static bool SaveExactTexture(const TextureData& cpuData, const std::filesystem::path& cookedPath);
 
         // AssetMetadata filepath is relative to project asset directory
         static Ref<Texture2D> ImportTexture2D(AssetHandle handle, const AssetMetadata& metadata);

@@ -1,6 +1,6 @@
 # Voxels -- Plan (2026-11)
 
-Status: **planned (2026-11-26), nothing built.** Backlog item **VX** (`Backlog_2026.md`).
+Status: **VX0 built (2026-11-26, not yet user-tested): `.vox` models import as meshes** (§4); VX1 onward planned. Backlog item **VX** (`Backlog_2026.md`).
 
 Goal: tiny voxels (10 cm by default) in Noxiouse, two ways at once:
 
@@ -162,6 +162,31 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - **Done when:** the user's MagicaVoxel models import, place and render in raster and RT presets; a `.vox` with several models
   becomes a prefab with the right transforms.
 
+**As built (VX0, 2026-11-26):**
+
+- Reader `NoxCore/src/NoxCore/Voxel/VoxReader.*` (all chunks above plus 0.98 `MATT`; models up to 1024 per axis; an animated shape's
+  frame 0; files without a scene graph place their first model -- the others are animation frames), mesher `VoxMesher.*` (greedy per
+  palette entry and plane, the glass rule: a face towards an empty cell, or from an opaque voxel towards a transparent one), importer
+  `NoxCore/src/NoxCore/Asset/VoxImporter.*`: a `.vox` is a `MeshSource` cooked by `MeshImporter::CookMesh` / `CookSplitMeshes`,
+  which take the glTF parser's output from it -- so hashing, hot reload, cluster LOD and packaging are the glTF path's.
+- **Multi-model scenes: Combine / Do Not Combine instead of a prefab** -- the glTF import's own choice (one mesh placed as in
+  MagicaVoxel, or a mesh per model with its file layout); a root node moves the scene's pivot to the origin.
+- **Pivot** option Bottom Center (default) / Center / File Origin; **Merge Faces** option; **Voxel Size** per import (`ImportScale` =
+  world units per voxel, default 10 cm) until the project setting exists (VX1).
+- **Palette textures** 256 x 1, one mip, uncompressed (Color sRGB; Surface R transparency / G roughness / B metallic; Emissive sRGB
+  colour x min(`_emit` x 2^`_flux`, 16) / 16), rewritten only when changed; materials `_Palette` / `_PaletteGlass` written once (factors
+  1, Emissive Strength 16; glass Transmission 1 x the surface R, mean IOR). Glass, blend, media and cloud entries go to the glass submesh.
+- **LOD: the engine's cluster LOD DAG, not voxel downsampling (yet)** -- it protects UV seams (= colour borders) and hard normal edges and
+  has no sloppy fallback, so flat areas of one colour simplify losslessly; voxel downsampling waits until the cluster LOD is seen to
+  melt the look.
+- Found on the way and fixed: `ReimportAsset` deleted a `.ntex` that is its own source (palette textures, generated textures); importing
+  a model again through the dialog made a second registry entry and kept the old cook (now the same asset is cooked again with the new
+  settings, glTF too); importing a `.vox` from outside the project copied its whole folder (now only the file); NoxToolsTest's
+  `fresnel` declared twice (did not compile).
+- Tests: `Tests/VoxTests.inl` (NoxToolsTest, 31 checks, also compiled standalone with ASan / UBSan here); the 44 files of
+  github.com/ephtracy/voxel-model and the 15 sample files of MagicaVoxel 0.99.7 read and meshed with closed surfaces. Not run here:
+  the cook inside the engine, the editor dialog, rendering (no GPU in the cloud container) -- the user's test.
+
 ## 5. The brick map (VX1-VX2)
 
 **CPU side** (`NoxCore/src/NoxCore/Voxel/`):
@@ -207,7 +232,7 @@ and post effects need nothing.
 
 | Phase | What | Done when |
 |---|---|---|
-| **VX0** | `.vox` reader + import as meshes / prefabs, palette materials (§4) | The user's models in the editor, both presets |
+| **VX0** | `.vox` reader + import as meshes (Combine / Do Not Combine), palette materials (§4) -- **built, not yet user-tested** | The user's models in the editor, both presets |
 | **VX1** | Brick map CPU side: chunks, bricks, palette (compaction, 2-byte fallback), voxel material table, encoding + zstd, FastNoise2 generator asset (public / secret layers, version + hash), a `.vox` model stamped into the world | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
 | **VX2** | GPU brick pool + voxel G-buffer output, **both primary-visibility candidates** (brick boxes with two-phase culling; compute primary rays), raster lighting | Terrain and the stamped model lit in the raster preset; both candidates measured at 1440p, one kept |
 | **VX3** | Raster preset coverage (§6), sky visibility and column summaries (underground darkness) | Voxel shadows (sun + local lights), probes, extra views, picking; a cave dark in the raster preset |
