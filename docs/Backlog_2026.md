@@ -178,6 +178,17 @@ Built items many of which the user has not tested yet (marked "untested"); the p
 
 ## Done (recent)
 
+- 2026-11-26 (waiting for the user's test): **Path tracer black on Vulkan since the D3D12 backend commit (ee7e9a77)** -- that commit
+  moved the push constants of the path tracer's ray tracing stages (ray generation, miss, closest hit, any hit) from a global
+  `[[vk::push_constant]] ConstantBuffer` to a `uniform` entry-point parameter, as it did for every compute / mesh / fragment shader;
+  for ray tracing entry points Slang puts those in the shader record (`ShaderRecordBufferKHR`, checked in the SPIR-V), which the shader
+  binding table does not hold: every stage read zeros, the ray generation returned at once (viewport 0 x 0), the image stayed black (and
+  DLSS-RR, fed guides nothing wrote, showed reused memory). Now a global again (`PathTracer/PathTracerPushConstants.slang`: Vulkan push
+  data, D3D12 root constants b0); the four stages compiled with Slang 2026.22.1 here: push constants, no shader record. **Still open
+  (NoxRHI):** D3D12 ray tracing pipelines are a stub (`PipelineD3D12::createRayTracingPipeline` builds a state object with no DXIL
+  libraries, hit groups or shader config; `CommandBufferD3D12::bindPipeline` binds them with SetPipelineState instead of
+  SetPipelineState1) -- the path tracer has never run on D3D12 (the in-tree NRI before NoxRHI had the same stub).
+
 - 2026-11-26 (waiting for the user's test): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
   `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette
   textures and metal / glass / emissive materials; scene graph placement, hot reload from MagicaVoxel, MCP `import_asset` with

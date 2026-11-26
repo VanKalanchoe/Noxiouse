@@ -2,9 +2,10 @@
 
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
+#include "PathTracerPushConstants.slang"
 
 [shader("anyhit")]
-void anyHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib, uniform PushConstantPathTracer pushConstant)
+void anyHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib)
 {
     UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 

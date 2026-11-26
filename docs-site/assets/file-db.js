@@ -637,6 +637,7 @@ window.NOX_FILE_DATABASE = [
         ["PathTracer/PathTracerHit.slang", "Hardware RT ClosestHit shader: Beer-Lambert volume absorption, unified NEE, StandardBSDF."],
         ["PathTracer/PathTracerAnyHit.slang", "Hardware RT AnyHit shader: alpha-cutout and stochastic alpha-blend opacity testing."],
         ["PathTracer/PathTracerMiss.slang", "Hardware RT Miss shader: evaluates skybox cubemap, visible sun/moon/area lights, environment MIS."],
+        ["PathTracer/PathTracerPushConstants.slang", "The path tracer stages' push constants as a global (Vulkan push data, D3D12 root constants b0): a ray tracing entry point's uniform parameters would be its shader record."],
         ["PathTracer/EnvironmentImportance.slang", "Equal-area octahedral luminance mipmap quadtree builder for MIP-descent environment NEE."],
         ["PathTracer/PathPayload.slang", "Compact TraceRay payload struct and pack/unpack routines."],
         ["PathTracer/PathState.slang", "Full path state, ray-cone LOD spread propagation, 2-slot interior stack, delta branch state."],

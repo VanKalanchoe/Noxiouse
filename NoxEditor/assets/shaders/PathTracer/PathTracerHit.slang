@@ -2,6 +2,7 @@
 
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
+#include "PathTracerPushConstants.slang"
 #include "PathTracerNEE.slang"
 #include "../MipFeedback.slang"
 
@@ -138,7 +139,7 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
 }
 
 [shader("closesthit")]
-void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib, uniform PushConstantPathTracer pushConstant)
+void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib)
 {
     PathState path = PathPayload::unpack(payload);
 

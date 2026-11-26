@@ -2,6 +2,7 @@
 
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
+#include "PathTracerPushConstants.slang"
 #include "../PathTracerSignals.slang"
 #include "../HeightFog.slang"
 
@@ -45,7 +46,7 @@ void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, ou
 }
 
 [shader("raygeneration")]
-void rayGenMain(uniform PushConstantPathTracer pushConstant)
+void rayGenMain()
 {
     uint2 pixelPos = DispatchRaysIndex().xy;
     if (pixelPos.x >= uint(pushConstant.viewportSize.x) || pixelPos.y >= uint(pushConstant.viewportSize.y))

@@ -2,10 +2,11 @@
 
 #include "PathPayload.slang"
 #include "PathTracerBridge.slang"
+#include "PathTracerPushConstants.slang"
 #include "EmissiveLights.slang"
 
 [shader("miss")]
-void missMain(inout PathPayload payload : SV_RayPayload, uniform PushConstantPathTracer pushConstant)
+void missMain(inout PathPayload payload : SV_RayPayload)
 {
     PathState path = PathPayload::unpack(payload);
 
