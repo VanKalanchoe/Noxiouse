@@ -26,6 +26,7 @@
 #include "NoxCore/Asset/VfxAsset.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Core/Application.h"
+#include "NoxCore/UI/Core/UILayer.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Core/WorldUnits.h"
 #include "NoxCore/Project/Project.h"
@@ -2332,9 +2333,18 @@ namespace Nox
 
     void ContentBrowserPanel::OpenModelImportDialog(const std::filesystem::path& relativeSource, const std::filesystem::path& externalSource)
     {
+        // A file dropped from the system or picked in the file dialog arrives between frames, when no UI context is current: the
+        // editor's own (the UI layer's) then, as its other dialogs opened from events do. (It returned without a word: dropping a model
+        // onto the editor did nothing.)
         NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
         if (!ctx)
+            if (UILayer* uiLayer = Application::Get().GetUILayer())
+                ctx = &uiLayer->GetContext();
+        if (!ctx)
+        {
+            NOX_CORE_WARN("ContentBrowserPanel: no UI to show the import dialog of {} in", relativeSource.generic_string());
             return;
+        }
 
         // Unreal's Interchange options, the ones a glTF needs: what to import, how to combine it, its scale, where it goes.
         struct ImportState

@@ -183,7 +183,8 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   textures and metal / glass / emissive materials; scene graph placement, hot reload from MagicaVoxel, MCP `import_asset` with
   `voxel_size_cm`. Fixed on the way: re-importing a model through the dialog now cooks the same asset again (was a second entry with
   the old cook, glTF too); `ReimportAsset` no longer deletes a `.ntex` that is its own source; NoxToolsTest compiles again (`fresnel`
-  declared twice). Offline: `Tests/VoxTests.inl` 31 checks; 59 real `.vox` files read and meshed closed.
+  declared twice). Offline: `Tests/VoxTests.inl` 31 checks; 59 real `.vox` files read and meshed closed. After the user's first test:
+  dropping a file from the system onto the editor opened no import dialog (no UI context current between frames; glTF too) -- fixed.
 
 - 2026-11-12 (waiting for the user's test): **Project Manager** (`NoxEditor/src/ProjectManager/`): the editor opens with it when no
   project is given -- recent projects (+ the Facerun sample), New Project (name, location, world units, render quality, C# scripts

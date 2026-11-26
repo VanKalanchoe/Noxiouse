@@ -183,6 +183,9 @@ The voxel data, rendering and physics do not change: a client brick is the publi
   a model again through the dialog made a second registry entry and kept the old cook (now the same asset is cooked again with the new
   settings, glTF too); importing a `.vox` from outside the project copied its whole folder (now only the file); NoxToolsTest's
   `fresnel` declared twice (did not compile).
+- **After the user's first test (2026-11-26):** dragging a `.vox` onto the Content Browser did nothing -- a file dropped from the
+  system (and one picked in the file dialog) arrives between frames, when no NoxUI context is current, and the import dialog returned
+  silently (glTF drops too, since the NoxUI editor). It now opens in the UI layer's context, as the editor's other event dialogs.
 - Tests: `Tests/VoxTests.inl` (NoxToolsTest, 31 checks, also compiled standalone with ASan / UBSan here); the 44 files of
   github.com/ephtracy/voxel-model and the 15 sample files of MagicaVoxel 0.99.7 read and meshed with closed surfaces. Not run here:
   the cook inside the engine, the editor dialog, rendering (no GPU in the cloud container) -- the user's test.
