@@ -7,9 +7,10 @@
 // Materials: one "Palette" material (and "PaletteGlass" for transparent entries) per file, reading three palette textures cooked next
 // to them (<model folder>/Textures/<file>_Palette{Color,Surface,Emissive}.ntex, 256 x 1, one mip, uncompressed: each voxel face's UVs
 // sit on its palette entry's texel, so the colours are exact). Color: the palette (sRGB). Surface (linear): R transparency, G
-// roughness, B metallic. Emissive (sRGB): colour x emission strength / 16 (strength = _emit x 2^_flux, at most 16; the material's
-// Emissive Strength is 16). The materials (.nmat) are written once like a glTF's -- edits in the Material Editor survive re-imports --
-// and everything the palette decides lives in the textures, which every cook rewrites when they changed (the editor reloads them).
+// roughness, B metallic. Emissive (sRGB): colour x the entry's emission strength / the brightest entry's (strength = _emit x
+// 2^(_flux + 1) x the import's Emission Scale). The materials (.nmat) are written once like a glTF's -- edits in the Material Editor
+// survive re-imports -- except their Emissive (1, or 0 without emissive entries) and Emissive Strength (the brightest entry's), which
+// every cook sets; the textures are rewritten when they changed (the editor reloads them).
 
 #include "MeshImporter.h"
 
@@ -37,7 +38,5 @@ namespace Nox
         // kind: "Color", "Surface" or "Emissive".
         static std::filesystem::path PaletteTexturePath(const std::filesystem::path& materialBase, const char* kind);
 
-        // Emission strength the palette's emissive texture is scaled to (the materials' Emissive Strength).
-        static constexpr float MaxEmissiveStrength = 16.0f;
     };
 }

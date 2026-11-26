@@ -78,6 +78,7 @@ namespace Nox
         // of one palette entry in one plane merge into rectangles (off: a quad per voxel face).
         VoxelPivot VoxelOrigin = VoxelPivot::BottomCenter;
         bool VoxelMergeFaces = true;
+        float VoxelEmissionScale = 1.0f; // multiplies the palette's emission (_emit x 2^(_flux + 1))
         // file's materials): the whole-file mesh path; empty = this asset's own path.
         std::filesystem::path MaterialBasePath;
     };

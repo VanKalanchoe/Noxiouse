@@ -187,6 +187,9 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   dropping a file from the system onto the editor opened no import dialog (no UI context current between frames; glTF too) -- fixed.
   Second test: a model folder moved in Explorer lost its mesh from the Content Browser (move detection adopted only self-contained
   files) -- moved cooked meshes are adopted now, their source and material base move with them (glTF too).
+  Third test: reloaded textures now reach the renderer (slot invalidated; palette written in place); emission `_emit` x 2^(`_flux` + 1) x
+  Emission Scale, only meshes with Emit entries are lights. Open: the user's path tracer renders black (not caused by the import as far as
+  the code shows; isolation asked).
 
 - 2026-11-12 (waiting for the user's test): **Project Manager** (`NoxEditor/src/ProjectManager/`): the editor opens with it when no
   project is given -- recent projects (+ the Facerun sample), New Project (name, location, world units, render quality, C# scripts

@@ -174,8 +174,8 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - **Pivot** option Bottom Center (default) / Center / File Origin; **Merge Faces** option; **Voxel Size** per import (`ImportScale` =
   world units per voxel, default 10 cm) until the project setting exists (VX1).
 - **Palette textures** 256 x 1, one mip, uncompressed (Color sRGB; Surface R transparency / G roughness / B metallic; Emissive sRGB
-  colour x min(`_emit` x 2^`_flux`, 16) / 16), rewritten only when changed; materials `_Palette` / `_PaletteGlass` written once (factors
-  1, Emissive Strength 16; glass Transmission 1 x the surface R, mean IOR). Glass, blend, media and cloud entries go to the glass submesh.
+  colour x strength / the brightest's, strength `_emit` x 2^(`_flux` + 1) x Emission Scale), rewritten only when changed; materials `_Palette` /
+  `_PaletteGlass` written once (factors 1; glass Transmission 1 x the surface R, mean IOR) except Emissive / Emissive Strength (each cook). Glass, blend, media and cloud entries go to the glass submesh.
 - **LOD: the engine's cluster LOD DAG, not voxel downsampling (yet)** -- it protects UV seams (= colour borders) and hard normal edges and
   has no sloppy fallback, so flat areas of one colour simplify losslessly; voxel downsampling waits until the cluster LOD is seen to
   melt the look.
@@ -189,6 +189,13 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - **Second test:** the knight's folder moved into `Models/` in Explorer kept its material and textures but lost its mesh (not listed):
   the move detection (`ScanAndRegisterNewAssets`, the Content Browser's Refresh) adopted only self-contained files. It now adopts a
   moved cooked mesh too and moves its source (`.vox` / `.gltf`) and material base path by the same step -- glTF model folders too.
+- **Third test:** palette edits did not show (the user had saved over another copy, but two real gaps were behind it as well): the
+  palette textures were renamed over, which the watcher reports as the `.tmp` only -- now written in place; and `ReimportAsset`
+  swapped a texture without telling the renderer, whose slot cache kept the old image -- now swapped as the streamer swaps one.
+  Emission was weak (room.vox lamps 4): now `_emit` x 2^(`_flux` + 1) (the Blender MagicaVoxel add-on's mapping; 8 for those lamps)
+  x a new **Emission Scale** import option; the materials' Emissive / Emissive Strength follow the palette on every cook (0 without
+  Emit entries, so meshes without lamps are no emissive lights). The black path tracer is not explained by the import (the emissive
+  sampling is guarded against zero-power instances) -- isolation asked of the user.
 - Tests: `Tests/VoxTests.inl` (NoxToolsTest, 31 checks, also compiled standalone with ASan / UBSan here); the 44 files of
   github.com/ephtracy/voxel-model and the 15 sample files of MagicaVoxel 0.99.7 read and meshed with closed surfaces. Not run here:
   the cook inside the engine, the editor dialog, rendering (no GPU in the cloud container) -- the user's test.

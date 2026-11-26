@@ -709,7 +709,8 @@ namespace Nox::Mcp
                                    .Number("import_scale", "Models: a custom scale in world units per file unit, instead of source_unit's", false, 1e-6, 1e6)
                                    .Boolean("animations", "Models: also import its animation clips (default true)")
                                    .Number("voxel_size_cm", ".vox models: the edge of one voxel in centimetres (default 10)", false, 0.5, 100.0)
-                                   .Enum("voxel_pivot", ".vox models: the mesh's origin (default bottom_center)", { "bottom_center", "center", "file_origin" });
+                                   .Enum("voxel_pivot", ".vox models: the mesh's origin (default bottom_center)", { "bottom_center", "center", "file_origin" })
+                                   .Number("voxel_emission_scale", ".vox models: multiplies the palette's emission (default 1)", false, 0.0, 1000.0);
             tool.Access = NoxMcp::ToolAccess::Write;
             tool.Handler = [context](const Json& arguments, ToolDone done)
             {
@@ -815,6 +816,7 @@ namespace Nox::Mcp
                         settings.ImportScale = WorldUnits::FromCentimeters(arguments.value("voxel_size_cm", 10.0f));
                         const std::string pivot = arguments.value("voxel_pivot", std::string("bottom_center"));
                         settings.VoxelOrigin = pivot == "center" ? VoxelPivot::Center : pivot == "file_origin" ? VoxelPivot::FileOrigin : VoxelPivot::BottomCenter;
+                        settings.VoxelEmissionScale = arguments.value("voxel_emission_scale", 1.0f);
                         destination.replace_extension(".nsmesh");
                     }
                     if (!manager->ImportModel(relativeSource, destination, settings))

@@ -1,10 +1,12 @@
 #include "VoxImporter.h"
 
+#include "MaterialSerializer.h"
 #include "TextureImporter.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Voxel/VoxMesher.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -39,8 +41,8 @@ namespace Nox
             return std::vector<uint8_t>(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
         }
 
-        // A 256 x 1 texture, one mip, uncompressed: written beside its path and moved over it only when its bytes changed (an unchanged
-        // palette writes nothing, so the file watcher does not reload it).
+        // A 256 x 1 texture, one mip, uncompressed, written only when its bytes changed (an unchanged palette writes nothing, so the file
+        // watcher does not reload it).
         bool WritePaletteTexture(const std::filesystem::path& path, const std::vector<uint8_t>& texels, nri::ImageFormat format)
         {
             TextureData data;
@@ -63,18 +65,17 @@ namespace Nox
                 std::filesystem::remove(temporary, error);
                 return false;
             }
-            if (std::filesystem::exists(path, error) && ReadFileBytes(path) == ReadFileBytes(temporary))
-            {
-                std::filesystem::remove(temporary, error);
+            const std::vector<uint8_t> bytes = ReadFileBytes(temporary);
+            std::filesystem::remove(temporary, error);
+            if (std::filesystem::exists(path, error) && ReadFileBytes(path) == bytes)
                 return true;
-            }
-            std::filesystem::rename(temporary, path, error);
-            if (error)
-            {
-                std::filesystem::remove(temporary, error);
+            // Written over in place (not renamed over): the file watcher reports the file itself, so the editor reloads it (a rename
+            // was reported as the .tmp only).
+            std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+            if (!stream)
                 return false;
-            }
-            return true;
+            stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            return stream.good();
         }
 
         Vox::Pivot ToVoxPivot(VoxelPivot pivot)
@@ -166,6 +167,22 @@ namespace Nox
         std::vector<uint8_t> emissive(PaletteSize * 4, 0);
         double iorSum = 0.0;
         uint32_t iorCount = 0;
+        // Emission strength per entry (radiance, 1 = the colour itself): _emit x 2^(_flux + 1), the Blender MagicaVoxel add-on's mapping
+        // of MagicaVoxel's Emission and Power (MagicaVoxel publishes none), times the import's Emission Scale. The texture holds each
+        // entry relative to the brightest; the materials' Emissive Strength is the brightest.
+        std::array<float, PaletteSize> strength{};
+        float maxStrength = 0.0f;
+        for (uint32_t index = 1; index < PaletteSize; ++index)
+        {
+            const Vox::Material& material = scene.Materials[index];
+            if (material.Type != Vox::MaterialType::Emit)
+                continue;
+            strength[index] = std::max(material.Emission * std::exp2(material.Flux + 1.0f) * std::max(settings.VoxelEmissionScale, 0.0f), 0.0f);
+            if (std::isfinite(strength[index]))
+                maxStrength = std::max(maxStrength, strength[index]);
+            else
+                strength[index] = 0.0f;
+        }
         std::vector<bool> used(PaletteSize, false);
         for (const Vox::ModelMesh& model : meshed.Models)
             for (const Vox::VoxGeometry* geometry : { &model.Opaque, &model.Transparent })
@@ -188,13 +205,13 @@ namespace Nox
             s[1] = ToByte(material.Roughness);
             s[2] = ToByte(material.Metallic);
             s[3] = 255;
-            if (material.Type == Vox::MaterialType::Emit)
+            if (strength[index] > 0.0f && maxStrength > 0.0f)
             {
-                const float strength = std::min(material.Emission * std::exp2(material.Flux), MaxEmissiveStrength) / MaxEmissiveStrength;
+                const float relative = strength[index] / maxStrength;
                 uint8_t* e = &emissive[index * 4];
-                e[0] = ToByte(LinearToSrgb(SrgbToLinear(r / 255.0f) * strength));
-                e[1] = ToByte(LinearToSrgb(SrgbToLinear(g / 255.0f) * strength));
-                e[2] = ToByte(LinearToSrgb(SrgbToLinear(b / 255.0f) * strength));
+                e[0] = ToByte(LinearToSrgb(SrgbToLinear(r / 255.0f) * relative));
+                e[1] = ToByte(LinearToSrgb(SrgbToLinear(g / 255.0f) * relative));
+                e[2] = ToByte(LinearToSrgb(SrgbToLinear(b / 255.0f) * relative));
             }
             emissive[index * 4 + 3] = 255;
             if (used[index] && material.IsTransparent())
@@ -223,13 +240,31 @@ namespace Nox
         palette.MetallicFactor = 1.0f;
         palette.RoughnessFactor = 1.0f;
         palette.EmissiveTexturePath = emissivePath.generic_string();
-        palette.EmissiveFactor = glm::vec3(1.0f);
-        palette.emissiveStrength = MaxEmissiveStrength;
+        // No emissive entries: no emission at all (the mesh is then no light for the path tracer and the ray-traced GI to sample).
+        palette.EmissiveFactor = glm::vec3(maxStrength > 0.0f ? 1.0f : 0.0f);
+        palette.emissiveStrength = maxStrength > 0.0f ? maxStrength : 1.0f;
         MaterialData glass = palette;
         glass.Name = "PaletteGlass";
         glass.TransmissionFactor = 1.0f;
         glass.TransmissionTexturePath = surfacePath.generic_string();
         glass.IOR = iorCount ? static_cast<float>(iorSum / iorCount) : 1.5f;
+
+        // The materials are written once (MeshImporter::WriteMaterials; edits survive), but their emission follows the palette: an existing
+        // one gets this cook's Emissive and Emissive Strength (the rest stays as edited).
+        for (const MaterialData& material : { palette, glass })
+        {
+            const std::filesystem::path path = assetDirectory / MeshImporter::MaterialAssetPath(materialBase, material, 0);
+            std::error_code existsError;
+            MaterialData existing;
+            if (!std::filesystem::exists(path, existsError) || !MaterialSerializer::Deserialize(path, existing))
+                continue;
+            if (existing.EmissiveFactor == material.EmissiveFactor && existing.emissiveStrength == material.emissiveStrength)
+                continue;
+            existing.EmissiveFactor = material.EmissiveFactor;
+            existing.emissiveStrength = material.emissiveStrength;
+            if (!MaterialSerializer::Serialize(path, existing))
+                NOX_CORE_WARN("VoxImporter: could not update the emission of {}", path.string());
+        }
 
         // Submeshes per model (opaque, then glass), the root node at the pivot, a node per placed model under it.
         const std::string stem = sourcePath.stem().string();

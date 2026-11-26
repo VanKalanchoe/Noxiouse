@@ -2450,6 +2450,15 @@ namespace Nox
             pivot->Tooltip = "Where the mesh's origin sits. Bottom Center: it stands on the ground where you drop it. File Origin: MagicaVoxel's own "
                              "coordinates (pieces built to line up keep lining up).";
             row("Pivot", pivot);
+            Ref<NoxUI::UIDragScalar> emission(new NoxUI::UIDragScalar(state->Settings.VoxelEmissionScale, 0.05f,
+                [state](float value) { state->Settings.VoxelEmissionScale = value; }));
+            emission->Min = 0.0f;
+            emission->Max = 1000.0f;
+            emission->Format = "{:.2f}";
+            emission->TrimZeros = true;
+            emission->Tooltip = "Multiplies the glow of the palette's Emit materials (their Emission x 2^(Power + 1)). Raise it when lamps light "
+                                "too little; 0 turns emission off.";
+            row("Emission Scale", emission);
             check("Merge Faces", state->Settings.VoxelMergeFaces, "Faces of one colour in one plane merged into rectangles (far fewer triangles). "
                                                               "Off: one quad per voxel face.");
             combine("Combine Models", state->Settings.StaticCombine, "A scene with several models: one mesh with them all, placed as in MagicaVoxel "

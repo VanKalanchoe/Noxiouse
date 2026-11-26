@@ -479,6 +479,15 @@ namespace Nox
         if (reimportedAsset)
         {
             reimportedAsset->Handle = handle;
+            // A texture swapped like the streamer swaps one: materials resolve to the new image's slot (the renderer caches slots by
+            // path), the old image leaves once the frames in flight are done with it. (Replaced in place, materials kept sampling the
+            // old slot -- a texture edited on disk did not change on screen -- while the image behind it was freed.)
+            if (auto* oldTexture = m_LoadedAssets.contains(handle) ? dynamic_cast<Texture2D*>(m_LoadedAssets.at(handle).get()) : nullptr)
+            {
+                const uint32_t oldSlot = oldTexture->GetDescriptorIndexSlot();
+                Renderer::DeferAssetRelease(std::move(m_LoadedAssets.at(handle)));
+                Renderer::InvalidateTextureDescriptorSlots({ oldSlot });
+            }
             m_LoadedAssets[handle] = reimportedAsset;
 
             if (metadata.Type == AssetType::Mesh ||
@@ -635,6 +644,7 @@ namespace Nox
                     entry.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
                     entry.MeshSettings.VoxelOrigin = it->MaterialBase.MeshSettings.VoxelOrigin;
                     entry.MeshSettings.VoxelMergeFaces = it->MaterialBase.MeshSettings.VoxelMergeFaces;
+                    entry.MeshSettings.VoxelEmissionScale = it->MaterialBase.MeshSettings.VoxelEmissionScale;
                     handleOfMesh[mesh.MeshIndex] = existing;
                     registryChanged = true;
                     if (m_LoadedAssets.contains(existing))
@@ -653,6 +663,7 @@ namespace Nox
                 metadata.MeshSettings.ImportScale = it->MaterialBase.MeshSettings.ImportScale;
                 metadata.MeshSettings.VoxelOrigin = it->MaterialBase.MeshSettings.VoxelOrigin;
                 metadata.MeshSettings.VoxelMergeFaces = it->MaterialBase.MeshSettings.VoxelMergeFaces;
+                metadata.MeshSettings.VoxelEmissionScale = it->MaterialBase.MeshSettings.VoxelEmissionScale;
                 handleOfMesh[mesh.MeshIndex] = RegisterAsset(metadata);
                 registryChanged = true;
             }
@@ -2316,6 +2327,7 @@ namespace Nox
             {
                 out << YAML::Key << "VoxelOrigin" << YAML::Value << static_cast<int>(metadata.MeshSettings.VoxelOrigin);
                 out << YAML::Key << "VoxelMergeFaces" << YAML::Value << metadata.MeshSettings.VoxelMergeFaces;
+                out << YAML::Key << "VoxelEmissionScale" << YAML::Value << metadata.MeshSettings.VoxelEmissionScale;
             }
             if (!metadata.MeshSettings.MaterialBasePath.empty())
                 out << YAML::Key << "MaterialBasePath" << YAML::Value << metadata.MeshSettings.MaterialBasePath.generic_string();
@@ -2663,6 +2675,8 @@ namespace Nox
                     metadata.MeshSettings.VoxelOrigin = static_cast<VoxelPivot>(std::clamp(settingsNode["VoxelOrigin"].as<int>(), 0, 2));
                 if (settingsNode["VoxelMergeFaces"])
                     metadata.MeshSettings.VoxelMergeFaces = settingsNode["VoxelMergeFaces"].as<bool>();
+                if (settingsNode["VoxelEmissionScale"])
+                    metadata.MeshSettings.VoxelEmissionScale = std::max(settingsNode["VoxelEmissionScale"].as<float>(), 0.0f);
             }
         }
 
