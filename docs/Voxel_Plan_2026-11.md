@@ -107,6 +107,35 @@ generated bricks) with the server's and asks for the chunk when they differ (an 
 server then sends it compressed. Far chunks can come at a coarser LOD when they must be sent. Late joiners get the edit logs of the
 chunks around them, not the chunks.
 
+## 3b. Cheating: a public and a secret layer
+
+Whatever a client generates, a hacked client can draw (X-ray, ESP): with client-side generation it would know every ore, cave and
+hidden room, and seed crackers recover a world's seed from terrain a player has seen, so a secret seed protects nothing. (Server-sent
+chunks have the same problem: Minecraft servers answer it with anti-xray, e.g. Paper's, replacing hidden ores with stone until they
+are exposed -- impossible for content clients generate themselves.) The game state itself stays safe as long as the server is
+authoritative: movement is checked against the server's own world (NoxNet: server authority, prediction, reconciliation), edits are
+brush operations the server validates (tool, reach, rate, cost) and resources are counted from the voxels the server removed; the
+chunk hash is a consistency check, never trusted; other players behind walls are held back by NoxNet's relevancy.
+
+**Two layers in the generator asset:**
+
+- **Public layer** (every machine): terrain shape, surface and bulk materials (rock, dirt, sand) -- the megabytes not worth sending;
+  seeing it through walls gives nothing. Its hash is the chunk hash (§3a).
+- **Secret layer** (server only): ores and valuable materials, loot, hidden caves and rooms, buried structures. The client holds the
+  public layer there (secret caves are solid rock to it, so no hole, light or sound gives them away); the server sends **overrides**
+  (voxel index replacements, air included) for secret voxels that are **exposed** (a neighbour turned to air) and **within reach**.
+
+| Concern | Handling |
+|---|---|
+| Delay on reveal (one round trip, 50-150 ms: ore popping in late) | The server reveals ahead: secret voxels within ~1-2 m of exposed surfaces near the player -- digging feels instant, and that thin shell is all an X-ray shows (Paper's anti-xray reveals a radius the same way) |
+| Exposed ore across a big cave | Exposed secret voxels revealed only within ~32-64 m of the player (a small pop when coming closer) |
+| Ores following public clues (depth, rock type) | Player knowledge, not a hack: only exact positions are hidden |
+| Server bookkeeping | Per player, the set of secret bricks already sent (unordered_dense); edit logs and saves cover both layers |
+| Single player / co-op | The local authority reveals at once: no delay, no cost |
+| Server setting **Hide underground content** | On by default in multiplayer; off (a friends' server): everything generated publicly, nothing delayed |
+
+The voxel data, rendering and physics do not change: a client brick is the public voxels plus the overrides it received.
+
 ## 4. `.vox` voxel meshes (VX0)
 
 - **Reader** (`NoxCore/src/NoxCore/Voxel/VoxReader.*`): RIFF-style chunks -- `MAIN`, `PACK`, `SIZE` + `XYZI` (models), `RGBA`
@@ -131,8 +160,9 @@ chunks around them, not the chunks.
   (index -> material entry), a revision. Encoded for disk: brick masks + palette indices bit-packed to the palette's size, then zstd.
 - `VoxelWorld` (a scene component / world-level system): the chunk map (unordered_dense), generation requests, edit application,
   dirty tracking, saving; world partition cells own the chunks inside them.
-- `VoxelGenerator` asset: a FastNoise2 tree (encoded string) + layers (surface material by height / slope, caves, ores) evaluated
-  per chunk on NoxTasks; deterministic from the world seed.
+- `VoxelGenerator` asset: FastNoise2 trees (encoded strings) in two layers (§3b) -- **public** (shape, surface material by height /
+  slope, bulk materials) and **secret** (ores, loot, hidden caves and rooms, buried structures; server only in multiplayer) --
+  evaluated per chunk on NoxTasks; deterministic from the world seed.
 - Palette: a project-wide **voxel material table** (name, base colour, roughness, metallic, emission, hardness, footstep surface,
   physical material); chunk palettes index into it.
 
@@ -167,7 +197,7 @@ and post effects need nothing.
 | **VX1** | Brick map CPU side: chunks, bricks, palette, voxel material table, encoding + zstd, FastNoise2 generator asset, a `.vox` model stamped into the world | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
 | **VX2** | GPU brick pool + brick culling + voxel G-buffer pass (§5), raster lighting | Terrain and the stamped model lit in the raster preset; frame time measured at 1440p |
 | **VX3** | Raster preset coverage (§6) | Voxel shadows (sun + local lights), probes, extra views, picking |
-| **VX4** | Brushes (§2): edits, dirty bricks, uploads, debris VFX, C# API (`VoxelWorld.Apply(brush)`, queries: raycast to a voxel, material at a point), edit deltas saved per cell, brush ops over the network | Digging and building in Play, saved and loaded, in multiplayer |
+| **VX4** | Brushes (§2): edits, dirty bricks, uploads, debris VFX, C# API (`VoxelWorld.Apply(brush)`, queries: raycast to a voxel, material at a point), edit deltas saved per cell, brush ops over the network validated by the server; the secret layer and its reveals (§3b) | Digging and building in Play, saved and loaded, in multiplayer; an X-ray client sees only revealed ores |
 | **VX5** | Streaming + LOD: chunks by distance through world partition, brick mips (2x2x2: the most common non-air index), LOD per distance, upload budget, an endless generated world | Flying across an endless world at the frame-rate target |
 | **VX6** | Collision: greedy-meshed simplified chunk meshes, Jolt `MeshShape`, async rebuild after edits; character controller on voxels; footsteps from the voxel material | Walking, jumping and physics objects on dug terrain |
 | **VX7** | RT preset: NoxRHI AABB BLAS (Vulkan, D3D12), a BLAS per chunk (refit on edits), procedural-candidate handling in the shared ray-query code (one brick-hit function), the path tracer; secondary rays on coarser mips | RT shadows, AO, reflections, GI, DDGI, ReSTIR and the path tracer see voxels; RT preset frame time measured |
