@@ -30,6 +30,8 @@ Order (the user's decision): **raster first, at 10 cm, starting with loading a `
 | Rendering of `.vox` props | Meshes: visible faces merged (greedy, per palette entry) into a `StaticMesh`; colours and materials from palette textures | Static art needs no voxel pass; the mesh path already has everything |
 | Collision of the world | Greedy-meshed, simplified (meshoptimizer) collision mesh per chunk, Jolt `MeshShape`, rebuilt off the main thread after edits | Where greedy meshing is the right tool; a custom Jolt voxel shape only if destruction at scale needs it (VX8) |
 | Edits | **Brush operations** (shape, size, add / subtract / paint / smooth, noise on the edge), applied by the authority, sent over the network as operations | Fun and fast to dig (§2), small to send, the same result everywhere |
+| Chunk and brick index | **ankerl::unordered_dense** maps (chunk position packed into 64 bits -> chunk; dirty sets), from the first line of code | Millions of lookups per second in generation, edits, streaming and meshing; far faster than `std::unordered_map`; no rework later |
+| World generation in multiplayer | **Every machine generates; the server sends only edits** -- FastNoise2 capped at **SSE4.1** on every machine (§3a), a hash per generated chunk checked against the server's, a full chunk sent only on a mismatch or for chunks clients cannot generate | Sending every chunk costs megabytes per second per player at 10 cm (§3a); generating everywhere costs a little CPU |
 | Ray tracing (later) | Bricks as **AABBs** in a BLAS per chunk; the shared ray-query code handles procedural candidates with the brick DDA; secondary rays trace coarser mips | Every RT effect (shadows, AO, reflections, GI, DDGI, ReSTIR, path tracer) then sees voxels without per-pass rewrites. NoxRHI's BLAS takes triangles only today (`NriAccelerationStructureTrianglesDesc`): it needs AABB geometry (Vulkan `VK_GEOMETRY_TYPE_AABBS_KHR`, D3D12 procedural primitive AABBs) |
 | Targets | Raster preset **120 fps**, RT preset **90 fps** at 1440p on the user's GPU | Estimates from how such engines work, to be measured from VX2 on (§8) |
 
@@ -61,14 +63,42 @@ operation (subtract, add with a palette index, paint, smooth) + edge noise (seed
 
 | Library | License | Use |
 |---|---|---|
-| **FastNoise2** | MIT | World generation on the CPU: SIMD node trees filled into whole 3D grids (`GenUniformGrid3D`), designed in its NoiseTool and stored as the encoded tree string in a generator asset. Check that its output is identical across CPUs before clients generate terrain themselves (else the server generates and sends) |
+| **FastNoise2** | MIT | World generation on the CPU: SIMD node trees filled into whole 3D grids (`GenUniformGrid3D`), designed in its NoiseTool and stored as the encoded tree string in a generator asset. Created with `maxFeatureSet = SSE41` on every machine (§3a) |
 | **zstd** (LZ4 if load speed wins) | BSD | Chunks on disk, streamed cells, saved edit deltas (palette-indexed bricks compress well) |
-| ankerl **unordered_dense** | MIT | Optional: the CPU chunk / brick index (position packed into 64 bits -> slot) |
+| ankerl **unordered_dense** | MIT | The CPU chunk / brick index and dirty sets (position packed into 64 bits -> slot), used from the start |
 
 Already in the engine: **OffsetAllocator** (the GPU brick pool), **Jolt** (collision), **meshoptimizer** (simplifying collision /
 prop meshes), **tinygltf** + editor **OpenVDB** (glTF -> voxels, VX9), **xxhash** (content hashes), **NoxTasks / taskflow**
 (generation, meshing, compression in parallel), **Tracy**. Written here (the user's decision): the **`.vox` reader** (not ogt_vox),
 the brick map, the DDA shaders, greedy meshing.
+
+## 3a. Determinism and what multiplayer sends (measured 2026-11-26)
+
+**FastNoise2 across instruction sets** (FastNoise2 c35d604, GCC, a CPU with AVX-512; Simplex, SuperSimplex, Perlin, Value, Cellular,
+5-6 octave FBm and Ridged, domain-warped FBm; 64^3 grids at the origin, at 640 voxels and at one million voxels out, compared bit for
+bit): **SSE2 and SSE4.1 give identical output; AVX2 and AVX-512 differ from them in almost every sample** (by 1e-7 to 1e-4, fused
+multiply-add rounding; Cellular differs between AVX2 and AVX-512 too). FastNoise2 picks the best level of the CPU at run time, so by
+default two players' machines generate slightly different worlds: a voxel whose density lies within 1e-4 of the surface threshold can
+be solid on one and air on the other. **Capped at SSE4.1** (`FastNoise::New<T>(FastSIMD::FeatureSet::SSE41)`,
+`NewFromEncodedNodeTree(tree, SSE41)`) every x86-64 machine runs the same code. Cost, one 64^3 chunk of domain-warped 5-octave simplex
+FBm on one core: SSE2 17.2 ms, **SSE4.1 13.1 ms**, AVX2 7.4 ms, AVX-512 3.9 ms -- about 600 chunks a second on 8 worker threads,
+and chunks fully above or below the surface skip most of it. Still to verify (VX1 test): the same chunk hashes on a Windows MSVC
+build and a Linux GCC / Clang build (no `-ffast-math` / `/fp:fast` in the generator), and ARM (NEON) machines differ by design: they
+take chunks from the server.
+
+**What Minecraft sends:** the server generates (single player runs an integrated server too) and sends whole chunks -- each 16^3
+section as a block palette + bit-packed indices, plus heightmaps, block entities and light, zlib-compressed above a size threshold;
+afterwards only block changes. Clients never generate terrain. Hytale's internals are not documented publicly; it is
+server-authoritative with chunks streamed by the server in the same family. At 1 m blocks this is cheap. **At 10 cm it is not:** a
+64^3 chunk is 262 KB raw, roughly 2-20 KB after palette packing and zstd; a player running at 10 m/s with a 256 m view distance meets
+on the order of hundreds of new near-surface chunks a second -- megabytes per second per player before LOD.
+
+**The plan's model:** the world is the seed + the generator asset + the edits. Every machine generates chunks itself (capped at
+SSE4.1); the server is authoritative for edits, which travel as brush operations (§2) and are kept per chunk as an edit log / brick
+deltas (also what a save game and a late joiner receive); after generating a chunk a client compares its hash (xxhash of the
+generated bricks) with the server's and asks for the chunk when they differ (an ARM client, a driver or compiler surprise) -- the
+server then sends it compressed. Far chunks can come at a coarser LOD when they must be sent. Late joiners get the edit logs of the
+chunks around them, not the chunks.
 
 ## 4. `.vox` voxel meshes (VX0)
 
@@ -142,7 +172,7 @@ and post effects need nothing.
 - Offline (NoxToolsTest): the `.vox` reader on hand-built files (every chunk type, broken sizes, the scene graph's rotations); chunk
   encode / decode round trips; brush application against a CPU reference; a CPU DDA reference against the shader's rules (same voxels
   hit for a grid of rays); greedy meshing (watertight, no T-junction gaps in collision); generator determinism (same seed, same
-  chunk).
+  chunk; the same chunk hash on Windows and Linux builds with the SSE4.1 cap).
 - GPU (the user): each phase's "done when", frame times in UIDemo-style summaries (voxel pass, shadows, uploads), validation clean on
   Vulkan and D3D12.
 
@@ -150,5 +180,6 @@ and post effects need nothing.
 
 - Mesh first, voxels second in the depth order, or the reverse (VX2 measures both).
 - Chunk size 64^3 vs 32^3 (finer streaming and edits vs fewer draws and tables).
-- Whether FastNoise2's output is identical across CPUs (decides client-side generation in multiplayer).
+- FastNoise2 capped at SSE4.1: identical chunk hashes between a Windows (MSVC) and a Linux (GCC / Clang) build (§3a; measured
+  identical across SSE2 / SSE4.1 on one machine, AVX2 / AVX-512 differ).
 - How far the per-voxel AO and the renderer's AO overlap (VX2 look test).
