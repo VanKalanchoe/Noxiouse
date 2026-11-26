@@ -17,19 +17,28 @@ same depth buffer and G-buffer and mix freely (a character in voxel terrain, a m
 
 Order (the user's decision): **raster first, at 10 cm, starting with loading a `.vox` model**; ray tracing after the raster preset works.
 
+**Opt-in, nothing changes for other projects:** the voxel system runs only in a scene that has a voxel world (a `VoxelWorld`
+component). Without one no voxel pass is recorded, no brick pool is allocated and no generation thread starts -- a realistic project
+(Cyberpunk-like: meshes, materials, RT / GI) renders exactly as today, and both kinds of project live side by side. Voxel meshes from
+`.vox` are ordinary meshes and need nothing either. The renderer changes are additions (a voxel pass, its use in the shadow / probe /
+view passes, later AABBs in NoxRHI's BLAS and a brick-hit function in the ray-query code) that do nothing when a scene has no voxels.
+
 ---
 
 ## 1. Decisions
 
 | Topic | Decision | Why |
 |---|---|---|
-| Voxel size | **10 cm** world voxels (project setting; 5 cm possible); later per-object grids at 2.5-5 cm for props and debris (§9 VX8) | The proven tiny-voxel size (Teardown). At 2560x1440 / 90 degrees a pixel covers ~8 mm at 10 m and ~8 cm at 100 m: smaller voxels turn sub-pixel at play distances and cost memory (4x per halving: surfaces scale with area) for nothing visible |
+| Voxel size | **A project setting, 5 cm to 1 m; 10 cm the default** (later per-object grids at 2.5-5 cm for props and debris, VX8). At **50 cm - 1 m** (Minecraft / Hytale-style blocks) the same brick map and voxel pass apply, and a material may have **block textures** (top / side / bottom, sampled at the hit point inside the voxel face) instead of one colour; chunk size is tuned with it (§9) | 10 cm: the proven tiny-voxel size (Teardown). At 2560x1440 / 90 degrees a pixel covers ~8 mm at 10 m and ~8 cm at 100 m: smaller voxels turn sub-pixel at play distances and cost memory (4x per halving: surfaces scale with area) for nothing visible |
 | World structure | Chunks of **64^3 voxels (6.4 m)**, each 8x8x8 **bricks of 8^3** | Brick = 512 voxels: 512 bytes at one palette index each, plus a 64-byte occupancy mask; a chunk is the unit of generation, streaming, saving and collision |
-| Voxel value | 1 byte: index into the chunk's palette (0 = air), up to 255 materials per chunk | Minecraft's sections store a palette + indices the same way (`PalettedContainer`); compresses very well |
-| Rendering of the world | Raster the boxes of the visible non-empty bricks, DDA inside the brick in the pixel shader, conservative depth (`SV_DepthGreaterEqual` with reverse-Z), output `GBufferOutput` | Cost per pixel, not per voxel; edits only write bytes (no remesh); LOD from brick mips; the G-buffer keeps every later pass unchanged |
+| Voxel value | 1 byte: index into the chunk's palette (0 = air), up to 255 materials per chunk; a chunk needing more (edits, a colourful stamped `.vox`) first compacts its palette (unused entries dropped), then switches to 2-byte indices for that chunk only | Minecraft's sections store a palette + indices the same way (`PalettedContainer`, which also widens its indices); compresses very well |
+| Vertical extent and column summaries | The world is endless horizontally and **-512 m to +512 m** vertically (project setting); per 64 x 64 voxel column a **summary**: lowest / highest surface voxel and the sky-visibility height | Chunks fully above or below the surface skip generation, sky visibility (below) is a lookup, far LOD starts from the column; cheap to keep up to date on edits |
+| **Underground darkness in the raster preset** | **Sky visibility per voxel brick** (Minecraft's sky light, coarse): flood-filled from the open sky through air, updated around edits on worker threads, sampled by the voxel pass and multiplied into the ambient / irradiance-volume light of voxel and mesh pixels in voxel worlds; block lights (torches) are ordinary point lights | The irradiance volume and probes were captured before the player dug: without it a fresh cave is lit like the outdoors. In the RT preset GI darkens caves itself; sky visibility then only guards probe-lit passes |
+| Rendering of the world | **Two candidates prototyped in VX2, the faster at 1440p kept:** (a) raster the boxes of the visible non-empty bricks (two-phase occlusion culling as the meshlets), DDA inside the brick in the pixel shader, conservative depth (`SV_DepthGreaterEqual` with reverse-Z); (b) one compute primary ray per pixel through chunk -> brick -> voxel, stopping at the first hit, depth-tested against the meshes. Both output `GBufferOutput` | Cost per pixel, not per voxel; edits only write bytes (no remesh); LOD from brick mips; the G-buffer keeps every later pass unchanged. (a) can overdraw at grazing angles (a pixel stepping through several mostly empty boxes, each discarded); (b) has no overdraw but no hardware depth rejection -- measure, do not guess |
 | Rendering of `.vox` props | Meshes: visible faces merged (greedy, per palette entry) into a `StaticMesh`; colours and materials from palette textures | Static art needs no voxel pass; the mesh path already has everything |
 | Collision of the world | Greedy-meshed, simplified (meshoptimizer) collision mesh per chunk, Jolt `MeshShape`, rebuilt off the main thread after edits | Where greedy meshing is the right tool; a custom Jolt voxel shape only if destruction at scale needs it (VX8) |
-| Edits | **Brush operations** (shape, size, add / subtract / paint / smooth, noise on the edge), applied by the authority, sent over the network as operations | Fun and fast to dig (§2), small to send, the same result everywhere |
+| Edits | **Brush operations** (shape, size, add / subtract / paint / smooth, noise on the edge), applied by the authority, sent over the network as operations; **evaluated in integer voxel coordinates** (shape tests in integers / fixed point, edge noise from strict-FP FastNoise2) so the client's prediction and the server give the same voxels; after an edit the touched bricks' hash is compared and the server sends those bricks on a mismatch; a chunk's edit log is **compacted** into its changed bricks once it grows larger than them | Fun and fast to dig (§2), small to send, the same result everywhere |
+| Generator versions | A world stores the generator asset's **version and hash**; an edited generator never changes existing worlds silently (they keep generating with the version they were made with, or an explicit Regenerate migrates them) | Edits are stored relative to the generated terrain: a changed generator would leave them floating or buried |
 | Chunk and brick index | **ankerl::unordered_dense** maps (chunk position packed into 64 bits -> chunk; dirty sets), from the first line of code | Millions of lookups per second in generation, edits, streaming and meshing; far faster than `std::unordered_map`; no rework later |
 | World generation in multiplayer | **Every machine generates; the server sends only edits** -- FastNoise2 built with **`FASTNOISE2_STRICT_FP=ON`** (every SIMD level bit-identical, each CPU keeps its fastest level; §3a), a hash per generated chunk checked against the server's, a full chunk sent only on a mismatch or for chunks clients cannot generate | Sending every chunk costs megabytes per second per player at 10 cm (§3a); generating everywhere costs a little CPU |
 | Ray tracing (later) | Bricks as **AABBs** in a BLAS per chunk; the shared ray-query code handles procedural candidates with the brick DDA; secondary rays trace coarser mips | Every RT effect (shadows, AO, reflections, GI, DDGI, ReSTIR, path tracer) then sees voxels without per-pass rewrites. NoxRHI's BLAS takes triangles only today (`NriAccelerationStructureTrianglesDesc`): it needs AABB geometry (Vulkan `VK_GEOMETRY_TYPE_AABBS_KHR`, D3D12 procedural primitive AABBs) |
@@ -148,7 +157,8 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - **Materials:** one `.nmat` per model with **palette textures** (256 x 1: base colour; a second for roughness / metallic / emission
   strength from `MATL`); each face's UVs point at its palette texel (point sampling). Glass entries (`_type glass`) a submesh with a
   transmission material. Emissive entries feed emission (and so the emissive light grid / GI).
-- **LOD:** meshoptimizer simplification as for other meshes; the voxel look is kept by simplifying only coplanar merges.
+- **LOD:** by **downsampling the voxels** (2x and 4x coarser models, each meshed the same way), not by triangle simplification, which
+  melts the blocky look.
 - **Done when:** the user's MagicaVoxel models import, place and render in raster and RT presets; a `.vox` with several models
   becomes a prefab with the right transforms.
 
@@ -163,16 +173,20 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - `VoxelGenerator` asset: FastNoise2 trees (encoded strings) in two layers (§3b) -- **public** (shape, surface material by height /
   slope, bulk materials) and **secret** (ores, loot, hidden caves and rooms, buried structures; server only in multiplayer) --
   evaluated per chunk on NoxTasks; deterministic from the world seed.
-- Palette: a project-wide **voxel material table** (name, base colour, roughness, metallic, emission, hardness, footstep surface,
-  physical material); chunk palettes index into it.
+- Palette: a project-wide **voxel material table** (name, base colour or block textures, roughness, metallic, emission, hardness,
+  footstep surface, physical material); chunk palettes index into it. Stamping a `.vox` into the world maps each of its palette
+  entries to the nearest material of the table, or adds entries (an import option).
 
 **GPU side** (`Renderer`, pass in `Passes/VoxelPasses.cpp`, shader `Voxel.slang`):
 
 - **Brick pool:** one large buffer of 512-byte bricks + occupancy masks, sub-allocated with OffsetAllocator; an upload budget per
   frame (MB), uploads from the dirty list.
 - **Chunk table:** per resident chunk its origin, LOD, 512 brick pointers (pool offset or uniform value), palette offset.
-- **Brick list:** per frame, a compute pass culls the resident non-empty bricks that have at least one exposed face against the
-  frustum and the previous frame's Hi-Z and writes an indirect draw of their boxes (front to back by chunk).
+- **Brick list (candidate a):** per frame, a compute pass culls the resident non-empty bricks that have at least one exposed face
+  against the frustum and the Hi-Z in two phases (last frame's visible bricks first, then the rest against the new Hi-Z, as the
+  meshlets are culled: nothing pops) and writes an indirect draw of their boxes (front to back by chunk).
+- **Primary rays (candidate b):** a compute pass, one ray per pixel from the camera through the chunk table, the brick pointers and the
+  occupancy masks (empty bricks and chunks skipped whole), depth-tested against the meshes' depth, writing the same outputs.
 - **Voxel G-buffer pass:** draws the brick boxes (back faces culled; the camera inside a brick handled by drawing that brick's box
   inside out), the pixel shader starts the ray at the box entry point (or the camera) and steps the 8^3 voxels with a DDA using the
   occupancy mask (64-bit words: whole rows skipped), at the first solid voxel writes `GBufferOutput` (base colour, roughness, metallic,
@@ -194,20 +208,23 @@ and post effects need nothing.
 | Phase | What | Done when |
 |---|---|---|
 | **VX0** | `.vox` reader + import as meshes / prefabs, palette materials (§4) | The user's models in the editor, both presets |
-| **VX1** | Brick map CPU side: chunks, bricks, palette, voxel material table, encoding + zstd, FastNoise2 generator asset, a `.vox` model stamped into the world | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
-| **VX2** | GPU brick pool + brick culling + voxel G-buffer pass (§5), raster lighting | Terrain and the stamped model lit in the raster preset; frame time measured at 1440p |
-| **VX3** | Raster preset coverage (§6) | Voxel shadows (sun + local lights), probes, extra views, picking |
-| **VX4** | Brushes (§2): edits, dirty bricks, uploads, debris VFX, C# API (`VoxelWorld.Apply(brush)`, queries: raycast to a voxel, material at a point), edit deltas saved per cell, brush ops over the network validated by the server; the secret layer and its reveals (§3b) | Digging and building in Play, saved and loaded, in multiplayer; an X-ray client sees only revealed ores |
-| **VX5** | Streaming + LOD: chunks by distance through world partition, brick mips (2x2x2: the most common non-air index), LOD per distance, upload budget, an endless generated world | Flying across an endless world at the frame-rate target |
-| **VX6** | Collision: greedy-meshed simplified chunk meshes, Jolt `MeshShape`, async rebuild after edits; character controller on voxels; footsteps from the voxel material | Walking, jumping and physics objects on dug terrain |
+| **VX1** | Brick map CPU side: chunks, bricks, palette (compaction, 2-byte fallback), voxel material table, encoding + zstd, FastNoise2 generator asset (public / secret layers, version + hash), a `.vox` model stamped into the world | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
+| **VX2** | GPU brick pool + voxel G-buffer output, **both primary-visibility candidates** (brick boxes with two-phase culling; compute primary rays), raster lighting | Terrain and the stamped model lit in the raster preset; both candidates measured at 1440p, one kept |
+| **VX3** | Raster preset coverage (§6), sky visibility and column summaries (underground darkness) | Voxel shadows (sun + local lights), probes, extra views, picking; a cave dark in the raster preset |
+| **VX4** | Collision: greedy-meshed chunk meshes (coplanar merges only, no simplification that opens gaps), Jolt `MeshShape`, async rebuild after edits; character controller on voxels; footsteps from the voxel material | Walking, jumping and physics objects on the terrain (needed before digging can be tried in Play) |
+| **VX5** | Brushes (§2): integer-space edits, dirty bricks, uploads, collision rebuilds, debris VFX, C# API (`VoxelWorld.Apply(brush)`, queries: raycast to a voxel, material at a point), edit logs with compaction saved per cell, generator version in the world, brush ops over the network validated by the server with brick-hash checks; the secret layer and its reveals (§3b) | Digging and building in Play, saved and loaded, in multiplayer; an X-ray client sees only revealed ores |
+| **VX6** | Streaming + LOD: chunks by distance through world partition, brick mips (2x2x2: the most common non-air index), LOD per distance, upload budget, an endless generated world | Flying across an endless world at the frame-rate target |
 | **VX7** | RT preset: NoxRHI AABB BLAS (Vulkan, D3D12), a BLAS per chunk (refit on edits), procedural-candidate handling in the shared ray-query code (one brick-hit function), the path tracer; secondary rays on coarser mips | RT shadows, AO, reflections, GI, DDGI, ReSTIR and the path tracer see voxels; RT preset frame time measured |
 | VX8 | Later: per-object voxel grids (dynamic, 2.5-5 cm), connectivity -> falling pieces, a custom Jolt voxel shape if destruction needs it | -- |
 | VX9 | Later: glTF -> voxels at import (OpenVDB mesh-to-volume for the inside, colours from the glTF textures matched to the palette) | -- |
 
+Not planned now: water and other fluids, falling sand / gravity voxels (later, if the game wants them).
+
 ## 8. Tests
 
 - Offline (NoxToolsTest): the `.vox` reader on hand-built files (every chunk type, broken sizes, the scene graph's rotations); chunk
-  encode / decode round trips; brush application against a CPU reference; a CPU DDA reference against the shader's rules (same voxels
+  encode / decode round trips; brush application against a CPU reference (integer evaluation: the same voxels from two different orders of operations on the
+  same brush list); palette compaction and the 2-byte fallback; sky visibility after carving a cave; a CPU DDA reference against the shader's rules (same voxels
   hit for a grid of rays); greedy meshing (watertight, no T-junction gaps in collision); generator determinism (same seed, same
   chunk; the same chunk hash on Windows and Linux builds with strict FP).
 - GPU (the user): each phase's "done when", frame times in UIDemo-style summaries (voxel pass, shadows, uploads), validation clean on
@@ -216,7 +233,8 @@ and post effects need nothing.
 ## 9. Open questions
 
 - Mesh first, voxels second in the depth order, or the reverse (VX2 measures both).
-- Chunk size 64^3 vs 32^3 (finer streaming and edits vs fewer draws and tables).
+- Chunk size 64^3 vs 32^3 (finer streaming and edits vs fewer draws and tables), and its value at 50 cm - 1 m voxels.
+- Primary visibility: brick boxes or compute primary rays (VX2 measures both).
 - Strict-FP FastNoise2: identical chunk hashes between a Windows (MSVC) and a Linux (GCC / Clang) build, and on ARM (§3a; measured
   identical across SSE2 / SSE4.1 / AVX2 / AVX-512 on one machine).
 - How far the per-voxel AO and the renderer's AO overlap (VX2 look test).
