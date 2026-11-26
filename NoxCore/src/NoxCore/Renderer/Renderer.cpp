@@ -647,6 +647,7 @@ namespace Nox
         watchShader("assets/shaders/VfxDecal.slang", "VFX Decal", [this]() { createVfxGraphicsPipelines(true); });
         watchShader("assets/shaders/VfxMeshParticle.slang", "VFX Mesh Particle", [this]() { createVfxGraphicsPipelines(true); });
         watchShader("assets/shaders/VfxDistortion.slang", "VFX Distortion", [this]() { createVfxGraphicsPipelines(true); });
+        watchShader("assets/shaders/HeterogeneousVolume.slang", "Heterogeneous Volume", [this]() { createVfxGraphicsPipelines(true); });
         watchShader("assets/shaders/OITComposite.slang", "OITComposite", [this]() { createOITCompositePipeline(true); });
         watchShader("assets/shaders/AVBOITBuild.slang", "AVBOITBuild", [this]() { createAVBOITPipelines(true); });
         // What every transparent shader includes (both OIT methods): those and AVBOIT's prepasses again.
@@ -5378,6 +5379,7 @@ namespace Nox
             addParticlePass(); // the alpha-blended ones into the OIT targets (with OIT), then their resolve, then the rest
             addVfxMeshParticlePass(); // GPU-instanced 3D mesh particles (step V3b)
             addVfxRibbonPass(); // Camera-facing VFX ribbons, trails & lightning beams (step V3a)
+            addHeterogeneousVolumePass(); // Heterogeneous .nvdb / OpenVDB volume ray-marcher (step N2)
             addVfxDistortionPass(); // Screen-space shockwaves, heat haze & portal warping (step V3b)
             addSSRHistoryPass(); // the lit scene the SSR reflect next frame
             addSceneOutlinePass(); // outlines (Post Process Volume) into the lit scene, before TAA / DLSS smooth them
@@ -6540,6 +6542,7 @@ namespace Nox
         m_vfxRibbonBatches.clear();
         m_vfxDecals.clear();
         m_vfxDistortions.clear();
+        m_vfxVolumeSubmissions.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)

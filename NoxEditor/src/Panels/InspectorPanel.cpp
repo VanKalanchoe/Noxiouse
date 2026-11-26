@@ -2792,6 +2792,32 @@ namespace Nox
                      });
         }
 
+        if (entity.HasComponent<VolumeComponent>())
+        {
+            makeCard("Heterogeneous Volume", true,
+                     [entity]() mutable { entity.GetComponent<VolumeComponent>() = VolumeComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<VolumeComponent>(); },
+                     [entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<VolumeComponent>();
+                         c.AddBool("Enabled", &comp.Enabled);
+                         c.AddAssetSlot("Volume (.nvdb / .vdb)", comp.Volume, { AssetType::Volume },
+                             [&comp](AssetHandle h) { comp.Volume = h; comp.CurrentTime = 0.0f; }, "Procedural Vortex");
+                         c.AddBool("Playing", &comp.Playing);
+                         c.AddBool("Looping", &comp.Looping);
+                         c.AddFloat("Playback Speed", &comp.PlaybackSpeed, 0.05f, 0.0f, 10.0f);
+                         c.AddVec3("Bounds Scale", &comp.BoundsScale, 0.1f);
+                         c.AddFloat("Density Scale", &comp.DensityScale, 0.1f, 0.0f, 50.0f);
+                         c.AddColor3("Smoke Albedo", &comp.Albedo);
+                         c.AddFloat("Anisotropy (g)", &comp.Anisotropy, 0.02f, -0.9f, 0.9f);
+                         c.AddFloat("Emission Scale (HDR)", &comp.EmissionScale, 0.2f, 0.0f, 100.0f);
+                         c.AddFloat("Blackbody Temp (K)", &comp.BlackbodyTemperature, 50.0f, 800.0f, 6500.0f);
+                         c.AddFloat("Ambient Strength", &comp.AmbientStrength, 0.02f, 0.0f, 5.0f);
+                         c.AddUInt32("Ray-March Steps", &comp.StepCount, 16, 192);
+                         c.AddUInt32("Shadow Steps", &comp.ShadowSteps, 0, 16);
+                     });
+        }
+
         if (entity.HasComponent<TextComponent>())
         {
             makeCard("Text Renderer", true,
@@ -2890,6 +2916,7 @@ namespace Nox
             addEntry.template operator()<BeamRendererComponent>("Beam Renderer"),
             addEntry.template operator()<DecalComponent>("Projected Decal"),
             addEntry.template operator()<DistortionComponent>("Screen-Space Distortion"),
+            addEntry.template operator()<VolumeComponent>("Heterogeneous Volume"),
             addEntry.template operator()<TextComponent>("Text Renderer"),
             addEntry.template operator()<PostProcessVolumeComponent>("Post Process Volume")
         };

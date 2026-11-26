@@ -13,6 +13,7 @@
 #include "NodeGraphImporter.h"
 #include "PrefabImporter.h"
 #include "TimelineImporter.h"
+#include "VolumeImporter.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
@@ -95,6 +96,9 @@ namespace Nox
                 return {};
             data->Handle = h;
             return Ref<Asset>(data);
+        }},
+        { AssetType::Volume, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            return Ref<Asset>(VolumeImporter::ImportVolume(h, meta));
         }}
     };
     

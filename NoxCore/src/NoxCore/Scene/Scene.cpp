@@ -27,6 +27,7 @@
 #include "NoxCore/Audio/AudioMixer.h"
 #include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/Asset/Material.h"
+#include "NoxCore/Asset/VolumeAsset.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Physics/Physics2D.h"
@@ -1387,7 +1388,7 @@ namespace Nox
             [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities); });
         // Particles spawn where their emitter is now: after propagation.
         m_UpdateSystems.AddSystem("Particles",
-            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent>(),
+            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, VolumeComponent>(),
             [this]() { UpdateParticles(); });
 
         // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
@@ -1400,7 +1401,7 @@ namespace Nox
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
             [this]() { Submit2D(); });
         m_SubmitSystems.AddSystem("Submit Particles",
-            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent>().Write<ParticleSubmission>(),
+            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent>().Write<ParticleSubmission>(),
             [this]() { SubmitParticles(); });
         m_SubmitSystems.AddSystem("Submit Post Process",
             ComponentAccess().Read<WorldTransformComponent, PostProcessVolumeComponent>().Write<PostProcessSubmission>(),
@@ -1869,6 +1870,14 @@ namespace Nox
         for (auto entity : beamView)
             beamView.get<BeamRendererComponent>(entity).Time += dt;
 
+        auto volumeView = m_Registry.view<VolumeComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : volumeView)
+        {
+            auto& vol = volumeView.get<VolumeComponent>(entity);
+            if (vol.Enabled && vol.Playing)
+                vol.CurrentTime += dt * vol.PlaybackSpeed;
+        }
+
         if (!m_FrameInput.StepAnimation)
             return;
         auto view = m_Registry.view<ParticleEmitterComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
@@ -2295,6 +2304,71 @@ namespace Nox
             gpu.chromaticAberration = glm::clamp(dist.ChromaticAberration, 0.0f, 1.0f);
             gpu.cameraFacing = dist.CameraFacing ? 1u : 0u;
             m_renderer->SubmitVfxDistortion(gpu);
+        }
+
+        // Step N2: Submit VolumeComponent heterogeneous volumes (.nvdb / .vdb or procedural fallback).
+        auto volView = m_Registry.view<VolumeComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : volView)
+        {
+            const auto [vol, world] = volView.get<VolumeComponent, WorldTransformComponent>(entity);
+            if (!vol.Enabled)
+                continue;
+
+            const VolumeAsset* asset = nullptr;
+            if (vol.Volume != 0)
+            {
+                asset = AssetManager::FindLoadedAsset<VolumeAsset>(vol.Volume);
+                if (!asset)
+                    missingAssets.push_back(vol.Volume);
+            }
+
+            uint32_t frameIdx = 0u;
+            glm::vec3 aabbMin(-0.5f, -0.5f, -0.5f);
+            glm::vec3 aabbMax(0.5f, 0.5f, 0.5f);
+            float invMaxDensity = 1.0f;
+            float invMaxTemp = 1.0f;
+
+            if (asset && asset->IsValid())
+            {
+                const VolumeHeader& hdr = asset->GetHeader();
+                const uint32_t totalFrames = std::max(hdr.FrameCount, 1u);
+                const float rawFrame = std::max(vol.CurrentTime, 0.0f) * std::max(hdr.Fps, 1.0f);
+                frameIdx = vol.Looping
+                    ? (static_cast<uint32_t>(rawFrame) % totalFrames)
+                    : std::min(static_cast<uint32_t>(rawFrame), totalFrames - 1u);
+
+                const VolumeFrameRecord& rec = asset->GetFrame(frameIdx);
+                // Normalize sequence bounds by overall sequence longest axis so any EmberGen/Houdini/Blender VDB
+                // spawns centered at the bottom pivot with predictable BoundsScale meters regardless of authored VDB scale.
+                const glm::vec3 seqExtent = hdr.AabbMax - hdr.AabbMin;
+                const float seqMaxDim = std::max({ seqExtent.x, seqExtent.y, seqExtent.z, 1e-3f });
+                const glm::vec3 seqPivot = 0.5f * (hdr.AabbMin + hdr.AabbMax);
+                aabbMin = (rec.AabbMin - seqPivot) / seqMaxDim;
+                aabbMax = (rec.AabbMax - seqPivot) / seqMaxDim;
+                invMaxDensity = hdr.MaxDensity > 1e-4f ? (1.0f / hdr.MaxDensity) : 1.0f;
+                invMaxTemp = hdr.MaxTemperature > 1e-4f ? (1.0f / hdr.MaxTemperature) : 1.0f;
+            }
+
+            const glm::vec3 scaledMin = aabbMin * vol.BoundsScale * unit;
+            const glm::vec3 scaledExtent = glm::max((aabbMax - aabbMin) * vol.BoundsScale * unit, glm::vec3(0.01f * unit));
+            const glm::mat4 entityRel = Math::RelativeTo(world.WorldMatrix, renderOrigin);
+            const glm::mat4 boxToWorld = entityRel * glm::translate(glm::mat4(1.0f), scaledMin) * glm::scale(glm::mat4(1.0f), scaledExtent);
+
+            Renderer::GpuVolumeSubmission sub{};
+            sub.EntityId = m_Registry.all_of<IDComponent>(entity)
+                ? static_cast<uint64_t>(m_Registry.get<IDComponent>(entity).ID)
+                : static_cast<uint64_t>(entt::to_integral(entity));
+            sub.Asset = asset;
+            sub.FrameIndex = frameIdx;
+            sub.Params.model = boxToWorld;
+            sub.Params.invModel = glm::inverse(boxToWorld);
+            sub.Params.albedoAndDensity = glm::vec4(vol.Albedo, std::max(vol.DensityScale, 0.0f));
+            sub.Params.emissionParams = glm::vec4(std::max(vol.EmissionScale, 0.0f), vol.BlackbodyTemperature,
+                                                  glm::clamp(vol.Anisotropy, -0.9f, 0.9f), std::max(vol.AmbientStrength, 0.0f));
+            sub.Params.marchParams = glm::vec4(static_cast<float>(std::clamp(vol.StepCount, 16u, 192u)),
+                                               static_cast<float>(std::clamp(vol.ShadowSteps, 0u, 16u)),
+                                               invMaxDensity, invMaxTemp);
+            m_renderer->SubmitHeterogeneousVolume(sub);
         }
     }
 
@@ -3900,7 +3974,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -4513,6 +4587,11 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<DistortionComponent>(Entity entity, DistortionComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<VolumeComponent>(Entity entity, VolumeComponent& component)
     {
     }
 

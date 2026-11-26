@@ -3,6 +3,7 @@
 // VfxSimulate.slang and drawn indirectly by Particles.slang in addParticlePass().
 #include "NoxCore/Renderer/Renderer.h"
 #include "FrameGraphResources.h"
+#include "NoxCore/Asset/VolumeAsset.h"
 
 #include <algorithm>
 #include <cstring>
@@ -344,6 +345,14 @@ namespace Nox
         distortion.shaders.push_back({ NRI_SHADER_STAGE_VERTEX, "vertMain", "assets/shaders/VfxDistortion.slang" });
         distortion.shaders.push_back({ NRI_SHADER_STAGE_FRAGMENT, "fragMain", "assets/shaders/VfxDistortion.slang" });
         m_vfxDistortionPipeline = m_device.createPipeline(distortion, m_shaderCompiler.handle());
+
+        nri::PipelineDesc volume{};
+        volume.type = NRI_PIPELINE_GRAPHICS;
+        volume.forceCompile = forceCompile;
+        volume.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT };
+        volume.shaders.push_back({ NRI_SHADER_STAGE_VERTEX, "vertMain", "assets/shaders/HeterogeneousVolume.slang" });
+        volume.shaders.push_back({ NRI_SHADER_STAGE_FRAGMENT, "fragMain", "assets/shaders/HeterogeneousVolume.slang" });
+        m_vfxVolumePipeline = m_device.createPipeline(volume, m_shaderCompiler.handle());
     }
 
     void Renderer::SubmitVfxRibbon(const VfxRibbonSettings& settings, std::span<const shaderio::GpuVfxRibbonNode> nodes)
@@ -420,6 +429,9 @@ namespace Nox
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_vfxDecalPipeline);
+                cmd.setVertexInput();
+                cmd.setPrimitiveTopology(NRI_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                cmd.setPrimitiveRestartEnable(false);
                 // Back-face culling with inward-wound cube in VfxDecal.slang renders the inside backfaces once per pixel
                 // so decals still render cleanly even when the camera is inside the decal volume.
                 cmd.setCullMode(NRI_CULL_MODE_BACK);
@@ -508,6 +520,9 @@ namespace Nox
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_vfxRibbonPipeline);
+                cmd.setVertexInput();
+                cmd.setPrimitiveTopology(NRI_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                cmd.setPrimitiveRestartEnable(false);
                 cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
@@ -695,6 +710,9 @@ namespace Nox
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_vfxDistortionPipeline);
+                cmd.setVertexInput();
+                cmd.setPrimitiveTopology(NRI_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                cmd.setPrimitiveRestartEnable(false);
                 cmd.setCullMode(NRI_CULL_MODE_NONE);
                 cmd.setDepthTestEnable(false);
                 cmd.setDepthWriteEnable(false);
@@ -714,6 +732,218 @@ namespace Nox
                     cmd.pushData(&push, sizeof(push));
                     cmd.draw(6u, 1u, 0u, 0u);
                 }
+            });
+    }
+
+    void Renderer::SubmitHeterogeneousVolume(const GpuVolumeSubmission& submission)
+    {
+        m_vfxVolumeSubmissions.push_back(submission);
+    }
+
+    void Renderer::addHeterogeneousVolumePass()
+    {
+        // Evict idle volume streams after 120 frames.
+        auto releaseStream = [&](GpuVolumeStream& s)
+        {
+            for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+            {
+                if (s.Density[i].Buffer) releaseBufferRefs(s.Density[i].Buffer.handle());
+                if (s.Temperature[i].Buffer) releaseBufferRefs(s.Temperature[i].Buffer.handle());
+                if (s.Flame[i].Buffer) releaseBufferRefs(s.Flame[i].Buffer.handle());
+            }
+        };
+        for (auto it = m_vfxVolumeStreams.begin(); it != m_vfxVolumeStreams.end(); )
+        {
+            if (m_vfxFrameCounter > it->second->LastUsedFrame + 120u)
+            {
+                releaseStream(*it->second);
+                it = m_vfxVolumeStreams.erase(it);
+            }
+            else
+                ++it;
+        }
+
+        if (m_vfxVolumeSubmissions.empty() || !m_vfxVolumePipeline ||
+            m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
+            return;
+
+        FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
+        if (!resources.HDRScene.IsValid() || !resources.Depth.IsValid())
+            return;
+
+        auto uploadChannel = [&](GpuVolumeChannelSlot& slot, const std::vector<uint8_t>& bytes, uint64_t minCap) -> uint64_t
+        {
+            if (bytes.empty())
+                return 0ull;
+            // Pad to 4-byte multiple so uint32_t FP16 pair loads never read past the end.
+            const uint64_t padded = (bytes.size() + 3ull) & ~3ull;
+            if (padded > slot.Capacity || !slot.Buffer)
+            {
+                if (slot.Buffer)
+                {
+                    releaseBufferRefs(slot.Buffer.handle());
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Buffer) });
+                }
+                slot.Capacity = std::max<uint64_t>({ padded, minCap, 4096ull });
+                slot.Buffer = m_device.createBuffer(nri::BufferDesc{ .size = slot.Capacity, .usage = NRI_BUFFER_USAGE_UNIFORM });
+                slot.Mapped = slot.Buffer.map(0, slot.Capacity);
+            }
+            std::memcpy(slot.Mapped, bytes.data(), bytes.size());
+            if (padded > bytes.size())
+                std::memset(static_cast<uint8_t*>(slot.Mapped) + bytes.size(), 0, padded - bytes.size());
+            return bufferReadRef(slot.Buffer);
+        };
+
+        std::vector<shaderio::GpuHeterogeneousVolume> gpuVolumes;
+        gpuVolumes.reserve(m_vfxVolumeSubmissions.size());
+        std::vector<uint8_t> scratchBytes;
+
+        for (const GpuVolumeSubmission& sub : m_vfxVolumeSubmissions)
+        {
+            shaderio::GpuHeterogeneousVolume gpu = sub.Params;
+            if (sub.Asset && sub.Asset->IsValid())
+            {
+                auto& streamPtr = m_vfxVolumeStreams[sub.EntityId];
+                if (!streamPtr)
+                    streamPtr = std::make_unique<GpuVolumeStream>();
+                GpuVolumeStream& stream = *streamPtr;
+                stream.LastUsedFrame = m_vfxFrameCounter;
+
+                if (stream.AssetHandle != static_cast<uint64_t>(sub.Asset->Handle))
+                {
+                    stream.AssetHandle = static_cast<uint64_t>(sub.Asset->Handle);
+                    stream.SlotFrame.fill(~0u);
+                }
+
+                const uint32_t fIdx = sub.FrameIndex % sub.Asset->GetFrameCount();
+                if (stream.SlotFrame[frameIndex] != fIdx)
+                {
+                    // Pre-size channel buffers to the sequence maximum so they never reallocate mid-playback.
+                    uint64_t maxDens = 0, maxTemp = 0, maxFlame = 0;
+                    for (uint32_t fi = 0; fi < sub.Asset->GetFrameCount(); ++fi)
+                    {
+                        const VolumeFrameRecord& fr = sub.Asset->GetFrame(fi);
+                        maxDens = std::max(maxDens, (fr.DensityBytes + 3ull) & ~3ull);
+                        maxTemp = std::max(maxTemp, (fr.TemperatureBytes + 3ull) & ~3ull);
+                        maxFlame = std::max(maxFlame, (fr.FlameBytes + 3ull) & ~3ull);
+                    }
+
+                    const VolumeFrameRecord& rec = sub.Asset->GetFrame(fIdx);
+                    stream.SlotFrame[frameIndex] = fIdx;
+                    stream.SlotDimX[frameIndex] = rec.DimX;
+                    stream.SlotDimY[frameIndex] = rec.DimY;
+                    stream.SlotDimZ[frameIndex] = rec.DimZ;
+                    uint32_t flags = 0u;
+
+                    if (sub.Asset->ReadFrameChannel(fIdx, VolumeChannel::Density, scratchBytes))
+                    {
+                        uploadChannel(stream.Density[frameIndex], scratchBytes, maxDens);
+                        flags |= shaderio::VOLUME_FLAG_HAS_DENSITY;
+                    }
+                    if (sub.Asset->ReadFrameChannel(fIdx, VolumeChannel::Temperature, scratchBytes))
+                    {
+                        uploadChannel(stream.Temperature[frameIndex], scratchBytes, maxTemp);
+                        flags |= shaderio::VOLUME_FLAG_HAS_TEMPERATURE;
+                    }
+                    if (sub.Asset->ReadFrameChannel(fIdx, VolumeChannel::Flame, scratchBytes))
+                    {
+                        uploadChannel(stream.Flame[frameIndex], scratchBytes, maxFlame);
+                        flags |= shaderio::VOLUME_FLAG_HAS_FLAME;
+                    }
+                    stream.SlotChannelFlags[frameIndex] = flags;
+                }
+
+                const uint32_t flags = stream.SlotChannelFlags[frameIndex];
+                gpu.densityBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_DENSITY) && stream.Density[frameIndex].Buffer
+                    ? bufferReadRef(stream.Density[frameIndex].Buffer) : 0ull;
+                gpu.temperatureBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_TEMPERATURE) && stream.Temperature[frameIndex].Buffer
+                    ? bufferReadRef(stream.Temperature[frameIndex].Buffer) : 0ull;
+                gpu.flameBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_FLAME) && stream.Flame[frameIndex].Buffer
+                    ? bufferReadRef(stream.Flame[frameIndex].Buffer) : 0ull;
+                gpu.dimX = stream.SlotDimX[frameIndex];
+                gpu.dimY = stream.SlotDimY[frameIndex];
+                gpu.dimZ = stream.SlotDimZ[frameIndex];
+                gpu.flags = flags;
+            }
+            else
+            {
+                gpu.flags = shaderio::VOLUME_FLAG_PROCEDURAL;
+            }
+            gpuVolumes.push_back(gpu);
+        }
+
+        const uint64_t required = sizeof(shaderio::GpuHeterogeneousVolume) * gpuVolumes.size();
+        if (required > m_vfxVolumeBufferCapacity || m_vfxVolumeBuffers.size() != MAX_FRAMES_IN_FLIGHT)
+        {
+            for (auto& old : m_vfxVolumeBuffers)
+            {
+                if (old)
+                {
+                    releaseBufferRefs(old.handle());
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(old) });
+                }
+            }
+            m_vfxVolumeBuffers.clear();
+            m_vfxVolumeBuffersMapped.clear();
+            m_vfxVolumeBufferCapacity = std::max<uint64_t>(required * 2, sizeof(shaderio::GpuHeterogeneousVolume) * 16);
+            for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
+            {
+                nri::Buffer buf = m_device.createBuffer(nri::BufferDesc{
+                    .size = m_vfxVolumeBufferCapacity,
+                    .usage = NRI_BUFFER_USAGE_UNIFORM
+                });
+                m_vfxVolumeBuffersMapped.push_back(buf.map(0, m_vfxVolumeBufferCapacity));
+                m_vfxVolumeBuffers.push_back(std::move(buf));
+            }
+        }
+        std::memcpy(m_vfxVolumeBuffersMapped[frameIndex], gpuVolumes.data(), required);
+
+        const uint64_t uniformsRef = bufferReadRef(m_uniformBuffers[frameIndex]);
+        const uint64_t volumesRef = bufferReadRef(m_vfxVolumeBuffers[frameIndex]);
+        const uint32_t count = static_cast<uint32_t>(gpuVolumes.size());
+        const uint32_t curFrame = static_cast<uint32_t>(m_vfxFrameCounter);
+        const glm::vec2 viewportSize(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
+
+        m_renderGraph.AddPass("Heterogeneous Volumes", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
+                builder.Read(resources.Depth);
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, res = &resources, uniformsRef, volumesRef, count, curFrame, viewportSize](RGPassContext& context)
+            {
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_vfxVolumePipeline);
+                cmd.setVertexInput();
+                cmd.setPrimitiveTopology(NRI_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                cmd.setPrimitiveRestartEnable(false);
+                cmd.setCullMode(NRI_CULL_MODE_BACK);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, true);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
+                cmd.setColorBlendEquation(0, {
+                    NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD,
+                    NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD
+                });
+
+                const uint32_t depthSlot = context.Slot(res->Depth);
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    shaderio::PushConstantHeterogeneousVolume push{};
+                    push.matrixReference = uniformsRef;
+                    push.volumesReference = volumesRef;
+                    push.volumeIndex = i;
+                    push.depthTextureIndex = depthSlot;
+                    push.frameIndex = curFrame;
+                    push.viewportSize = viewportSize;
+                    cmd.pushData(&push, sizeof(push));
+                    cmd.draw(36u, 1u, 0u, 0u);
+                }
+                cmd.setColorBlendEnable(0, false);
             });
     }
 }

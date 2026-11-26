@@ -1175,6 +1175,28 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<VolumeComponent>())
+        {
+            const auto& vol = entity.GetComponent<VolumeComponent>();
+            out << YAML::Key << "VolumeComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << vol.Enabled;
+            out << YAML::Key << "Volume" << YAML::Value << vol.Volume;
+            out << YAML::Key << "Playing" << YAML::Value << vol.Playing;
+            out << YAML::Key << "Looping" << YAML::Value << vol.Looping;
+            out << YAML::Key << "PlaybackSpeed" << YAML::Value << vol.PlaybackSpeed;
+            out << YAML::Key << "DensityScale" << YAML::Value << vol.DensityScale;
+            out << YAML::Key << "Albedo" << YAML::Value << vol.Albedo;
+            out << YAML::Key << "Anisotropy" << YAML::Value << vol.Anisotropy;
+            out << YAML::Key << "EmissionScale" << YAML::Value << vol.EmissionScale;
+            out << YAML::Key << "BlackbodyTemperature" << YAML::Value << vol.BlackbodyTemperature;
+            out << YAML::Key << "AmbientStrength" << YAML::Value << vol.AmbientStrength;
+            out << YAML::Key << "StepCount" << YAML::Value << vol.StepCount;
+            out << YAML::Key << "ShadowSteps" << YAML::Value << vol.ShadowSteps;
+            out << YAML::Key << "BoundsScale" << YAML::Value << vol.BoundsScale;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<CameraComponent>())
         {
             out << YAML::Key << "CameraComponent";
@@ -2972,6 +2994,26 @@ namespace Nox
             read("ChromaticAberration", dist.ChromaticAberration);
             read("RimTint", dist.RimTint);
             read("CameraFacing", dist.CameraFacing);
+        }
+
+        if (auto volNode = entity["VolumeComponent"])
+        {
+            auto& vol = deserializedEntity.AddComponent<VolumeComponent>();
+            auto read = [&](const char* key, auto& val) { if (volNode[key]) val = volNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Enabled", vol.Enabled);
+            read("Volume", vol.Volume);
+            read("Playing", vol.Playing);
+            read("Looping", vol.Looping);
+            read("PlaybackSpeed", vol.PlaybackSpeed);
+            read("DensityScale", vol.DensityScale);
+            read("Albedo", vol.Albedo);
+            read("Anisotropy", vol.Anisotropy);
+            read("EmissionScale", vol.EmissionScale);
+            read("BlackbodyTemperature", vol.BlackbodyTemperature);
+            read("AmbientStrength", vol.AmbientStrength);
+            read("StepCount", vol.StepCount);
+            read("ShadowSteps", vol.ShadowSteps);
+            read("BoundsScale", vol.BoundsScale);
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

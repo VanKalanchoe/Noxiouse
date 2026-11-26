@@ -14,6 +14,7 @@ find_package (yaml-cpp REQUIRED)
 find_package (Freetype REQUIRED)
 find_package (spdlog CONFIG REQUIRED)
 find_package (box2d REQUIRED)
+find_package (OpenVDB CONFIG QUIET)
 
 set(RTXDI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendors/RTXDI")
 set(RTXDI_INCLUDE_DIR "${RTXDI_DIR}/Include" "${RTXDI_DIR}/Include/Rtxdi" "${RTXDI_DIR}/include")
@@ -83,6 +84,15 @@ if(NOX_ENABLE_TRACY)
     add_subdirectory(vendors/tracy EXCLUDE_FROM_ALL)
     # PRIVATE: TRACY_* definitions and includes only reach NoxCore (TracyBackend.cpp is the only user).
     target_link_libraries(${PROJECT_NAME} PRIVATE Tracy::TracyClient)
+endif()
+
+if(OpenVDB_FOUND)
+    message(STATUS "NoxCore: OpenVDB found -- enabling .vdb -> .nvdb volume cooker (NOX_HAS_OPENVDB=1)")
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenVDB::openvdb)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC NOX_HAS_OPENVDB=1)
+else()
+    message(STATUS "NoxCore: OpenVDB not found -- .nvdb runtime loader active; install 'openvdb:x64-windows' via vcpkg to cook .vdb files")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC NOX_HAS_OPENVDB=0)
 endif()
 
 # PUBLIC so NoxCore/Debug/Profiler.h expands the same way in NoxCore and in every application.

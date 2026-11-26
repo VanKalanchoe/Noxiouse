@@ -77,6 +77,7 @@ namespace Nox
         case AssetType::AudioGraph:        return { "Audio Graph",    NoxUI::ThemeColor("AssetAudioGraph", { 0.54f, 0.68f, 1.00f, 1.0f }) };
         case AssetType::AudioMixer:        return { "Audio Mixer",    NoxUI::ThemeColor("AssetAudioMixer", { 0.60f, 0.64f, 0.84f, 1.0f }) };
         case AssetType::AcousticData:      return { "Acoustic Data",  NoxUI::ThemeColor("AssetAcousticData", { 0.44f, 0.78f, 0.82f, 1.0f }) };
+        case AssetType::Volume:            return { "Volume",         NoxUI::ThemeColor("AssetVolume", { 0.72f, 0.44f, 0.96f, 1.0f }) };
         default:                           return { "File",           NoxUI::ThemeColor("AssetFile", { 0.62f, 0.66f, 0.74f, 1.0f }) };
         }
     }
@@ -293,7 +294,7 @@ namespace Nox
         constexpr NoxUI::UIThemeToken kFolderColor{ "ContentFolder", { 0.86f, 0.70f, 0.38f, 1.0f } };
         constexpr NoxUI::UIThemeToken kScriptColor{ "ContentScript", { 0.44f, 0.62f, 0.95f, 1.0f } };
 
-        constexpr const char* kFilterNames[] = { "All Types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio", "Scripts" };
+        constexpr const char* kFilterNames[] = { "All Types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio", "Scripts", "Volumes" };
 
         std::string ToLower(std::string_view text)
         {
@@ -1475,6 +1476,7 @@ namespace Nox
         case 6: return type == AssetType::AnimationSequence || type == AssetType::AnimationGraph || type == AssetType::Skeleton || type == AssetType::Timeline;
         case 7: return type == AssetType::AudioClip || type == AssetType::AudioGraph || type == AssetType::AudioMixer;
         case 8: return isScript;
+        case 9: return type == AssetType::Volume;
         default: return true;
         }
     }

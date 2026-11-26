@@ -35,6 +35,7 @@
 
 namespace Nox
 {
+    class VolumeAsset;
     using nri::RenderGraph;
     using nri::RGBuilder;
     using nri::RGPassContext;
@@ -124,6 +125,7 @@ namespace NoxUI { class UIViewportManager; }
 
 namespace Nox
 {
+    class VolumeAsset;
     enum class NRDReflectionDenoiser : uint8_t
     {
         Off = 0,
@@ -472,6 +474,15 @@ namespace Nox
         void SubmitVfxRibbon(const VfxRibbonSettings& settings, std::span<const shaderio::GpuVfxRibbonNode> nodes);
         void SubmitVfxDecal(const shaderio::GpuVfxDecal& decal);
         void SubmitVfxDistortion(const shaderio::GpuVfxDistortion& distortion);
+
+        struct GpuVolumeSubmission
+        {
+            uint64_t EntityId = 0;
+            const VolumeAsset* Asset = nullptr;
+            uint32_t FrameIndex = 0;
+            shaderio::GpuHeterogeneousVolume Params{};
+        };
+        void SubmitHeterogeneousVolume(const GpuVolumeSubmission& submission);
         void SubmitLight(const glm::dmat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const SpotLightComponent& light);
@@ -1790,10 +1801,39 @@ namespace Nox
         uint64_t m_vfxDistortionBufferCapacity = 0;
         nri::Pipeline m_vfxDistortionPipeline;
 
+        // Heterogeneous Volumes (step N2)
+        struct GpuVolumeChannelSlot
+        {
+            nri::Buffer Buffer;
+            void* Mapped = nullptr;
+            uint64_t Capacity = 0;
+        };
+        struct GpuVolumeStream
+        {
+            uint64_t AssetHandle = 0;
+            uint64_t LastUsedFrame = 0;
+            std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotFrame{};
+            std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotDimX{};
+            std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotDimY{};
+            std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotDimZ{};
+            std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> SlotChannelFlags{};
+            std::array<GpuVolumeChannelSlot, MAX_FRAMES_IN_FLIGHT> Density;
+            std::array<GpuVolumeChannelSlot, MAX_FRAMES_IN_FLIGHT> Temperature;
+            std::array<GpuVolumeChannelSlot, MAX_FRAMES_IN_FLIGHT> Flame;
+            GpuVolumeStream() { SlotFrame.fill(~0u); }
+        };
+        std::unordered_map<uint64_t, std::unique_ptr<GpuVolumeStream>> m_vfxVolumeStreams;
+        std::vector<GpuVolumeSubmission> m_vfxVolumeSubmissions;
+        std::vector<nri::Buffer> m_vfxVolumeBuffers;
+        std::vector<void*> m_vfxVolumeBuffersMapped;
+        uint64_t m_vfxVolumeBufferCapacity = 0;
+        nri::Pipeline m_vfxVolumePipeline;
+
         void createVfxGraphicsPipelines(bool forceCompile = false);
         void addVfxDecalPass();
         void addVfxMeshParticlePass();
         void addVfxRibbonPass();
+        void addHeterogeneousVolumePass();
         void addVfxDistortionPass();
         std::vector<shaderio::GpuParticle> m_particles;
         std::vector<ParticleBatch> m_particleBatches;

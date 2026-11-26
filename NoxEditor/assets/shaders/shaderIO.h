@@ -2313,6 +2313,43 @@ struct PushConstantVfxDistortion
     uint32_t pad0;
 };
 
+// Heterogeneous Volumes (docs/VFX_And_Volumes_Plan_2026-11.md step N2):
+// Ray-marched FP16 .nvdb volumes (or procedural fire/smoke fallback) with Beer-Lambert transmittance,
+// physical blackbody emission, Henyey-Greenstein scattering, self-shadowing, and Reverse-Z depth occlusion.
+STATIC_CONST uint32_t VOLUME_FLAG_HAS_DENSITY     = 1u << 0;
+STATIC_CONST uint32_t VOLUME_FLAG_HAS_TEMPERATURE = 1u << 1;
+STATIC_CONST uint32_t VOLUME_FLAG_HAS_FLAME       = 1u << 2;
+STATIC_CONST uint32_t VOLUME_FLAG_PROCEDURAL      = 1u << 3;
+
+struct GpuHeterogeneousVolume
+{
+    mat4 model;                    // unit box [0, 1]^3 -> render space
+    mat4 invModel;                 // render space -> unit box [0, 1]^3
+    uint64_t densityBufferRef;     // packed FP16 uint32[] (2 halfs per uint), 0 if unused
+    uint64_t temperatureBufferRef; // packed FP16 uint32[], 0 if unused
+    uint64_t flameBufferRef;       // packed FP16 uint32[], 0 if unused
+    uint32_t dimX;
+    uint32_t dimY;
+    uint32_t dimZ;
+    uint32_t flags;                // VOLUME_FLAG_*
+    uint32_t padVol0;
+    uint32_t padVol1;
+    vec4 albedoAndDensity;         // rgb = smoke scatter albedo, w = densityScale
+    vec4 emissionParams;           // x = emissionScale, y = blackbodyKelvin, z = anisotropy g, w = ambientStrength
+    vec4 marchParams;              // x = stepCount, y = shadowSteps, z = invMaxDensity, w = invMaxTemperature
+};
+
+struct PushConstantHeterogeneousVolume
+{
+    uint64_t matrixReference;
+    uint64_t volumesReference;     // GpuHeterogeneousVolume[]
+    uint32_t volumeIndex;
+    uint32_t depthTextureIndex;
+    uint32_t frameIndex;
+    uint32_t pad0;
+    vec2 viewportSize;
+};
+
 struct PushConstantDDGIRadiance
 {
     uint64_t matrixReference;

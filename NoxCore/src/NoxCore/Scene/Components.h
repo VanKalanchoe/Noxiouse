@@ -969,6 +969,32 @@ namespace Nox
         DistortionComponent(const DistortionComponent&) = default;
     };
 
+    // Heterogeneous Volume Renderer (docs/VFX_And_Volumes_Plan_2026-11.md step N2):
+    // Ray-marches cooked .nvdb / OpenVDB .vdb volumes (or a built-in procedural fire/smoke vortex when empty)
+    // with Beer-Lambert transmittance, blackbody fire emission, Henyey-Greenstein scattering & Reverse-Z occlusion.
+    struct VolumeComponent
+    {
+        bool Enabled = true;
+        AssetHandle Volume = 0;               // AssetType::Volume (.nvdb or .vdb); 0: procedural fire/smoke vortex
+        bool Playing = true;
+        bool Looping = true;
+        float PlaybackSpeed = 1.0f;
+        float CurrentTime = 0.0f;             // runtime clock (seconds)
+
+        float DensityScale = 4.0f;            // extinction multiplier
+        glm::vec3 Albedo{ 0.82f, 0.84f, 0.88f }; // smoke scattering color
+        float Anisotropy = 0.35f;             // Henyey-Greenstein g in [-0.9, 0.9]
+        float EmissionScale = 8.0f;           // HDR blackbody fire/flame intensity
+        float BlackbodyTemperature = 2600.0f; // Kelvin peak temperature
+        float AmbientStrength = 0.35f;        // sky/IBL ambient inside smoke
+        uint32_t StepCount = 64u;             // primary ray-march steps (16..192)
+        uint32_t ShadowSteps = 8u;            // light-march self-shadowing steps (0..16)
+        glm::vec3 BoundsScale{ 2.0f, 3.0f, 2.0f }; // meters (used as size for procedural fallback, or multiplier when Volume != 0)
+
+        VolumeComponent() = default;
+        VolumeComponent(const VolumeComponent&) = default;
+    };
+
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -1429,7 +1455,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

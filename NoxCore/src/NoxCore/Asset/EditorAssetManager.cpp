@@ -146,7 +146,9 @@ namespace Nox
         { ".flac", AssetType::AudioClip },
         { ".mp3", AssetType::AudioClip },
         { ".slang", AssetType::MaterialShader },
-        { ".nmatgraph", AssetType::MaterialGraph }
+        { ".nmatgraph", AssetType::MaterialGraph },
+        { ".nvdb", AssetType::Volume },
+        { ".vdb", AssetType::Volume }
     };
 
     AssetType EditorAssetManager::GetAssetTypeFromExtension(const std::filesystem::path& extension)
@@ -2416,7 +2418,7 @@ namespace Nox
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".nox" || ext == ".nanim" || ext == ".nskel" || ext == ".nmat" ||
                 ext == ".ntex" || ext == ".nanimgraph" || ext == ".naudiograph" || ext == ".nprefab" || ext == ".ntimeline" ||
-                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".slang" || ext == ".nmatgraph")
+                ext == ".ttf" || ext == ".otf" || ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".slang" || ext == ".nmatgraph" || ext == ".nvdb" || ext == ".vdb")
             {
                 std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
 
