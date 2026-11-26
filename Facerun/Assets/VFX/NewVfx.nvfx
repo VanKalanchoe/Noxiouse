@@ -1,0 +1,100 @@
+VfxAsset: 1
+Name: NewVfx
+Duration: 4
+Looping: true
+Layers:
+  - Name: Vortex Sparks
+    Enabled: true
+    Type: Particles
+    LocalOffset: [0, 0, 0]
+    LocalRotation: [0, 0, 0]
+    StartDelay: 0
+    Duration: 0
+    Particle:
+      GpuSimulated: true
+      SpawnRate: 14000
+      Burst: 0
+      MaxParticles: 50000
+      Shape: 3
+      ShapeSize: [0.9, 0.9, 0.9]
+      ConeAngle: 15
+      LifetimeMin: 0.8
+      LifetimeMax: 1.6
+      Velocity: [0, 2.8, 0]
+      VelocityRandom: [0.6, 0.5, 0.6]
+      Gravity: 0
+      Drag: 0
+      SizeStart: 0.05
+      SizeEnd: 0.005
+      ColorStart: [0.25, 0.8, 1, 1]
+      ColorEnd: [0.45, 0.25, 1, 0]
+      Intensity: 5
+      Blend: 0
+      RenderMode: 0
+      ParticleMesh: 0
+      AlignToVelocity: false
+      CurlNoiseEnabled: true
+      CurlNoiseStrength: 2.5
+      CurlNoiseFrequency: 1.5
+      VortexEnabled: true
+      VortexStrength: 10
+      VortexRadialPull: 3
+      VortexRadius: 3
+      AttractorEnabled: false
+      AttractorOffset: [0, 2, 0]
+      AttractorStrength: 12
+      DepthCollisionEnabled: false
+  - Name: Ground Rune
+    Enabled: true
+    Type: Decal
+    LocalOffset: [0, 0, 0]
+    LocalRotation: [0, 0, 0]
+    StartDelay: 0
+    Duration: 0
+    Decal:
+      Size: [3.2, 1.5, 3.2]
+      Color: [0.2, 0.78, 1, 1]
+      EmissiveIntensity: 4
+      Blend: 0
+      Texture: 0
+  - Name: Portal Ripple
+    Enabled: true
+    Type: Distortion
+    LocalOffset: [0, 1.2, 0]
+    LocalRotation: [0, 0, 0]
+    StartDelay: 0
+    Duration: 0
+    Distortion:
+      Mode: 0
+      Radius: 2.4
+      Strength: 0.035
+      RingWidth: 0.25
+      Speed: 0.9
+      ChromaticAberration: 0.25
+      RimTint: [0.3, 0.85, 1, 0.35]
+  - Name: Portal Mist
+    Enabled: true
+    Type: LocalFog
+    LocalOffset: [0, 1, 0]
+    LocalRotation: [0, 0, 0]
+    StartDelay: 0
+    Duration: 0
+    LocalFog:
+      Shape: 2
+      Extents: [1.4, 1.5, 1.4]
+      Density: 0.35
+      Albedo: [0.75, 0.85, 1]
+      EmissiveColor: [0.15, 0.65, 1]
+      EmissiveIntensity: 1.2
+  - Name: Portal Light
+    Enabled: true
+    Type: PointLight
+    LocalOffset: [0, 1.4, 0]
+    LocalRotation: [0, 0, 0]
+    StartDelay: 0
+    Duration: 0
+    Light:
+      Color: [0.25, 0.75, 1]
+      Intensity: 16
+      Radius: 7
+      PulseSpeed: 3.5

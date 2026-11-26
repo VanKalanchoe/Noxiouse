@@ -1351,6 +1351,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 175276338021839062
+    FilePath: VFX/TornadoVDB/tornado_0103.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0103.vdb
+    Type: AssetType::Volume
   - Handle: 175280790463021124
     FilePath: StreamingTest/Materials/Tile_6_15_Tile_6_15.nmat
     SourceFilePath: StreamingTest/Materials/Tile_6_15_Tile_6_15.nmat
@@ -1648,6 +1652,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 201818141727473436
+    FilePath: VFX/TornadoVDB/tornado_0093.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0093.vdb
+    Type: AssetType::Volume
   - Handle: 202281441460981376
     FilePath: StreamingTest/Textures/Tile_18_3.ntex
     Type: AssetType::Texture2D
@@ -1989,6 +1997,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 232701352980015506
+    FilePath: VFX/TornadoVDB/tornado_0017.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0017.vdb
+    Type: AssetType::Volume
   - Handle: 232811196491907383
     FilePath: StreamingTest/Textures/Tile_69_10.ntex
     Type: AssetType::Texture2D
@@ -2411,6 +2423,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 281288414758772634
+    FilePath: VFX/TornadoVDB/tornado_0034.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0034.vdb
+    Type: AssetType::Volume
   - Handle: 281761755321226443
     FilePath: StreamingTest/Meshes/Tile_21_74.nsmesh
     Type: AssetType::StaticMesh
@@ -2606,6 +2622,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_65_33_Tile_65_33.nmat
     SourceFilePath: StreamingTest/Materials/Tile_65_33_Tile_65_33.nmat
     Type: AssetType::Material
+  - Handle: 300578348663637803
+    FilePath: VFX/TornadoVDB/tornado_0099.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0099.vdb
+    Type: AssetType::Volume
   - Handle: 301682408542481666
     FilePath: StreamingTest/Textures/Tile_30_34.ntex
     Type: AssetType::Texture2D
@@ -3566,6 +3586,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 430130085015674821
+    FilePath: VFX/TornadoVDB/tornado_0126.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0126.vdb
+    Type: AssetType::Volume
   - Handle: 430484752169664985
     FilePath: StreamingTest/Textures/Tile_58_72.ntex
     Type: AssetType::Texture2D
@@ -4456,6 +4480,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 533697646761490184
+    FilePath: VFX/TornadoVDB/tornado_0075.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0075.vdb
+    Type: AssetType::Volume
   - Handle: 534038662602935567
     FilePath: StreamingTest/Materials/Tile_44_42_Tile_44_42.nmat
     SourceFilePath: StreamingTest/Materials/Tile_44_42_Tile_44_42.nmat
@@ -4791,6 +4819,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 567997063198749418
+    FilePath: VFX/TornadoVDB/tornado_0012.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0012.vdb
+    Type: AssetType::Volume
   - Handle: 569449169796179670
     FilePath: StreamingTest/Textures/Tile_47_72.ntex
     Type: AssetType::Texture2D
@@ -5443,6 +5475,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_55_67_Tile_55_67.nmat
     SourceFilePath: StreamingTest/Materials/Tile_55_67_Tile_55_67.nmat
     Type: AssetType::Material
+  - Handle: 653385408029902846
+    FilePath: VFX/TornadoVDB/tornado_0105.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0105.vdb
+    Type: AssetType::Volume
   - Handle: 654815859363449503
     FilePath: StreamingTest/Materials/Tile_59_62_Tile_59_62.nmat
     SourceFilePath: StreamingTest/Materials/Tile_59_62_Tile_59_62.nmat
@@ -6398,6 +6434,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_8_12_Tile_8_12.nmat
     SourceFilePath: StreamingDense/Materials/Tile_8_12_Tile_8_12.nmat
     Type: AssetType::Material
+  - Handle: 773634710338567523
+    FilePath: VFX/TornadoVDB/tornado_0036.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0036.vdb
+    Type: AssetType::Volume
   - Handle: 773650742148244996
     FilePath: StreamingTest/Textures/Tile_64_59.ntex
     Type: AssetType::Texture2D
@@ -6716,6 +6756,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 797369726555396396
+    FilePath: VFX/TornadoVDB/tornado_0040.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0040.vdb
+    Type: AssetType::Volume
   - Handle: 798522160828162050
     FilePath: StreamingTest/Meshes/Tile_63_17.nsmesh
     Type: AssetType::StaticMesh
@@ -9697,6 +9741,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1159967363466752638
+    FilePath: VFX/TornadoVDB/tornado_0069.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0069.vdb
+    Type: AssetType::Volume
   - Handle: 1160069275405893346
     FilePath: StreamingTest/Meshes/Tile_57_7.nsmesh
     Type: AssetType::StaticMesh
@@ -12658,6 +12706,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1498072177806818050
+    FilePath: VFX/TornadoVDB/tornado_0000.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0000.vdb
+    Type: AssetType::Volume
   - Handle: 1498734952693306034
     FilePath: StreamingTest/Meshes/Tile_58_74.nsmesh
     Type: AssetType::StaticMesh
@@ -12996,6 +13048,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1532009567967009591
+    FilePath: VFX/TornadoVDB/tornado_0098.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0098.vdb
+    Type: AssetType::Volume
   - Handle: 1532760254876829643
     FilePath: StreamingDense/Meshes/Tile_8_2.nsmesh
     Type: AssetType::StaticMesh
@@ -13776,6 +13832,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 1615970728879042435
+    FilePath: VFX/TornadoVDB/tornado_0122.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0122.vdb
+    Type: AssetType::Volume
   - Handle: 1616156621951871928
     FilePath: Models/bistro/Meshes/subset_2_531.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -15328,6 +15388,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1796800685198173125
+    FilePath: VFX/TornadoVDB/tornado_0016.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0016.vdb
+    Type: AssetType::Volume
   - Handle: 1799287565017232670
     FilePath: StreamingTest/Meshes/Tile_2_81.nsmesh
     Type: AssetType::StaticMesh
@@ -15827,6 +15891,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1860210920654624655
+    FilePath: VFX/TornadoVDB/tornado_0050.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0050.vdb
+    Type: AssetType::Volume
   - Handle: 1861389573259664162
     FilePath: StreamingTest/Materials/Tile_26_69_Tile_26_69.nmat
     SourceFilePath: StreamingTest/Materials/Tile_26_69_Tile_26_69.nmat
@@ -16396,6 +16464,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1920969596916786833
+    FilePath: VFX/TornadoVDB/tornado_0125.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0125.vdb
+    Type: AssetType::Volume
   - Handle: 1921013665371321955
     FilePath: StreamingTest/Meshes/Tile_3_15.nsmesh
     Type: AssetType::StaticMesh
@@ -17098,6 +17170,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 1996175135231240883
+    FilePath: VFX/TornadoVDB/tornado_0108.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0108.vdb
+    Type: AssetType::Volume
   - Handle: 1997847715424725293
     FilePath: StreamingTest/Meshes/Tile_79_7.nsmesh
     Type: AssetType::StaticMesh
@@ -18484,6 +18560,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2156684077556684394
+    FilePath: VFX/TornadoVDB/tornado_0090.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0090.vdb
+    Type: AssetType::Volume
   - Handle: 2157521378975911349
     FilePath: StreamingTest/Textures/Tile_56_26.ntex
     Type: AssetType::Texture2D
@@ -18987,6 +19067,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2204208816879732863
+    FilePath: VFX/TornadoVDB/tornado_0076.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0076.vdb
+    Type: AssetType::Volume
   - Handle: 2206030558936941541
     FilePath: StreamingTest/Meshes/Tile_17_0.nsmesh
     Type: AssetType::StaticMesh
@@ -19934,6 +20018,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2303190898665924250
+    FilePath: VFX/TornadoVDB/tornado_0051.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0051.vdb
+    Type: AssetType::Volume
   - Handle: 2303553684368357827
     FilePath: StreamingTest/Textures/Tile_74_66.ntex
     Type: AssetType::Texture2D
@@ -23779,6 +23867,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 2755127172081267352
+    FilePath: VFX/TornadoVDB/tornado_0111.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0111.vdb
+    Type: AssetType::Volume
   - Handle: 2755739034164831265
     FilePath: StreamingTest/Textures/Tile_21_41.ntex
     Type: AssetType::Texture2D
@@ -24123,6 +24215,10 @@ AssetRegistry:
       SourceMeshIndex: 340
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 2802999824607148445
+    FilePath: VFX/TornadoVDB/tornado_0004.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0004.vdb
+    Type: AssetType::Volume
   - Handle: 2803940911425956910
     FilePath: StreamingTest/Textures/Tile_54_73.ntex
     Type: AssetType::Texture2D
@@ -25294,6 +25390,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2928669832443387120
+    FilePath: VFX/TornadoVDB/tornado_0011.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0011.vdb
+    Type: AssetType::Volume
   - Handle: 2929874862100155005
     FilePath: StreamingTest/Meshes/Tile_49_8.nsmesh
     Type: AssetType::StaticMesh
@@ -26948,6 +27048,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3136332828586323039
+    FilePath: VFX/TornadoVDB/tornado_0081.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0081.vdb
+    Type: AssetType::Volume
   - Handle: 3137632250011299455
     FilePath: StreamingTest/Meshes/Tile_71_35.nsmesh
     Type: AssetType::StaticMesh
@@ -29728,6 +29832,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3434970858156636034
+    FilePath: VFX/TornadoVDB/tornado_0064.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0064.vdb
+    Type: AssetType::Volume
   - Handle: 3435282568023817995
     FilePath: StreamingTest/Materials/Tile_24_68_Tile_24_68.nmat
     SourceFilePath: StreamingTest/Materials/Tile_24_68_Tile_24_68.nmat
@@ -30234,6 +30342,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3493700496496519747
+    FilePath: VFX/TornadoVDB/tornado_0102.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0102.vdb
+    Type: AssetType::Volume
   - Handle: 3493970166701339072
     FilePath: StreamingTest/Meshes/Tile_49_74.nsmesh
     Type: AssetType::StaticMesh
@@ -30571,6 +30683,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3524821438179075282
+    FilePath: VFX/TornadoVDB/tornado_0073.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0073.vdb
+    Type: AssetType::Volume
   - Handle: 3525700734402802002
     FilePath: StreamingTest/Meshes/Tile_17_38.nsmesh
     Type: AssetType::StaticMesh
@@ -30942,6 +31058,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3560500628151753832
+    FilePath: VFX/TornadoVDB/tornado_0027.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0027.vdb
+    Type: AssetType::Volume
   - Handle: 3561289516562236414
     FilePath: StreamingDense/Materials/Tile_12_3_Tile_12_3.nmat
     SourceFilePath: StreamingDense/Materials/Tile_12_3_Tile_12_3.nmat
@@ -32391,6 +32511,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3713127165760743579
+    FilePath: VFX/TornadoVDB/tornado_0097.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0097.vdb
+    Type: AssetType::Volume
   - Handle: 3713378758469039374
     FilePath: StreamingTest/Textures/Tile_70_54.ntex
     Type: AssetType::Texture2D
@@ -32592,6 +32716,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 3747278060650420475
+    FilePath: VFX/TornadoVDB/tornado_0058.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0058.vdb
+    Type: AssetType::Volume
   - Handle: 3747891042972464720
     FilePath: Materials/Cube_Cube_Material_Instance_12655269398170201671.nmat
     SourceFilePath: Materials/Cube_Cube_Material_Instance_12655269398170201671.nmat
@@ -34886,6 +35014,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4003825213182213294
+    FilePath: VFX/TornadoVDB/tornado_0114.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0114.vdb
+    Type: AssetType::Volume
   - Handle: 4004080785115159908
     FilePath: StreamingTest/Meshes/Tile_23_53.nsmesh
     Type: AssetType::StaticMesh
@@ -35019,6 +35151,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4019256212251884824
+    FilePath: VFX/TornadoVDB/tornado_0109.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0109.vdb
+    Type: AssetType::Volume
   - Handle: 4019748153456030883
     FilePath: StreamingTest/Textures/Tile_14_69.ntex
     Type: AssetType::Texture2D
@@ -35272,6 +35408,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_35_9_Tile_35_9.nmat
     SourceFilePath: StreamingTest/Materials/Tile_35_9_Tile_35_9.nmat
     Type: AssetType::Material
+  - Handle: 4044403624596141156
+    FilePath: VFX/TornadoVDB/tornado_0072.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0072.vdb
+    Type: AssetType::Volume
   - Handle: 4044859499029933495
     FilePath: StreamingTest/Textures/Tile_36_7.ntex
     Type: AssetType::Texture2D
@@ -37780,6 +37920,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 4347961293346648579
+    FilePath: VFX/TornadoVDB/tornado_0078.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0078.vdb
+    Type: AssetType::Volume
   - Handle: 4349121929788600033
     FilePath: StreamingDense/Materials/Tile_17_17_Tile_17_17.nmat
     SourceFilePath: StreamingDense/Materials/Tile_17_17_Tile_17_17.nmat
@@ -39931,6 +40075,10 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00001ad_Brushed_Metal.nmat
     Type: AssetType::Material
+  - Handle: 4589559564749431455
+    FilePath: VFX/TornadoVDB/tornado_0096.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0096.vdb
+    Type: AssetType::Volume
   - Handle: 4592045635978745807
     FilePath: Models/bistro/Materials/bistro_LMBR_000002c_awning_beams_10.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_000002c_awning_beams_10.nmat
@@ -40492,6 +40640,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 4671329608959478201
+    FilePath: VFX/TornadoVDB/tornado_0030.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0030.vdb
+    Type: AssetType::Volume
   - Handle: 4672318974486992299
     FilePath: StreamingTest/Textures/Tile_26_72.ntex
     Type: AssetType::Texture2D
@@ -44147,6 +44299,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5094901081619735921
+    FilePath: VFX/TornadoVDB/tornado_0048.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0048.vdb
+    Type: AssetType::Volume
   - Handle: 5096027223113486760
     FilePath: StreamingTest/Textures/Tile_80_47.ntex
     Type: AssetType::Texture2D
@@ -45982,6 +46138,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_13_59_Tile_13_59.nmat
     SourceFilePath: StreamingTest/Materials/Tile_13_59_Tile_13_59.nmat
     Type: AssetType::Material
+  - Handle: 5296610823037034838
+    FilePath: VFX/TornadoVDB/tornado_0007.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0007.vdb
+    Type: AssetType::Volume
   - Handle: 5296635636244897409
     FilePath: Models/bistro/Meshes/subset_0_430.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -47573,6 +47733,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5447616847316632833
+    FilePath: VFX/TornadoVDB/tornado_0115.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0115.vdb
+    Type: AssetType::Volume
   - Handle: 5449056422129100367
     FilePath: StreamingTest/Meshes/Tile_65_15.nsmesh
     Type: AssetType::StaticMesh
@@ -48122,6 +48286,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 5498546536589216263
+    FilePath: VFX/TornadoVDB/tornado_0071.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0071.vdb
+    Type: AssetType::Volume
   - Handle: 5498713185446718957
     FilePath: StreamingTest/Textures/Tile_51_25.ntex
     Type: AssetType::Texture2D
@@ -49965,6 +50133,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5707441485812032521
+    FilePath: VFX/TornadoVDB/tornado_0123.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0123.vdb
+    Type: AssetType::Volume
   - Handle: 5707448783869182105
     FilePath: StreamingDense/Materials/Tile_0_1_Tile_0_1.nmat
     SourceFilePath: StreamingDense/Materials/Tile_0_1_Tile_0_1.nmat
@@ -50645,6 +50817,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5773153555636129369
+    FilePath: VFX/TornadoVDB/tornado_0038.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0038.vdb
+    Type: AssetType::Volume
   - Handle: 5773420130304280202
     FilePath: StreamingTest/Textures/Tile_60_33.ntex
     Type: AssetType::Texture2D
@@ -52427,6 +52603,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 5981553267135555420
+    FilePath: VFX/TornadoVDB/tornado_0042.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0042.vdb
+    Type: AssetType::Volume
   - Handle: 5981636304442397150
     FilePath: StreamingTest/Meshes/Tile_70_24.nsmesh
     Type: AssetType::StaticMesh
@@ -52818,6 +52998,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6023668974907233116
+    FilePath: VFX/TornadoVDB/tornado_0053.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0053.vdb
+    Type: AssetType::Volume
   - Handle: 6023691736513042278
     FilePath: StreamingTest/Textures/Tile_5_53.ntex
     Type: AssetType::Texture2D
@@ -52837,6 +53021,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6025122155566966293
+    FilePath: VFX/TornadoVDB/tornado_0008.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0008.vdb
+    Type: AssetType::Volume
   - Handle: 6025615070792884894
     FilePath: StreamingTest/Textures/Tile_29_10.ntex
     Type: AssetType::Texture2D
@@ -52927,6 +53115,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6035201800756771719
+    FilePath: VFX/TornadoVDB/tornado_0101.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0101.vdb
+    Type: AssetType::Volume
   - Handle: 6035336031676697694
     FilePath: StreamingTest/Meshes/Tile_60_8.nsmesh
     Type: AssetType::StaticMesh
@@ -55769,6 +55961,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6366193564786361448
+    FilePath: VFX/TornadoVDB/tornado_0085.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0085.vdb
+    Type: AssetType::Volume
   - Handle: 6367670273616989512
     FilePath: StreamingTest/Meshes/Tile_24_80.nsmesh
     Type: AssetType::StaticMesh
@@ -57615,6 +57811,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6582850103245347999
+    FilePath: VFX/TornadoVDB/tornado_0062.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0062.vdb
+    Type: AssetType::Volume
   - Handle: 6583247642220640558
     FilePath: StreamingTest/Meshes/Tile_79_69.nsmesh
     Type: AssetType::StaticMesh
@@ -57809,6 +58009,10 @@ AssetRegistry:
     FilePath: Materials/Sphere_Sphere_Material_Instance_15035757338342387950.nmat
     SourceFilePath: Materials/Sphere_Sphere_Material_Instance_15035757338342387950.nmat
     Type: AssetType::Material
+  - Handle: 6606490622987975397
+    FilePath: VFX/TornadoVDB/tornado_0015.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0015.vdb
+    Type: AssetType::Volume
   - Handle: 6608133666130352651
     FilePath: StreamingTest/Meshes/Tile_59_38.nsmesh
     Type: AssetType::StaticMesh
@@ -59498,6 +59702,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 6801022879771071493
+    FilePath: VFX/TornadoVDB/tornado_0095.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0095.vdb
+    Type: AssetType::Volume
   - Handle: 6801031509882641738
     FilePath: StreamingTest/Textures/Tile_14_64.ntex
     Type: AssetType::Texture2D
@@ -60361,6 +60569,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 6900842355341549555
+    FilePath: VFX/TornadoVDB/tornado_0106.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0106.vdb
+    Type: AssetType::Volume
   - Handle: 6901182980739465802
     FilePath: StreamingTest/Meshes/Tile_45_51.nsmesh
     Type: AssetType::StaticMesh
@@ -63536,6 +63748,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7242479593473753190
+    FilePath: VFX/TornadoVDB/tornado_0120.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0120.vdb
+    Type: AssetType::Volume
   - Handle: 7243614677833796984
     FilePath: StreamingTest/Textures/Tile_47_57.ntex
     Type: AssetType::Texture2D
@@ -64255,6 +64471,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 7323456131754622398
+    FilePath: VFX/TornadoVDB/tornado_0054.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0054.vdb
+    Type: AssetType::Volume
   - Handle: 7323988697567675610
     FilePath: StreamingTest/Textures/Tile_49_29.ntex
     Type: AssetType::Texture2D
@@ -66849,6 +67069,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 7628469913816629946
+    FilePath: VFX/TornadoVDB/tornado_0047.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0047.vdb
+    Type: AssetType::Volume
   - Handle: 7630008788345025531
     FilePath: StreamingTest/Meshes/Tile_10_34.nsmesh
     Type: AssetType::StaticMesh
@@ -68252,6 +68476,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 7801781272818459256
+    FilePath: VFX/TornadoVDB/tornado_0005.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0005.vdb
+    Type: AssetType::Volume
   - Handle: 7803706510886442520
     FilePath: StreamingTest/Meshes/Tile_21_44.nsmesh
     Type: AssetType::StaticMesh
@@ -73087,6 +73315,10 @@ AssetRegistry:
       SourceMeshIndex: 9
       ImportScale: 100
       MaterialBasePath: Models/SpecularTest/Meshes/SpecularTest.nsmesh
+  - Handle: 8347779624142447363
+    FilePath: VFX/TornadoVDB/tornado_0033.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0033.vdb
+    Type: AssetType::Volume
   - Handle: 8348281028278601182
     FilePath: StreamingTest/Meshes/Tile_43_7.nsmesh
     Type: AssetType::StaticMesh
@@ -75134,6 +75366,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8588200052667780008
+    FilePath: VFX/TornadoVDB/tornado_0055.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0055.vdb
+    Type: AssetType::Volume
   - Handle: 8588560014221414958
     FilePath: StreamingDense/Materials/Tile_20_19_Tile_20_19.nmat
     SourceFilePath: StreamingDense/Materials/Tile_20_19_Tile_20_19.nmat
@@ -76776,6 +77012,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 8768126060921961562
+    FilePath: VFX/TornadoVDB/tornado_0022.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0022.vdb
+    Type: AssetType::Volume
   - Handle: 8768401716723860921
     FilePath: StreamingTest/Textures/Tile_63_17.ntex
     Type: AssetType::Texture2D
@@ -76999,6 +77239,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_18_13_Tile_18_13.nmat
     SourceFilePath: StreamingDense/Materials/Tile_18_13_Tile_18_13.nmat
     Type: AssetType::Material
+  - Handle: 8799118932766669201
+    FilePath: VFX/TornadoVDB/tornado_0067.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0067.vdb
+    Type: AssetType::Volume
   - Handle: 8799525116692305158
     FilePath: StreamingTest/Materials/Tile_63_63_Tile_63_63.nmat
     SourceFilePath: StreamingTest/Materials/Tile_63_63_Tile_63_63.nmat
@@ -78728,6 +78972,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9010457556199547750
+    FilePath: VFX/TornadoVDB/tornado_0049.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0049.vdb
+    Type: AssetType::Volume
   - Handle: 9010507855658144078
     FilePath: StreamingTest/Textures/Tile_24_77.ntex
     Type: AssetType::Texture2D
@@ -79054,6 +79302,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9046970577546946014
+    FilePath: VFX/TornadoVDB/tornado_0006.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0006.vdb
+    Type: AssetType::Volume
   - Handle: 9048856299116745160
     FilePath: StreamingTest/Meshes/Tile_38_28.nsmesh
     Type: AssetType::StaticMesh
@@ -79226,6 +79478,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_28_19_Tile_28_19.nmat
     SourceFilePath: StreamingTest/Materials/Tile_28_19_Tile_28_19.nmat
     Type: AssetType::Material
+  - Handle: 9071343434749862413
+    FilePath: VFX/TornadoVDB/tornado_0025.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0025.vdb
+    Type: AssetType::Volume
   - Handle: 9072033078099145543
     FilePath: StreamingTest/Meshes/Tile_10_72.nsmesh
     Type: AssetType::StaticMesh
@@ -80249,6 +80505,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9187773170825819413
+    FilePath: VFX/TornadoVDB/tornado_0024.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0024.vdb
+    Type: AssetType::Volume
   - Handle: 9189001008910452715
     FilePath: StreamingTest/Meshes/Tile_21_22.nsmesh
     Type: AssetType::StaticMesh
@@ -83361,6 +83621,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9518790610948451849
+    FilePath: VFX/TornadoVDB/tornado_0087.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0087.vdb
+    Type: AssetType::Volume
   - Handle: 9519542567128275146
     FilePath: StreamingTest/Meshes/Tile_63_53.nsmesh
     Type: AssetType::StaticMesh
@@ -83399,6 +83663,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9523810724088978086
+    FilePath: VFX/TornadoVDB/tornado_0077.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0077.vdb
+    Type: AssetType::Volume
   - Handle: 9524342646212527424
     FilePath: StreamingTest/Meshes/Tile_36_79.nsmesh
     Type: AssetType::StaticMesh
@@ -84369,6 +84637,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_43_38_Tile_43_38.nmat
     SourceFilePath: StreamingTest/Materials/Tile_43_38_Tile_43_38.nmat
     Type: AssetType::Material
+  - Handle: 9627350120490567607
+    FilePath: VFX/TornadoVDB/tornado_0088.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0088.vdb
+    Type: AssetType::Volume
   - Handle: 9627977505344222808
     FilePath: StreamingTest/Textures/Tile_10_74.ntex
     Type: AssetType::Texture2D
@@ -84688,6 +84960,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 9667321607194477102
+    FilePath: VFX/TornadoVDB/tornado_0063.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0063.vdb
+    Type: AssetType::Volume
   - Handle: 9667898804343970732
     FilePath: StreamingTest/Meshes/Tile_59_81.nsmesh
     Type: AssetType::StaticMesh
@@ -85187,6 +85463,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9719322622274681082
+    FilePath: VFX/TornadoVDB/tornado_0080.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0080.vdb
+    Type: AssetType::Volume
   - Handle: 9719808500984382044
     FilePath: StreamingTest/Meshes/Tile_50_15.nsmesh
     Type: AssetType::StaticMesh
@@ -90137,6 +90417,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10293725494496697411
+    FilePath: VFX/TornadoVDB/tornado_0031.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0031.vdb
+    Type: AssetType::Volume
   - Handle: 10294153365511923346
     FilePath: StreamingTest/Textures/Tile_81_9.ntex
     Type: AssetType::Texture2D
@@ -91589,6 +91873,14 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10456142354431619528
+    FilePath: VFX/TornadoVDB/tornado_0118.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0118.vdb
+    Type: AssetType::Volume
+  - Handle: 10456741932043430398
+    FilePath: VFX/TornadoVDB/tornado_0037.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0037.vdb
+    Type: AssetType::Volume
   - Handle: 10458009015020372483
     FilePath: StreamingDense/Textures/Tile_9_18.ntex
     Type: AssetType::Texture2D
@@ -91739,6 +92031,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10471388633936367038
+    FilePath: VFX/TornadoVDB/tornado_0009.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0009.vdb
+    Type: AssetType::Volume
   - Handle: 10473051595180510985
     FilePath: StreamingTest/Textures/Tile_26_9.ntex
     Type: AssetType::Texture2D
@@ -92681,6 +92977,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10587750142165467689
+    FilePath: VFX/TornadoVDB/tornado_0002.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0002.vdb
+    Type: AssetType::Volume
   - Handle: 10588657794650008117
     FilePath: StreamingTest/Meshes/Tile_38_65.nsmesh
     Type: AssetType::StaticMesh
@@ -92930,6 +93230,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10620412521869309348
+    FilePath: VFX/TornadoVDB/tornado_0084.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0084.vdb
+    Type: AssetType::Volume
   - Handle: 10620992337263593977
     FilePath: StreamingTest/Textures/Tile_53_72.ntex
     Type: AssetType::Texture2D
@@ -94243,6 +94547,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_22_24_Tile_22_24.nmat
     SourceFilePath: StreamingTest/Materials/Tile_22_24_Tile_22_24.nmat
     Type: AssetType::Material
+  - Handle: 10789759673798756079
+    FilePath: VFX/TornadoVDB/tornado_0104.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0104.vdb
+    Type: AssetType::Volume
   - Handle: 10790819787658053293
     FilePath: StreamingTest/Meshes/Tile_63_7.nsmesh
     Type: AssetType::StaticMesh
@@ -95463,6 +95771,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 10928226779385171612
+    FilePath: VFX/TornadoVDB/tornado_0057.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0057.vdb
+    Type: AssetType::Volume
   - Handle: 10929927016075201134
     FilePath: StreamingTest/Materials/Tile_11_0_Tile_11_0.nmat
     SourceFilePath: StreamingTest/Materials/Tile_11_0_Tile_11_0.nmat
@@ -97074,6 +97386,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11113616796262473796
+    FilePath: VFX/TornadoVDB/tornado_0052.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0052.vdb
+    Type: AssetType::Volume
   - Handle: 11114754464739626608
     FilePath: StreamingTest/Materials/Tile_37_46_Tile_37_46.nmat
     SourceFilePath: StreamingTest/Materials/Tile_37_46_Tile_37_46.nmat
@@ -97579,6 +97895,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11170831586101465533
+    FilePath: VFX/TornadoVDB/tornado_0068.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0068.vdb
+    Type: AssetType::Volume
   - Handle: 11171322351310422746
     FilePath: StreamingTest/Textures/Tile_79_11.ntex
     Type: AssetType::Texture2D
@@ -97930,6 +98250,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11210181267026125322
+    FilePath: VFX/TornadoVDB/tornado_0056.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0056.vdb
+    Type: AssetType::Volume
   - Handle: 11212483169574661073
     FilePath: StreamingTest/Textures/Tile_3_52.ntex
     Type: AssetType::Texture2D
@@ -98050,6 +98374,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11229446811572454281
+    FilePath: VFX/TornadoVDB/tornado_0018.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0018.vdb
+    Type: AssetType::Volume
   - Handle: 11229464311027934153
     FilePath: StreamingTest/Textures/Tile_71_20.ntex
     Type: AssetType::Texture2D
@@ -98186,6 +98514,14 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11241807158856199123
+    FilePath: VFX/TornadoVDB/tornado_0019.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0019.vdb
+    Type: AssetType::Volume
+  - Handle: 11242392657606482140
+    FilePath: VFX/TornadoVDB/tornado_0119.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0119.vdb
+    Type: AssetType::Volume
   - Handle: 11244236593047388153
     FilePath: StreamingTest/Meshes/Tile_74_46.nsmesh
     Type: AssetType::StaticMesh
@@ -98837,6 +99173,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_20_2_Tile_20_2.nmat
     SourceFilePath: StreamingDense/Materials/Tile_20_2_Tile_20_2.nmat
     Type: AssetType::Material
+  - Handle: 11312417914633504978
+    FilePath: VFX/TornadoVDB/tornado_0046.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0046.vdb
+    Type: AssetType::Volume
   - Handle: 11312595520744159910
     FilePath: Models/bistro/Meshes/subset_3_111.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -100916,6 +101256,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11537083899108888538
+    FilePath: VFX/TornadoVDB/tornado_0035.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0035.vdb
+    Type: AssetType::Volume
   - Handle: 11538456091637390040
     FilePath: StreamingTest/Meshes/Tile_80_8.nsmesh
     Type: AssetType::StaticMesh
@@ -101380,6 +101724,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 11597578096099305599
+    FilePath: VFX/TornadoVDB/tornado_0039.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0039.vdb
+    Type: AssetType::Volume
   - Handle: 11598287146405922173
     FilePath: StreamingTest/Meshes/Tile_57_55.nsmesh
     Type: AssetType::StaticMesh
@@ -101600,6 +101948,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 11632582619094056483
+    FilePath: VFX/TornadoVDB/tornado_0083.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0083.vdb
+    Type: AssetType::Volume
   - Handle: 11633051636671506528
     FilePath: StreamingDense/Textures/Tile_13_1.ntex
     Type: AssetType::Texture2D
@@ -101949,6 +102301,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_15_21_Tile_15_21.nmat
     SourceFilePath: StreamingTest/Materials/Tile_15_21_Tile_15_21.nmat
     Type: AssetType::Material
+  - Handle: 11667686097844085028
+    FilePath: VFX/TornadoVDB/tornado_0094.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0094.vdb
+    Type: AssetType::Volume
   - Handle: 11668698570739405105
     FilePath: StreamingTest/Textures/Tile_53_76.ntex
     Type: AssetType::Texture2D
@@ -104799,6 +105155,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_16_0_Tile_16_0.nmat
     SourceFilePath: StreamingDense/Materials/Tile_16_0_Tile_16_0.nmat
     Type: AssetType::Material
+  - Handle: 11995212527152379349
+    FilePath: VFX/TornadoVDB/tornado_0107.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0107.vdb
+    Type: AssetType::Volume
   - Handle: 11995633997571004244
     FilePath: StreamingTest/Meshes/Tile_54_37.nsmesh
     Type: AssetType::StaticMesh
@@ -105653,6 +106013,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12114249944417453440
+    FilePath: VFX/TornadoVDB/tornado_0014.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0014.vdb
+    Type: AssetType::Volume
   - Handle: 12114608021355758937
     FilePath: StreamingTest/Textures/Tile_49_75.ntex
     Type: AssetType::Texture2D
@@ -107381,6 +107745,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12299430344811365618
+    FilePath: VFX/TornadoVDB/tornado_0010.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0010.vdb
+    Type: AssetType::Volume
   - Handle: 12299858101702691229
     FilePath: StreamingTest/Meshes/Tile_41_14.nsmesh
     Type: AssetType::StaticMesh
@@ -108325,6 +108693,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 12405769930997593263
+    FilePath: VFX/TornadoVDB/tornado_0000.nvdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0000.nvdb
+    Type: AssetType::Volume
   - Handle: 12407922997516175907
     FilePath: Materials/Cube_Cube_Material.nmat
     SourceFilePath: Materials/Cube_Cube_Material.nmat
@@ -109251,6 +109623,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12505707814752203413
+    FilePath: VFX/TornadoVDB/tornado_0060.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0060.vdb
+    Type: AssetType::Volume
   - Handle: 12506122029242536316
     FilePath: StreamingTest/Meshes/Tile_2_8.nsmesh
     Type: AssetType::StaticMesh
@@ -109509,6 +109885,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_20_20_Tile_20_20.nmat
     SourceFilePath: StreamingDense/Materials/Tile_20_20_Tile_20_20.nmat
     Type: AssetType::Material
+  - Handle: 12530686827977008348
+    FilePath: VFX/TornadoVDB/tornado_0086.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0086.vdb
+    Type: AssetType::Volume
   - Handle: 12531169630136888993
     FilePath: StreamingTest/Materials/Tile_71_43_Tile_71_43.nmat
     SourceFilePath: StreamingTest/Materials/Tile_71_43_Tile_71_43.nmat
@@ -110391,6 +110771,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12642159842679639525
+    FilePath: VFX/TornadoVDB/tornado_0117.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0117.vdb
+    Type: AssetType::Volume
   - Handle: 12642347703309114804
     FilePath: StreamingTest/Textures/Tile_69_19.ntex
     Type: AssetType::Texture2D
@@ -111789,6 +112173,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12807476084967674388
+    FilePath: VFX/NewVfx.nvfx
+    SourceFilePath: VFX/NewVfx.nvfx
+    Type: AssetType::Vfx
   - Handle: 12808406135763821890
     FilePath: StreamingTest/Textures/Tile_16_15.ntex
     Type: AssetType::Texture2D
@@ -116348,6 +116736,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13344565258864873465
+    FilePath: VFX/TornadoVDB/tornado_0059.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0059.vdb
+    Type: AssetType::Volume
   - Handle: 13344665346397509820
     FilePath: StreamingTest/Materials/Tile_14_5_Tile_14_5.nmat
     SourceFilePath: StreamingTest/Materials/Tile_14_5_Tile_14_5.nmat
@@ -117940,6 +118332,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13534317573583187360
+    FilePath: VFX/TornadoVDB/tornado_0043.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0043.vdb
+    Type: AssetType::Volume
   - Handle: 13534530447759285288
     FilePath: StreamingTest/Textures/Tile_8_37.ntex
     Type: AssetType::Texture2D
@@ -119443,6 +119839,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13731594372601847694
+    FilePath: VFX/TornadoVDB/tornado_0113.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0113.vdb
+    Type: AssetType::Volume
   - Handle: 13732471545536240731
     FilePath: StreamingTest/Materials/Tile_56_13_Tile_56_13.nmat
     SourceFilePath: StreamingTest/Materials/Tile_56_13_Tile_56_13.nmat
@@ -120215,6 +120615,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 13825711765033097109
+    FilePath: VFX/TornadoVDB/tornado_0021.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0021.vdb
+    Type: AssetType::Volume
   - Handle: 13827219429534627514
     FilePath: StreamingTest/Meshes/Tile_33_19.nsmesh
     Type: AssetType::StaticMesh
@@ -120718,6 +121122,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 13874849978748553001
+    FilePath: VFX/TornadoVDB/tornado_0124.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0124.vdb
+    Type: AssetType::Volume
   - Handle: 13876281994615217928
     FilePath: StreamingTest/Meshes/Tile_21_15.nsmesh
     Type: AssetType::StaticMesh
@@ -122859,6 +123267,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14108457610464768227
+    FilePath: VFX/TornadoVDB/tornado_0121.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0121.vdb
+    Type: AssetType::Volume
   - Handle: 14109058064342675732
     FilePath: StreamingTest/Meshes/Tile_44_79.nsmesh
     Type: AssetType::StaticMesh
@@ -122887,6 +123299,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_22_19_Tile_22_19.nmat
     SourceFilePath: StreamingTest/Materials/Tile_22_19_Tile_22_19.nmat
     Type: AssetType::Material
+  - Handle: 14111719160284611537
+    FilePath: VFX/TornadoVDB/tornado_0028.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0028.vdb
+    Type: AssetType::Volume
   - Handle: 14113511099606642079
     FilePath: StreamingTest/Materials/Tile_65_24_Tile_65_24.nmat
     SourceFilePath: StreamingTest/Materials/Tile_65_24_Tile_65_24.nmat
@@ -123021,6 +123437,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 14128654094427370569
+    FilePath: VFX/TornadoVDB/tornado_0100.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0100.vdb
+    Type: AssetType::Volume
   - Handle: 14128792795708851705
     FilePath: StreamingTest/Meshes/Tile_66_38.nsmesh
     Type: AssetType::StaticMesh
@@ -127201,6 +127621,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 14624785280494489485
+    FilePath: VFX/TornadoVDB/tornado_0065.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0065.vdb
+    Type: AssetType::Volume
   - Handle: 14624836393613997572
     FilePath: StreamingTest/Meshes/Tile_50_31.nsmesh
     Type: AssetType::StaticMesh
@@ -128197,6 +128621,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 14739305413444443795
+    FilePath: VFX/TornadoVDB/tornado_0110.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0110.vdb
+    Type: AssetType::Volume
   - Handle: 14740479123562402658
     FilePath: StreamingTest/Meshes/Tile_59_31.nsmesh
     Type: AssetType::StaticMesh
@@ -130735,6 +131163,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15010943193432770537
+    FilePath: VFX/TornadoVDB/tornado_0116.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0116.vdb
+    Type: AssetType::Volume
   - Handle: 15011508580241376003
     FilePath: Models/bistro/Meshes/subset_2_337.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -131003,6 +131435,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15042237925522940365
+    FilePath: VFX/TornadoVDB/tornado_0066.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0066.vdb
+    Type: AssetType::Volume
   - Handle: 15043918253147144191
     FilePath: StreamingDense/Materials/Tile_7_8_Tile_7_8.nmat
     SourceFilePath: StreamingDense/Materials/Tile_7_8_Tile_7_8.nmat
@@ -131087,6 +131523,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_1_1_Tile_1_1.nmat
     SourceFilePath: StreamingDense/Materials/Tile_1_1_Tile_1_1.nmat
     Type: AssetType::Material
+  - Handle: 15051568758878384097
+    FilePath: VFX/TornadoVDB/tornado_0020.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0020.vdb
+    Type: AssetType::Volume
   - Handle: 15052319596710973799
     FilePath: StreamingTest/Meshes/Tile_80_81.nsmesh
     Type: AssetType::StaticMesh
@@ -131838,6 +132278,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15134651885174468249
+    FilePath: VFX/TornadoVDB/tornado_0013.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0013.vdb
+    Type: AssetType::Volume
   - Handle: 15135348536582603031
     FilePath: StreamingDense/Textures/Tile_11_11.ntex
     Type: AssetType::Texture2D
@@ -131859,6 +132303,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15136901780825263122
+    FilePath: VFX/TornadoVDB/tornado_0045.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0045.vdb
+    Type: AssetType::Volume
   - Handle: 15136925250641934983
     FilePath: Models/bistro/Meshes/subset_2_323.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -132562,6 +133010,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15205541924514219437
+    FilePath: VFX/TornadoVDB/tornado_0082.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0082.vdb
+    Type: AssetType::Volume
   - Handle: 15205954622331653647
     FilePath: StreamingTest/Textures/Tile_16_21.ntex
     Type: AssetType::Texture2D
@@ -135421,6 +135873,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15534658386864292161
+    FilePath: VFX/TornadoVDB/tornado_0044.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0044.vdb
+    Type: AssetType::Volume
   - Handle: 15536053155032319480
     FilePath: StreamingTest/Meshes/Tile_60_48.nsmesh
     Type: AssetType::StaticMesh
@@ -135735,6 +136191,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_9_5_Tile_9_5.nmat
     SourceFilePath: StreamingTest/Materials/Tile_9_5_Tile_9_5.nmat
     Type: AssetType::Material
+  - Handle: 15569212942981812066
+    FilePath: VFX/TornadoVDB/tornado_0092.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0092.vdb
+    Type: AssetType::Volume
   - Handle: 15570318329637783681
     FilePath: StreamingTest/Textures/Tile_7_34.ntex
     Type: AssetType::Texture2D
@@ -136925,6 +137385,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15712927498340661496
+    FilePath: VFX/TornadoVDB/tornado_0032.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0032.vdb
+    Type: AssetType::Volume
   - Handle: 15714220551082038338
     FilePath: StreamingTest/Meshes/Tile_10_53.nsmesh
     Type: AssetType::StaticMesh
@@ -138550,6 +139014,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15880024171354584516
+    FilePath: VFX/TornadoVDB/tornado_0029.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0029.vdb
+    Type: AssetType::Volume
   - Handle: 15880254583581225941
     FilePath: StreamingTest/Textures/Tile_57_37.ntex
     Type: AssetType::Texture2D
@@ -139255,6 +139723,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 15959857208186937020
+    FilePath: VFX/TornadoVDB/tornado_0127.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0127.vdb
+    Type: AssetType::Volume
   - Handle: 15959958183965918208
     FilePath: StreamingTest/Meshes/Tile_63_4.nsmesh
     Type: AssetType::StaticMesh
@@ -139442,6 +139914,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 15974096446123479895
+    FilePath: VFX/TornadoVDB/tornado_0089.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0089.vdb
+    Type: AssetType::Volume
   - Handle: 15975467576379104114
     FilePath: Models/bistro/Meshes/subset_20.nsmesh
     SourceFilePath: Models/bistro/bistro.gltf
@@ -140215,6 +140691,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 16082516567208922939
+    FilePath: VFX/TornadoVDB/tornado_0026.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0026.vdb
+    Type: AssetType::Volume
   - Handle: 16082780511717844727
     FilePath: StreamingTest/Materials/Tile_4_7_Tile_4_7.nmat
     SourceFilePath: StreamingTest/Materials/Tile_4_7_Tile_4_7.nmat
@@ -141249,6 +141729,10 @@ AssetRegistry:
       SourceMeshIndex: 277
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 16197238976310149428
+    FilePath: VFX/TornadoVDB/tornado_0112.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0112.vdb
+    Type: AssetType::Volume
   - Handle: 16200002977686644940
     FilePath: StreamingTest/Textures/Tile_70_19.ntex
     Type: AssetType::Texture2D
@@ -142418,6 +142902,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_43_70_Tile_43_70.nmat
     SourceFilePath: StreamingTest/Materials/Tile_43_70_Tile_43_70.nmat
     Type: AssetType::Material
+  - Handle: 16345864620327395508
+    FilePath: VFX/TornadoVDB/tornado_0091.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0091.vdb
+    Type: AssetType::Volume
   - Handle: 16346376525927235105
     FilePath: StreamingTest/Materials/Tile_14_46_Tile_14_46.nmat
     SourceFilePath: StreamingTest/Materials/Tile_14_46_Tile_14_46.nmat
@@ -145302,6 +145790,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 16663434002438923631
+    FilePath: VFX/TornadoVDB/tornado_0023.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0023.vdb
+    Type: AssetType::Volume
   - Handle: 16667344786043672185
     FilePath: StreamingTest/Meshes/Tile_11_37.nsmesh
     Type: AssetType::StaticMesh
@@ -148894,6 +149386,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 17044739078276118896
+    FilePath: VFX/TornadoVDB/tornado_0070.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0070.vdb
+    Type: AssetType::Volume
   - Handle: 17046278730888557230
     FilePath: StreamingDense/Textures/Tile_3_9.ntex
     Type: AssetType::Texture2D
@@ -149740,6 +150236,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 17149126699822656230
+    FilePath: VFX/TornadoVDB/tornado_0061.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0061.vdb
+    Type: AssetType::Volume
   - Handle: 17150216513840354332
     FilePath: StreamingTest/Meshes/Tile_76_25.nsmesh
     Type: AssetType::StaticMesh
@@ -150698,6 +151198,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_3_4_Tile_3_4.nmat
     SourceFilePath: StreamingTest/Materials/Tile_3_4_Tile_3_4.nmat
     Type: AssetType::Material
+  - Handle: 17255309727464421896
+    FilePath: VFX/TornadoVDB/tornado_0001.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0001.vdb
+    Type: AssetType::Volume
   - Handle: 17255652109683560042
     FilePath: StreamingTest/Meshes/Tile_17_9.nsmesh
     Type: AssetType::StaticMesh
@@ -154976,6 +155480,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17731266830458844087
+    FilePath: VFX/TornadoVDB/tornado_0079.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0079.vdb
+    Type: AssetType::Volume
   - Handle: 17731833912499285057
     FilePath: StreamingTest/Meshes/Tile_3_75.nsmesh
     Type: AssetType::StaticMesh
@@ -159448,6 +159956,10 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 18245681307134492125
+    FilePath: VFX/TornadoVDB/tornado_0041.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0041.vdb
+    Type: AssetType::Volume
   - Handle: 18246669743100258660
     FilePath: StreamingTest/Textures/Tile_66_52.ntex
     Type: AssetType::Texture2D
@@ -159483,6 +159995,10 @@ AssetRegistry:
       SourceMeshIndex: 202
       ImportScale: 100
       MaterialBasePath: Models/bistro/Meshes/bistro.nsmesh
+  - Handle: 18248903500644509331
+    FilePath: VFX/TornadoVDB/tornado_0074.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0074.vdb
+    Type: AssetType::Volume
   - Handle: 18249100339211251643
     FilePath: StreamingTest/Meshes/Tile_81_56.nsmesh
     Type: AssetType::StaticMesh
@@ -160672,6 +161188,10 @@ AssetRegistry:
     FilePath: StreamingDense/Materials/Tile_11_9_Tile_11_9.nmat
     SourceFilePath: StreamingDense/Materials/Tile_11_9_Tile_11_9.nmat
     Type: AssetType::Material
+  - Handle: 18379131074043323870
+    FilePath: VFX/TornadoVDB/tornado_0003.vdb
+    SourceFilePath: VFX/TornadoVDB/tornado_0003.vdb
+    Type: AssetType::Volume
   - Handle: 18379360590350170093
     FilePath: StreamingTest/Textures/Tile_25_20.ntex
     Type: AssetType::Texture2D
