@@ -2416,6 +2416,8 @@ namespace Nox
         // Moved outside the editor (Explorer, version control): an unregistered file while an asset of the same file name and type
         // is registered at a path that no longer exists is that asset, moved -- it keeps its handle, so whatever refers to it (an
         // Animator's graph, a mesh's material) keeps working, as Godot finds a moved resource by its UID. Built on first need.
+        // An imported mesh (a cooked .nsmesh / .nmesh of a .gltf / .vox) moves with its model folder: its source and material base
+        // path move by the same step (a model folder moved into Models/ keeps its mesh -- it used to be left unregistered).
         bool missingBuilt = false;
         std::unordered_map<std::string, std::vector<AssetHandle>> missingByName;
         auto adoptMoved = [&](const std::filesystem::path& relativePath, AssetType type)
@@ -2426,8 +2428,9 @@ namespace Nox
                 for (const auto& [handle, metadata] : m_AssetRegistry)
                 {
                     const bool selfContained = metadata.SourceFilePath.empty() || metadata.SourceFilePath == metadata.FilePath;
+                    const bool importedMesh = !selfContained && (metadata.Type == AssetType::StaticMesh || metadata.Type == AssetType::Mesh);
                     std::error_code missingError;
-                    if (selfContained && !metadata.FilePath.empty() && !std::filesystem::exists(assetDir / metadata.FilePath, missingError))
+                    if ((selfContained || importedMesh) && !metadata.FilePath.empty() && !std::filesystem::exists(assetDir / metadata.FilePath, missingError))
                         missingByName[metadata.FilePath.filename().generic_string()].push_back(handle);
                 }
             }
@@ -2447,13 +2450,56 @@ namespace Nox
                 return false;
 
             AssetMetadata& metadata = m_AssetRegistry.at(match);
+            const bool imported = !metadata.SourceFilePath.empty() && metadata.SourceFilePath != metadata.FilePath;
             m_HandleByPath.erase(metadata.FilePath.lexically_normal().generic_string());
             if (std::find(metadata.FormerPaths.begin(), metadata.FormerPaths.end(), metadata.FilePath) == metadata.FormerPaths.end())
                 metadata.FormerPaths.push_back(metadata.FilePath);
             NOX_CORE_INFO("[EditorAssetManager] '{}' was moved to '{}' outside the editor: it keeps its asset handle",
                           metadata.FilePath.generic_string(), relativePath.generic_string());
-            metadata.FilePath = relativePath;
-            metadata.SourceFilePath = relativePath;
+            if (imported)
+            {
+                // The step of the move: the folders before the part both paths end in (chr_knight/Meshes/x.nsmesh ->
+                // Models/chr_knight/Meshes/x.nsmesh: "" -> "Models"), applied to the source and the material base.
+                const std::filesystem::path oldPath = metadata.FilePath.lexically_normal();
+                std::vector<std::filesystem::path> from(oldPath.begin(), oldPath.end());
+                std::vector<std::filesystem::path> to(relativePath.begin(), relativePath.end());
+                while (!from.empty() && !to.empty() && from.back() == to.back())
+                {
+                    from.pop_back();
+                    to.pop_back();
+                }
+                auto rebase = [&](const std::filesystem::path& path) -> std::filesystem::path
+                {
+                    const std::filesystem::path normal = path.lexically_normal();
+                    std::vector<std::filesystem::path> parts(normal.begin(), normal.end());
+                    if (parts.size() < from.size() || !std::equal(from.begin(), from.end(), parts.begin()))
+                        return path;
+                    std::filesystem::path result;
+                    for (const std::filesystem::path& part : to)
+                        result /= part;
+                    for (size_t i = from.size(); i < parts.size(); ++i)
+                        result /= parts[i];
+                    return result;
+                };
+                const std::filesystem::path movedSource = rebase(metadata.SourceFilePath);
+                std::error_code sourceError;
+                if (movedSource != metadata.SourceFilePath && std::filesystem::exists(assetDir / movedSource, sourceError))
+                {
+                    if (const auto old = m_HandleByPath.find(metadata.SourceFilePath.lexically_normal().generic_string());
+                        old != m_HandleByPath.end() && old->second == match)
+                        m_HandleByPath.erase(old);
+                    NOX_CORE_INFO("[EditorAssetManager] its source '{}' moved to '{}'", metadata.SourceFilePath.generic_string(), movedSource.generic_string());
+                    metadata.SourceFilePath = movedSource;
+                }
+                if (!metadata.MeshSettings.MaterialBasePath.empty())
+                    metadata.MeshSettings.MaterialBasePath = rebase(metadata.MeshSettings.MaterialBasePath);
+                metadata.FilePath = relativePath;
+            }
+            else
+            {
+                metadata.FilePath = relativePath;
+                metadata.SourceFilePath = relativePath;
+            }
             IndexPath(match, metadata);
             std::erase(found->second, match);
             return true;
@@ -2492,6 +2538,17 @@ namespace Nox
                     IndexPath(newHandle, metadata);
                     registryChanged = true;
                     NOX_CORE_INFO("[EditorAssetManager] Auto-registered newly discovered asset: {}", relativePath.string());
+                }
+            }
+            else if (ext == ".nsmesh" || ext == ".nmesh")
+            {
+                // A cooked mesh is registered by its import; an unregistered one here can only be a moved one (above). Anything else
+                // (a cook in progress whose split import is not published yet) is left to its import.
+                const std::filesystem::path relativePath = entry.path().lexically_relative(assetDir).lexically_normal();
+                if (!registeredPaths.contains(relativePath.generic_string()) && adoptMoved(relativePath, GetAssetTypeFromExtension(ext)))
+                {
+                    registeredPaths.insert(relativePath.generic_string());
+                    registryChanged = true;
                 }
             }
         }

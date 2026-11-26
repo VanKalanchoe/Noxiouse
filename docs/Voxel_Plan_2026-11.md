@@ -186,6 +186,9 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - **After the user's first test (2026-11-26):** dragging a `.vox` onto the Content Browser did nothing -- a file dropped from the
   system (and one picked in the file dialog) arrives between frames, when no NoxUI context is current, and the import dialog returned
   silently (glTF drops too, since the NoxUI editor). It now opens in the UI layer's context, as the editor's other event dialogs.
+- **Second test:** the knight's folder moved into `Models/` in Explorer kept its material and textures but lost its mesh (not listed):
+  the move detection (`ScanAndRegisterNewAssets`, the Content Browser's Refresh) adopted only self-contained files. It now adopts a
+  moved cooked mesh too and moves its source (`.vox` / `.gltf`) and material base path by the same step -- glTF model folders too.
 - Tests: `Tests/VoxTests.inl` (NoxToolsTest, 31 checks, also compiled standalone with ASan / UBSan here); the 44 files of
   github.com/ephtracy/voxel-model and the 15 sample files of MagicaVoxel 0.99.7 read and meshed with closed surfaces. Not run here:
   the cook inside the engine, the editor dialog, rendering (no GPU in the cloud container) -- the user's test.

@@ -185,6 +185,8 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   the old cook, glTF too); `ReimportAsset` no longer deletes a `.ntex` that is its own source; NoxToolsTest compiles again (`fresnel`
   declared twice). Offline: `Tests/VoxTests.inl` 31 checks; 59 real `.vox` files read and meshed closed. After the user's first test:
   dropping a file from the system onto the editor opened no import dialog (no UI context current between frames; glTF too) -- fixed.
+  Second test: a model folder moved in Explorer lost its mesh from the Content Browser (move detection adopted only self-contained
+  files) -- moved cooked meshes are adopted now, their source and material base move with them (glTF too).
 
 - 2026-11-12 (waiting for the user's test): **Project Manager** (`NoxEditor/src/ProjectManager/`): the editor opens with it when no
   project is given -- recent projects (+ the Facerun sample), New Project (name, location, world units, render quality, C# scripts

@@ -593,6 +593,7 @@ window.NOX_MANUAL_PAGES = [
             "",
             "- **\"Not imported -- ... has no visible voxels or cannot be read\"** when the window should open: the file is not a MagicaVoxel file, is cut off, or everything in it is hidden. **NoxEditor:** open **Window > Output Log** and type `VoxImporter` in its search box: the line says why (e.g. *\"a chunk (XYZI) is larger than the file (truncated?)\"*).",
             "- **Dragging the file onto the editor does nothing:** fixed on 2026-11-26 (the import window could not open from a drop -- glTF files too). Rebuild NoxEditor; until then use the Content Browser's **Import** button.",
+            "- **I moved the model's folder in Explorer and the mesh is gone from the Content Browser** (the material and textures are there): fixed on 2026-11-26 -- rebuild NoxEditor, then right-click empty space in the Content Browser > **Refresh**: the mesh is found at its new place and keeps working (its `.vox` moves with it).",
             "- **The model lies on its side or is mirrored:** please report it with the file -- the axis turn was checked against MagicaVoxel's file rules, not yet on every kind of file.",
             "- **Lamps do not glow enough / too much:** change **Emissive Strength** on `<file>_Palette` (Material Editor).",
             "- **Glass looks solid:** the entry's transparency in MagicaVoxel is low (the glass is only as see-through as that). Raise it in MagicaVoxel and save.",
