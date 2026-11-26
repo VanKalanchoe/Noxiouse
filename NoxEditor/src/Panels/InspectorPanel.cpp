@@ -21,6 +21,7 @@
 #include "NoxCore/Asset/EditorAssetManager.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/MaterialSerializer.h"
+#include "NoxCore/Asset/VfxAsset.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/MaterialGraph.h"
@@ -2818,6 +2819,205 @@ namespace Nox
                      });
         }
 
+        if (entity.HasComponent<LocalFogVolumeComponent>())
+        {
+            makeCard("Local Fog Volume", true,
+                     [entity]() mutable { entity.GetComponent<LocalFogVolumeComponent>() = LocalFogVolumeComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<LocalFogVolumeComponent>(); },
+                     [entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<LocalFogVolumeComponent>();
+                         c.AddBool("Enabled", &comp.Enabled);
+                         c.AddEnum("Shape", { "Box", "Sphere", "Cylinder" }, static_cast<int>(comp.Shape),
+                             [&comp](int i) { comp.Shape = static_cast<LocalFogShape>(i); });
+                         c.AddVec3("Extents (m)", &comp.Extents, 0.1f);
+                         c.AddFloat("Density", &comp.Density, 0.02f, 0.0f, 10.0f);
+                         c.AddColor3("Albedo", &comp.Albedo);
+                         c.AddColor3("Emissive Color", &comp.EmissiveColor);
+                         c.AddFloat("Emissive Intensity", &comp.EmissiveIntensity, 0.05f, 0.0f, 50.0f);
+                         c.AddFloat("Edge Falloff", &comp.EdgeFalloff, 0.02f, 0.01f, 1.0f);
+                         c.AddFloat("Noise Strength", &comp.NoiseStrength, 0.02f, 0.0f, 1.0f);
+                         c.AddFloat("Noise Scale", &comp.NoiseScale, 0.05f, 0.01f, 10.0f);
+                         c.AddFloat("Noise Speed", &comp.NoiseSpeed, 0.05f, 0.0f, 10.0f);
+                     });
+        }
+
+        if (entity.HasComponent<VfxComponent>())
+        {
+            makeCard("VFX System", true,
+                     [entity]() mutable { entity.GetComponent<VfxComponent>() = VfxComponent{}; },
+                     [entity]() mutable { entity.RemoveComponent<VfxComponent>(); },
+                     [this, entity](CardBuilder& c) mutable
+                     {
+                         auto& comp = entity.GetComponent<VfxComponent>();
+                         c.AddAssetSlot("VFX Asset (.nvfx)", comp.Vfx, { AssetType::Vfx },
+                             [this, &comp](AssetHandle h)
+                             {
+                                 comp.Vfx = h;
+                                 comp.Runtime.NeedsRestart = true;
+                                 NotifyMutated(true);
+                             });
+                         c.AddBool("Playing", &comp.Playing);
+                         c.AddBool("Looping", &comp.Looping);
+                         c.AddFloat("Playback Speed", &comp.PlaybackSpeed, 0.05f, 0.0f, 10.0f);
+                         c.AddFloat("Scale", &comp.Scale, 0.05f, 0.01f, 100.0f);
+                         c.AddColor4("Color Tint", &comp.ColorTint);
+
+                         auto ctrlRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                         ctrlRow->WidthMode = NoxUI::UISizeMode::Fill;
+                         auto restartBtn = NoxUI::Button("Restart", [&comp]()
+                         {
+                             comp.Playing = true;
+                             comp.Runtime.NeedsRestart = true;
+                         });
+                         restartBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                         ctrlRow->AddChild(restartBtn);
+
+                         VfxAsset* asset = comp.Vfx != 0
+                             ? const_cast<VfxAsset*>(AssetManager::FindLoadedAsset<VfxAsset>(comp.Vfx))
+                             : nullptr;
+                         if (asset)
+                         {
+                             auto saveBtn = NoxUI::Button("Save .nvfx", [asset, handle = comp.Vfx]()
+                             {
+                                 std::filesystem::path savePath = asset->FilePath;
+                                 if (savePath.empty() && Project::GetActive())
+                                 {
+                                     if (auto mgr = Project::GetActive()->GetEditorAssetManager())
+                                     {
+                                         const AssetMetadata& meta = mgr->GetMetadata(handle);
+                                         if (!meta.FilePath.empty())
+                                             savePath = Project::GetAssetFileSystemPath(meta.FilePath);
+                                     }
+                                 }
+                                 if (!savePath.empty())
+                                     asset->Save(savePath);
+                             });
+                             saveBtn->Padding = NoxUI::UIThickness::Symmetric(8.0f, 4.0f);
+                             ctrlRow->AddChild(saveBtn);
+                         }
+                         c.AddRow("Playback", ctrlRow);
+
+                         if (asset)
+                         {
+                             auto presetRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                             presetRow->WidthMode = NoxUI::UISizeMode::Fill;
+                             for (const char* presetName : { "Teleport", "Fireball", "Lightning" })
+                             {
+                                 auto btn = NoxUI::Button(presetName, [this, asset, &comp, name = std::string(presetName)]()
+                                 {
+                                     asset->LoadPreset(name);
+                                     comp.Playing = true;
+                                     comp.Runtime.NeedsRestart = true;
+                                     NotifyMutated(true);
+                                 });
+                                 btn->Padding = NoxUI::UIThickness::Symmetric(6.0f, 3.0f);
+                                 presetRow->AddChild(btn);
+                             }
+                             c.AddRow("Load Preset", presetRow);
+
+                             c.AddFloat("Duration (s)", &asset->Duration, 0.1f, 0.0f, 60.0f);
+
+                             static const char* layerTypeNames[] = {
+                                 "Particles", "Trail", "Beam", "Decal", "Distortion", "Volume", "LocalFog", "PointLight"
+                             };
+
+                             auto addLayerRow1 = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 3.0f);
+                             addLayerRow1->WidthMode = NoxUI::UISizeMode::Fill;
+                             auto addLayerRow2 = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 3.0f);
+                             addLayerRow2->WidthMode = NoxUI::UISizeMode::Fill;
+                             for (int lt = 0; lt < 8; ++lt)
+                             {
+                                 auto addBtn = NoxUI::Button(std::string("+") + layerTypeNames[lt], [this, asset, &comp, lt]()
+                                 {
+                                     VfxLayer nl{};
+                                     nl.Name = std::string(layerTypeNames[lt]) + " " + std::to_string(asset->Layers.size() + 1);
+                                     nl.Type = static_cast<VfxLayerType>(lt);
+                                     nl.Enabled = true;
+                                     asset->Layers.push_back(std::move(nl));
+                                     comp.Runtime.NeedsRestart = true;
+                                     NotifyMutated(true);
+                                 });
+                                 addBtn->Padding = NoxUI::UIThickness::Symmetric(4.0f, 2.0f);
+                                 (lt < 4 ? addLayerRow1 : addLayerRow2)->AddChild(addBtn);
+                             }
+                             c.AddRow("Add Layer", addLayerRow1);
+                             c.AddRow("", addLayerRow2);
+
+                             for (size_t i = 0; i < asset->Layers.size(); ++i)
+                             {
+                                 VfxLayer& layer = asset->Layers[i];
+                                 const int tIdx = std::clamp(static_cast<int>(layer.Type), 0, 7);
+                                 auto headerRow = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
+                                 headerRow->WidthMode = NoxUI::UISizeMode::Fill;
+
+                                 auto enBox = NoxUI::MakeUI<NoxUI::UICheckBox>("", layer.Enabled);
+                                 enBox->OnChanged = [&layer](bool v) { layer.Enabled = v; };
+                                 headerRow->AddChild(enBox);
+
+                                 auto titleLbl = NoxUI::MakeUI<NoxUI::UILabel>(layer.Name + " [" + layerTypeNames[tIdx] + "]");
+                                 titleLbl->WidthMode = NoxUI::UISizeMode::Fill;
+                                 titleLbl->FlexWeight = 1.0f;
+                                 headerRow->AddChild(titleLbl);
+
+                                 auto delBtn = NoxUI::Button("x", [this, asset, &comp, i]()
+                                 {
+                                     if (i < asset->Layers.size())
+                                         asset->Layers.erase(asset->Layers.begin() + static_cast<ptrdiff_t>(i));
+                                     comp.Runtime.NeedsRestart = true;
+                                     NotifyMutated(true);
+                                 });
+                                 delBtn->WidthMode = NoxUI::UISizeMode::Fixed;
+                                 delBtn->HeightMode = NoxUI::UISizeMode::Fixed;
+                                 delBtn->FixedSize = { 22.0f, 22.0f };
+                                 delBtn->Padding = NoxUI::UIThickness::All(0.0f);
+                                 headerRow->AddChild(delBtn);
+                                 c.Body->AddChild(headerRow);
+
+                                 // Compact key controls per layer type
+                                 switch (layer.Type)
+                                 {
+                                 case VfxLayerType::Particles:
+                                     c.AddFloat("  Rate", &layer.Particle.SpawnRate, 1.0f, 0.0f, 100000.0f);
+                                     c.AddFloat("  Intensity", &layer.Particle.Intensity, 0.1f, 0.0f, 50.0f);
+                                     c.AddColor4("  Color Start", &layer.Particle.ColorStart);
+                                     break;
+                                 case VfxLayerType::Trail:
+                                     c.AddFloat("  Width", &layer.Trail.WidthStart, 0.02f, 0.01f, 10.0f);
+                                     c.AddFloat("  Intensity", &layer.Trail.Intensity, 0.1f, 0.0f, 50.0f);
+                                     break;
+                                 case VfxLayerType::Beam:
+                                     c.AddVec3("  Target Offset", &layer.Beam.TargetOffset, 0.1f);
+                                     c.AddFloat("  Noise Amp", &layer.Beam.NoiseAmplitude, 0.02f, 0.0f, 5.0f);
+                                     c.AddFloat("  Intensity", &layer.Beam.Intensity, 0.2f, 0.0f, 50.0f);
+                                     break;
+                                 case VfxLayerType::Decal:
+                                     c.AddVec3("  Size (m)", &layer.Decal.Size, 0.1f);
+                                     c.AddFloat("  Emissive", &layer.Decal.EmissiveIntensity, 0.1f, 0.0f, 50.0f);
+                                     break;
+                                 case VfxLayerType::Distortion:
+                                     c.AddFloat("  Radius (m)", &layer.Distortion.Radius, 0.05f, 0.05f, 50.0f);
+                                     c.AddFloat("  Strength", &layer.Distortion.Strength, 0.005f, 0.0f, 0.5f);
+                                     break;
+                                 case VfxLayerType::Volume:
+                                     c.AddFloat("  Density", &layer.Volume.DensityScale, 0.1f, 0.0f, 50.0f);
+                                     c.AddFloat("  Emission", &layer.Volume.EmissionScale, 0.1f, 0.0f, 50.0f);
+                                     break;
+                                 case VfxLayerType::LocalFog:
+                                     c.AddFloat("  Density", &layer.LocalFog.Density, 0.02f, 0.0f, 10.0f);
+                                     c.AddFloat("  Emissive", &layer.LocalFog.EmissiveIntensity, 0.05f, 0.0f, 50.0f);
+                                     break;
+                                 case VfxLayerType::PointLight:
+                                     c.AddColor3("  Color", &layer.Light.Color);
+                                     c.AddFloat("  Intensity", &layer.Light.Intensity, 0.5f, 0.0f, 500.0f);
+                                     c.AddFloat("  Radius (m)", &layer.Light.Radius, 0.2f, 0.1f, 100.0f);
+                                     break;
+                                 }
+                             }
+                         }
+                     });
+        }
+
         if (entity.HasComponent<TextComponent>())
         {
             makeCard("Text Renderer", true,
@@ -2917,6 +3117,8 @@ namespace Nox
             addEntry.template operator()<DecalComponent>("Projected Decal"),
             addEntry.template operator()<DistortionComponent>("Screen-Space Distortion"),
             addEntry.template operator()<VolumeComponent>("Heterogeneous Volume"),
+            addEntry.template operator()<LocalFogVolumeComponent>("Local Fog Volume"),
+            addEntry.template operator()<VfxComponent>("VFX System"),
             addEntry.template operator()<TextComponent>("Text Renderer"),
             addEntry.template operator()<PostProcessVolumeComponent>("Post Process Volume")
         };

@@ -26,13 +26,20 @@ namespace Nox
         m_volumetricFogIntegratePipeline = m_device.createPipeline(desc, m_shaderCompiler.handle());
     }
 
+    void Renderer::SubmitLocalFogVolume(const shaderio::GpuLocalFogVolume& volume)
+    {
+        m_localFogVolumes.push_back(volume);
+    }
+
     void Renderer::addVolumetricFogPass()
     {
         uniformData.volumetricFogTextureIndex = 0xFFFFFFFF;
         uniformData.volumetricFogSlices = 0;
         uniformData.volumetricFogDistance = 0.0f;
         const bool pathTracing = m_pathTracingEnabled || m_debugMode == 18 || m_debugMode == 19;
-        if (!m_volumetricFog || pathTracing || uniformData.heightFogDensity <= 0.0f || !m_volumetricFogLightPipeline || !m_volumetricFogIntegratePipeline)
+        const bool hasLocalFog = !m_localFogVolumes.empty();
+        if ((!m_volumetricFog && !hasLocalFog) || pathTracing || (uniformData.heightFogDensity <= 0.0f && !hasLocalFog) ||
+            !m_volumetricFogLightPipeline || !m_volumetricFogIntegratePipeline)
         {
             m_fogHistoryValid = false;
             return;
@@ -97,6 +104,39 @@ namespace Nox
         push.jitter = static_cast<float>(std::fmod(static_cast<double>(m_sceneFrameCounter) * 0.6180339887498949, 1.0));
         push.albedo = m_volumetricFogAlbedo;
         push.localLights = m_volumetricFogLocalLights ? 1u : 0u;
+        push.localFogVolumesReference = 0ull;
+        push.localFogVolumeCount = 0u;
+        if (hasLocalFog)
+        {
+            const uint64_t required = sizeof(shaderio::GpuLocalFogVolume) * m_localFogVolumes.size();
+            if (required > m_localFogVolumeBufferCapacity || m_localFogVolumeBuffers.size() != MAX_FRAMES_IN_FLIGHT)
+            {
+                for (auto& old : m_localFogVolumeBuffers)
+                {
+                    if (old)
+                    {
+                        releaseBufferRefs(old.handle());
+                        std::scoped_lock lock(m_deferredReleasesMutex);
+                        m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(old) });
+                    }
+                }
+                m_localFogVolumeBuffers.clear();
+                m_localFogVolumeBuffersMapped.clear();
+                m_localFogVolumeBufferCapacity = std::max<uint64_t>(required * 2, sizeof(shaderio::GpuLocalFogVolume) * 32);
+                for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot)
+                {
+                    nri::Buffer buf = m_device.createBuffer(nri::BufferDesc{
+                        .size = m_localFogVolumeBufferCapacity,
+                        .usage = NRI_BUFFER_USAGE_UNIFORM
+                    });
+                    m_localFogVolumeBuffersMapped.push_back(buf.map(0, m_localFogVolumeBufferCapacity));
+                    m_localFogVolumeBuffers.push_back(std::move(buf));
+                }
+            }
+            std::memcpy(m_localFogVolumeBuffersMapped[frameIndex], m_localFogVolumes.data(), required);
+            push.localFogVolumesReference = bufferReadRef(m_localFogVolumeBuffers[frameIndex]);
+            push.localFogVolumeCount = static_cast<uint32_t>(m_localFogVolumes.size());
+        }
         m_fogHistoryIndex = writeIndex;
         m_fogHistoryValid = true;
 

@@ -1197,6 +1197,40 @@ namespace Nox
             out << YAML::EndMap;
         }
 
+        if (entity.HasComponent<LocalFogVolumeComponent>())
+        {
+            static const char* shapeNames[] = { "Box", "Sphere", "Cylinder" };
+            const auto& fog = entity.GetComponent<LocalFogVolumeComponent>();
+            out << YAML::Key << "LocalFogVolumeComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Enabled" << YAML::Value << fog.Enabled;
+            out << YAML::Key << "Shape" << YAML::Value << shapeNames[static_cast<int>(fog.Shape)];
+            out << YAML::Key << "Extents" << YAML::Value << fog.Extents;
+            out << YAML::Key << "Density" << YAML::Value << fog.Density;
+            out << YAML::Key << "Albedo" << YAML::Value << fog.Albedo;
+            out << YAML::Key << "EmissiveColor" << YAML::Value << fog.EmissiveColor;
+            out << YAML::Key << "EmissiveIntensity" << YAML::Value << fog.EmissiveIntensity;
+            out << YAML::Key << "EdgeFalloff" << YAML::Value << fog.EdgeFalloff;
+            out << YAML::Key << "NoiseStrength" << YAML::Value << fog.NoiseStrength;
+            out << YAML::Key << "NoiseScale" << YAML::Value << fog.NoiseScale;
+            out << YAML::Key << "NoiseSpeed" << YAML::Value << fog.NoiseSpeed;
+            out << YAML::EndMap;
+        }
+
+        if (entity.HasComponent<VfxComponent>())
+        {
+            const auto& vfx = entity.GetComponent<VfxComponent>();
+            out << YAML::Key << "VfxComponent";
+            out << YAML::BeginMap;
+            out << YAML::Key << "Vfx" << YAML::Value << vfx.Vfx;
+            out << YAML::Key << "Playing" << YAML::Value << vfx.Playing;
+            out << YAML::Key << "Looping" << YAML::Value << vfx.Looping;
+            out << YAML::Key << "PlaybackSpeed" << YAML::Value << vfx.PlaybackSpeed;
+            out << YAML::Key << "Scale" << YAML::Value << vfx.Scale;
+            out << YAML::Key << "ColorTint" << YAML::Value << vfx.ColorTint;
+            out << YAML::EndMap;
+        }
+
         if (entity.HasComponent<CameraComponent>())
         {
             out << YAML::Key << "CameraComponent";
@@ -3014,6 +3048,41 @@ namespace Nox
             read("StepCount", vol.StepCount);
             read("ShadowSteps", vol.ShadowSteps);
             read("BoundsScale", vol.BoundsScale);
+        }
+
+        if (auto fogNode = entity["LocalFogVolumeComponent"])
+        {
+            auto& fog = deserializedEntity.AddComponent<LocalFogVolumeComponent>();
+            auto read = [&](const char* key, auto& val) { if (fogNode[key]) val = fogNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Enabled", fog.Enabled);
+            if (fogNode["Shape"])
+            {
+                const std::string s = fogNode["Shape"].as<std::string>();
+                fog.Shape = s == "Box" ? LocalFogShape::Box
+                          : s == "Cylinder" ? LocalFogShape::Cylinder
+                          : LocalFogShape::Sphere;
+            }
+            read("Extents", fog.Extents);
+            read("Density", fog.Density);
+            read("Albedo", fog.Albedo);
+            read("EmissiveColor", fog.EmissiveColor);
+            read("EmissiveIntensity", fog.EmissiveIntensity);
+            read("EdgeFalloff", fog.EdgeFalloff);
+            read("NoiseStrength", fog.NoiseStrength);
+            read("NoiseScale", fog.NoiseScale);
+            read("NoiseSpeed", fog.NoiseSpeed);
+        }
+
+        if (auto vfxNode = entity["VfxComponent"])
+        {
+            auto& vfx = deserializedEntity.AddComponent<VfxComponent>();
+            auto read = [&](const char* key, auto& val) { if (vfxNode[key]) val = vfxNode[key].as<std::remove_reference_t<decltype(val)>>(); };
+            read("Vfx", vfx.Vfx);
+            read("Playing", vfx.Playing);
+            read("Looping", vfx.Looping);
+            read("PlaybackSpeed", vfx.PlaybackSpeed);
+            read("Scale", vfx.Scale);
+            read("ColorTint", vfx.ColorTint);
         }
 
         auto animatorComponent = entity["AnimatorComponent"];

@@ -6543,6 +6543,7 @@ namespace Nox
         m_vfxDecals.clear();
         m_vfxDistortions.clear();
         m_vfxVolumeSubmissions.clear();
+        m_localFogVolumes.clear();
     }
 
     void Renderer::updateSceneAccelerationStructure(uint32_t currentFrameIndex)

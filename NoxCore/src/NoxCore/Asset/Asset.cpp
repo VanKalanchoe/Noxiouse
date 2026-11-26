@@ -29,6 +29,7 @@ namespace Nox
         case AssetType::MaterialShader: return "AssetType::MaterialShader";
         case AssetType::MaterialGraph: return "AssetType::MaterialGraph";
         case AssetType::Volume: return "AssetType::Volume";
+        case AssetType::Vfx: return "AssetType::Vfx";
         }
 
         return "AssetType::<Invalid>";
@@ -59,6 +60,7 @@ namespace Nox
         if (assetType == "AssetType::MaterialShader") return AssetType::MaterialShader;
         if (assetType == "AssetType::MaterialGraph") return AssetType::MaterialGraph;
         if (assetType == "AssetType::Volume") return AssetType::Volume;
+        if (assetType == "AssetType::Vfx") return AssetType::Vfx;
 
         return AssetType::None;
     }

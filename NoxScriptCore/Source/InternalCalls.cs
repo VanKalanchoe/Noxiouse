@@ -72,6 +72,15 @@ internal static unsafe class InternalCalls
     private static delegate*<ulong, void> Particles_Stop;
     private static delegate*<ulong, int, void> Particles_Emit;
     private static delegate*<ulong, uint> Particles_IsEmitting;
+    private static delegate*<ulong, uint, void> Vfx_Play;
+    private static delegate*<ulong, void> Vfx_Stop;
+    private static delegate*<ulong, uint> Vfx_IsPlaying;
+    private static delegate*<ulong, float> Vfx_GetScale;
+    private static delegate*<ulong, float, void> Vfx_SetScale;
+    private static delegate*<ulong, float, float, float, float, void> Vfx_SetColorTint;
+    private static delegate*<ulong, NativeString, float, void> Vfx_SetFloat;
+    private static delegate*<ulong, NativeString, float, float, float, void> Vfx_SetVec3;
+    private static delegate*<ulong, NativeString, float, float, float, float, void> Vfx_SetColor;
     private static delegate*<ulong, NativeString, float, void> Mesh_SetMorphWeight;
     private static delegate*<ulong, NativeString, float> Mesh_GetMorphWeight;
     private static delegate*<ulong, NativeString, void> Mesh_ClearMorphWeight;
@@ -459,6 +468,31 @@ internal static unsafe class InternalCalls
     internal static bool IsEmittingParticles(ulong entityID) => Particles_IsEmitting(entityID) != 0;
 
     internal static int GetParticleCount(ulong entityID) => Particles_GetCount(entityID);
+
+    internal static void PlayVfx(ulong entityID, bool restart) => Vfx_Play(entityID, restart ? 1u : 0u);
+    internal static void StopVfx(ulong entityID) => Vfx_Stop(entityID);
+    internal static bool IsVfxPlaying(ulong entityID) => Vfx_IsPlaying(entityID) != 0;
+    internal static float GetVfxScale(ulong entityID) => Vfx_GetScale(entityID);
+    internal static void SetVfxScale(ulong entityID, float scale) => Vfx_SetScale(entityID, scale);
+    internal static void SetVfxColorTint(ulong entityID, float r, float g, float b, float a) => Vfx_SetColorTint(entityID, r, g, b, a);
+
+    internal static void SetVfxFloat(ulong entityID, string name, float value)
+    {
+        using NativeString nativeName = new(name);
+        Vfx_SetFloat(entityID, nativeName, value);
+    }
+
+    internal static void SetVfxVec3(ulong entityID, string name, Vector3 value)
+    {
+        using NativeString nativeName = new(name);
+        Vfx_SetVec3(entityID, nativeName, value.X, value.Y, value.Z);
+    }
+
+    internal static void SetVfxColor(ulong entityID, string name, float r, float g, float b, float a)
+    {
+        using NativeString nativeName = new(name);
+        Vfx_SetColor(entityID, nativeName, r, g, b, a);
+    }
 
     internal static void PlayOneShot(string clipPath, Vector3d position, float volume, bool spatial, string bus)
     {

@@ -995,6 +995,65 @@ namespace Nox
         VolumeComponent(const VolumeComponent&) = default;
     };
 
+    enum class LocalFogShape : uint8_t
+    {
+        Box      = 0,
+        Sphere   = 1,
+        Cylinder = 2
+    };
+
+    // Local Volumetric Fog Volume (docs/VFX_And_Volumes_Plan_2026-11.md step N3):
+    // Injected directly into VolumetricFog.slang froxels (catches real sun shafts, point/spot lights & sky IBL)
+    // for glowing magic mist, portal auras, and dungeon fog.
+    struct LocalFogVolumeComponent
+    {
+        bool Enabled = true;
+        LocalFogShape Shape = LocalFogShape::Sphere;
+        glm::vec3 Extents{ 3.0f, 2.0f, 3.0f };     // meters (half-extents / radius)
+        float Density = 0.25f;                      // extinction per meter
+        glm::vec3 Albedo{ 0.75f, 0.85f, 1.0f };     // scattering tint
+        glm::vec3 EmissiveColor{ 0.15f, 0.55f, 1.0f }; // self-lit magic mist / portal glow
+        float EmissiveIntensity = 0.0f;             // HDR glow (0 = purely lit by scene lights)
+        float EdgeFalloff = 0.45f;                  // 0..1 smooth edge feathering
+        float NoiseStrength = 0.5f;                 // 0..1 animated 3D mist turbulence
+        float NoiseScale = 0.5f;                    // cycles per meter
+        float NoiseSpeed = 0.4f;                    // animation speed
+
+        LocalFogVolumeComponent() = default;
+        LocalFogVolumeComponent(const LocalFogVolumeComponent&) = default;
+    };
+
+    // Runtime state for a VfxComponent instance (not serialized).
+    struct VfxRuntimeState
+    {
+        float Time = 0.0f;
+        bool NeedsRestart = false;
+        std::vector<ParticleSimulation> ParticleSims;
+        std::vector<TrailSimulation> TrailSims;
+        std::vector<float> LayerTimes;
+        std::unordered_map<std::string, float> FloatParams;
+        std::unordered_map<std::string, glm::vec3> Vec3Params;
+        std::unordered_map<std::string, glm::vec4> ColorParams;
+    };
+
+    // Unified Multi-Layer VFX Component (.nvfx, docs/VFX_And_Volumes_Plan_2026-11.md step V4).
+    // Plays a reusable VfxAsset containing any combination of GPU particles, ribbons/trails,
+    // lightning beams, projected decals, screen-space distortion, heterogeneous volumes,
+    // local volumetric fog, and dynamic point lights.
+    struct VfxComponent
+    {
+        AssetHandle Vfx = 0;
+        bool Playing = true;
+        bool Looping = true;
+        float PlaybackSpeed = 1.0f;
+        float Scale = 1.0f;
+        glm::vec4 ColorTint{ 1.0f, 1.0f, 1.0f, 1.0f };
+        VfxRuntimeState Runtime;
+
+        VfxComponent() = default;
+        VfxComponent(const VfxComponent&) = default;
+    };
+
     struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -1455,7 +1514,7 @@ namespace Nox
     using AllComponents = 
         ComponentGroup<TransformComponent, WorldTransformComponent, RelationshipComponent, DirtyTransformComponent, FolderComponent,
         MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, ModelNodeComponent, PrefabInstanceComponent, PrefabNodeComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent,
-        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, SpriteRendererComponent,
+        TimelinePlayerComponent, AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, LocalFogVolumeComponent, VfxComponent, SpriteRendererComponent,
             CircleRendererComponent, CameraComponent, ScriptComponent,
             /*NativeScriptComponent,*/ RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent,

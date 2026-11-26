@@ -144,6 +144,7 @@ namespace Nox
         void CreateGraph(int kind); // 0 animation, 1 audio, 2 material
         void CreateMaterialShader();
         void CreateTimeline();
+        void CreateVfx();
         void CreateScript();
         void OpenModelImportDialog(const std::filesystem::path& relativeSource, const std::filesystem::path& externalSource);
         void ShowInExplorer(const std::filesystem::path& absolutePath);

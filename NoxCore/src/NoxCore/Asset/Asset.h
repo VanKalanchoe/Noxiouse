@@ -45,7 +45,9 @@ namespace Nox
         MaterialGraph, // NodeGraph/NodeGraphAsset.h wrapping a NodeGraph whose Domain is "MaterialGraph" (.nmatgraph): a surface built from
                        // nodes (Renderer/MaterialGraph.h), used by materials (MaterialData::SurfaceGraph)
 
-        Volume // Asset/VolumeAsset.h: cooked sparse/FP16 heterogeneous volume or animated sequence (.nvdb, cooked from OpenVDB .vdb)
+        Volume, // Asset/VolumeAsset.h: cooked sparse/FP16 heterogeneous volume or animated sequence (.nvdb, cooked from OpenVDB .vdb)
+
+        Vfx // Asset/VfxAsset.h: unified multi-layer GPU VFX system (.nvfx) combining particles, meshes, trails, beams, decals, distortion, volumes & lights
     };
 
     // Where an asset is on its way into memory (§5.11.2). A request starts the load once; the asset is usable when Ready.

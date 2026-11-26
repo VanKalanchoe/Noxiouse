@@ -353,6 +353,14 @@ namespace Nox
         volume.shaders.push_back({ NRI_SHADER_STAGE_VERTEX, "vertMain", "assets/shaders/HeterogeneousVolume.slang" });
         volume.shaders.push_back({ NRI_SHADER_STAGE_FRAGMENT, "fragMain", "assets/shaders/HeterogeneousVolume.slang" });
         m_vfxVolumePipeline = m_device.createPipeline(volume, m_shaderCompiler.handle());
+
+        nri::PipelineDesc volumeComp{};
+        volumeComp.type = NRI_PIPELINE_GRAPHICS;
+        volumeComp.forceCompile = forceCompile;
+        volumeComp.colorFormats = { NRI_FORMAT_R16G16B16A16_SFLOAT };
+        volumeComp.shaders.push_back({ NRI_SHADER_STAGE_VERTEX, "compositeVertMain", "assets/shaders/HeterogeneousVolume.slang" });
+        volumeComp.shaders.push_back({ NRI_SHADER_STAGE_FRAGMENT, "compositeFragMain", "assets/shaders/HeterogeneousVolume.slang" });
+        m_vfxVolumeCompositePipeline = m_device.createPipeline(volumeComp, m_shaderCompiler.handle());
     }
 
     void Renderer::SubmitVfxRibbon(const VfxRibbonSettings& settings, std::span<const shaderio::GpuVfxRibbonNode> nodes)
@@ -747,9 +755,9 @@ namespace Nox
         {
             for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
             {
-                if (s.Density[i].Buffer) releaseBufferRefs(s.Density[i].Buffer.handle());
-                if (s.Temperature[i].Buffer) releaseBufferRefs(s.Temperature[i].Buffer.handle());
-                if (s.Flame[i].Buffer) releaseBufferRefs(s.Flame[i].Buffer.handle());
+                if (s.Density[i].Device) releaseBufferRefs(s.Density[i].Device.handle());
+                if (s.Temperature[i].Device) releaseBufferRefs(s.Temperature[i].Device.handle());
+                if (s.Flame[i].Device) releaseBufferRefs(s.Flame[i].Device.handle());
             }
         };
         for (auto it = m_vfxVolumeStreams.begin(); it != m_vfxVolumeStreams.end(); )
@@ -763,7 +771,7 @@ namespace Nox
                 ++it;
         }
 
-        if (m_vfxVolumeSubmissions.empty() || !m_vfxVolumePipeline ||
+        if (m_vfxVolumeSubmissions.empty() || !m_vfxVolumePipeline || !m_vfxVolumeCompositePipeline ||
             m_frame.renderExtent.width == 0 || m_frame.renderExtent.height == 0)
             return;
 
@@ -771,28 +779,43 @@ namespace Nox
         if (!resources.HDRScene.IsValid() || !resources.Depth.IsValid())
             return;
 
+        struct VolumeCopyOp
+        {
+            NriBuffer Src = nullptr;
+            NriBuffer Dst = nullptr;
+            uint64_t Size = 0;
+        };
+        std::vector<VolumeCopyOp> pendingCopies;
+
         auto uploadChannel = [&](GpuVolumeChannelSlot& slot, const std::vector<uint8_t>& bytes, uint64_t minCap) -> uint64_t
         {
             if (bytes.empty())
                 return 0ull;
             // Pad to 4-byte multiple so uint32_t FP16 pair loads never read past the end.
             const uint64_t padded = (bytes.size() + 3ull) & ~3ull;
-            if (padded > slot.Capacity || !slot.Buffer)
+            if (padded > slot.Capacity || !slot.Staging || !slot.Device)
             {
-                if (slot.Buffer)
+                if (slot.Device)
                 {
-                    releaseBufferRefs(slot.Buffer.handle());
+                    releaseBufferRefs(slot.Device.handle());
                     std::scoped_lock lock(m_deferredReleasesMutex);
-                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Buffer) });
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Device) });
+                }
+                if (slot.Staging)
+                {
+                    std::scoped_lock lock(m_deferredReleasesMutex);
+                    m_deferredReleases.push_back({ MAX_FRAMES_IN_FLIGHT, std::move(slot.Staging) });
                 }
                 slot.Capacity = std::max<uint64_t>({ padded, minCap, 4096ull });
-                slot.Buffer = m_device.createBuffer(nri::BufferDesc{ .size = slot.Capacity, .usage = NRI_BUFFER_USAGE_UNIFORM });
-                slot.Mapped = slot.Buffer.map(0, slot.Capacity);
+                slot.Staging = m_device.createBuffer(nri::BufferDesc{ .size = slot.Capacity, .usage = NRI_BUFFER_USAGE_UNIFORM });
+                slot.Mapped = slot.Staging.map(0, slot.Capacity);
+                slot.Device = m_device.createBuffer(nri::BufferDesc{ .size = slot.Capacity, .usage = NRI_BUFFER_USAGE_STORAGE_STATIC });
             }
             std::memcpy(slot.Mapped, bytes.data(), bytes.size());
             if (padded > bytes.size())
                 std::memset(static_cast<uint8_t*>(slot.Mapped) + bytes.size(), 0, padded - bytes.size());
-            return bufferReadRef(slot.Buffer);
+            pendingCopies.push_back({ slot.Staging.handle(), slot.Device.handle(), padded });
+            return bufferReadRef(slot.Device);
         };
 
         std::vector<shaderio::GpuHeterogeneousVolume> gpuVolumes;
@@ -855,12 +878,12 @@ namespace Nox
                 }
 
                 const uint32_t flags = stream.SlotChannelFlags[frameIndex];
-                gpu.densityBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_DENSITY) && stream.Density[frameIndex].Buffer
-                    ? bufferReadRef(stream.Density[frameIndex].Buffer) : 0ull;
-                gpu.temperatureBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_TEMPERATURE) && stream.Temperature[frameIndex].Buffer
-                    ? bufferReadRef(stream.Temperature[frameIndex].Buffer) : 0ull;
-                gpu.flameBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_FLAME) && stream.Flame[frameIndex].Buffer
-                    ? bufferReadRef(stream.Flame[frameIndex].Buffer) : 0ull;
+                gpu.densityBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_DENSITY) && stream.Density[frameIndex].Device
+                    ? bufferReadRef(stream.Density[frameIndex].Device) : 0ull;
+                gpu.temperatureBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_TEMPERATURE) && stream.Temperature[frameIndex].Device
+                    ? bufferReadRef(stream.Temperature[frameIndex].Device) : 0ull;
+                gpu.flameBufferRef = (flags & shaderio::VOLUME_FLAG_HAS_FLAME) && stream.Flame[frameIndex].Device
+                    ? bufferReadRef(stream.Flame[frameIndex].Device) : 0ull;
                 gpu.dimX = stream.SlotDimX[frameIndex];
                 gpu.dimY = stream.SlotDimY[frameIndex];
                 gpu.dimZ = stream.SlotDimZ[frameIndex];
@@ -906,14 +929,50 @@ namespace Nox
         const uint32_t curFrame = static_cast<uint32_t>(m_vfxFrameCounter);
         const glm::vec2 viewportSize(static_cast<float>(m_frame.renderExtent.width), static_cast<float>(m_frame.renderExtent.height));
 
+        if (!pendingCopies.empty())
+        {
+            m_renderGraph.AddPass("Heterogeneous Volume Upload", RGPassFlags::NeverCull,
+                [](RGBuilder&) {},
+                [copies = std::move(pendingCopies)](RGPassContext& context)
+                {
+                    nri::CommandBuffer& cmd = context.Cmd();
+                    std::vector<nri::BufferBarrierDesc> barriers;
+                    barriers.reserve(copies.size());
+                    for (const VolumeCopyOp& op : copies)
+                    {
+                        const nri::BufferCopyRegion region{ .srcOffset = 0, .dstOffset = 0, .size = op.Size };
+                        nriCmdCopyBuffer(cmd.handle(), op.Src, op.Dst, &region);
+                        barriers.push_back(nri::BufferBarrierDesc{
+                            op.Dst,
+                            { nri::AccessBits::TransferWrite, nri::StageBits::Transfer },
+                            { nri::AccessBits::ShaderRead, nri::StageBits::Fragment }
+                        });
+                    }
+                    cmd.resourceBarriers({}, std::span<const nri::BufferBarrierDesc>(barriers));
+                });
+        }
+
+        const NriExtent2D halfExtent{
+            std::max(1u, (m_frame.renderExtent.width + 1u) / 2u),
+            std::max(1u, (m_frame.renderExtent.height + 1u) / 2u)
+        };
+        const glm::vec2 halfViewportSize(static_cast<float>(halfExtent.width), static_cast<float>(halfExtent.height));
+
+        RGTextureDesc halfDesc{};
+        halfDesc.Size = RGSize::Absolute;
+        halfDesc.Width = halfExtent.width;
+        halfDesc.Height = halfExtent.height;
+        halfDesc.Format = NRI_FORMAT_R16G16B16A16_SFLOAT;
+        const auto halfResVolumes = m_renderGraph.CreateTexture("HalfResVolumes", halfDesc);
+
         m_renderGraph.AddPass("Heterogeneous Volumes", RGPassFlags::Raster,
             [&](RGBuilder& builder)
             {
-                builder.ColorTarget(resources.HDRScene, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
+                builder.ColorTarget(halfResVolumes, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                 builder.Read(resources.Depth);
-                builder.SetRenderArea(m_frame.renderExtent);
+                builder.SetRenderArea(halfExtent);
             },
-            [this, res = &resources, uniformsRef, volumesRef, count, curFrame, viewportSize](RGPassContext& context)
+            [this, res = &resources, uniformsRef, volumesRef, count, curFrame, halfViewportSize](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_vfxVolumePipeline);
@@ -939,10 +998,43 @@ namespace Nox
                     push.volumeIndex = i;
                     push.depthTextureIndex = depthSlot;
                     push.frameIndex = curFrame;
-                    push.viewportSize = viewportSize;
+                    push.viewportSize = halfViewportSize;
                     cmd.pushData(&push, sizeof(push));
                     cmd.draw(36u, 1u, 0u, 0u);
                 }
+                cmd.setColorBlendEnable(0, false);
+            });
+
+        m_renderGraph.AddPass("Heterogeneous Volumes Composite", RGPassFlags::Raster,
+            [&](RGBuilder& builder)
+            {
+                builder.ColorTarget(resources.HDRScene, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
+                builder.Read(halfResVolumes);
+                builder.SetRenderArea(m_frame.renderExtent);
+            },
+            [this, halfResVolumes, uniformsRef, viewportSize](RGPassContext& context)
+            {
+                nri::CommandBuffer& cmd = context.Cmd();
+                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_vfxVolumeCompositePipeline);
+                cmd.setVertexInput();
+                cmd.setPrimitiveTopology(NRI_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                cmd.setPrimitiveRestartEnable(false);
+                cmd.setCullMode(NRI_CULL_MODE_NONE);
+                cmd.setDepthTestEnable(false);
+                cmd.setDepthWriteEnable(false);
+                cmd.setColorBlendEnable(0, true);
+                cmd.setColorWriteMask(0, nri::ColorComponent::All);
+                cmd.setColorBlendEquation(0, {
+                    NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD,
+                    NRI_BLEND_FACTOR_ONE, NRI_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, NRI_BLEND_OP_ADD
+                });
+
+                shaderio::PushConstantHeterogeneousVolume push{};
+                push.matrixReference = uniformsRef;
+                push.depthTextureIndex = context.Slot(halfResVolumes);
+                push.viewportSize = viewportSize;
+                cmd.pushData(&push, sizeof(push));
+                cmd.draw(3u, 1u, 0u, 0u);
                 cmd.setColorBlendEnable(0, false);
             });
     }

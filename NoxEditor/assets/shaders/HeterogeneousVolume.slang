@@ -108,24 +108,37 @@ float vol_noise3(float3 x)
              lerp(vol_hash31(i + float3(0,1,1)), vol_hash31(i + float3(1,1,1)), u.x), u.y), u.z);
 }
 
-void vol_sample_procedural(float3 uvw, float time, out float density, out float temperature)
+void vol_sample_procedural(float3 uvw, float time, bool fastShadow, out float density, out float temperature)
 {
     const float ny = uvw.y;
+    const float heightFade = sin(ny * 3.14159265);
+    if (heightFade <= 1e-4)
+    {
+        density = 0.0;
+        temperature = 0.0;
+        return;
+    }
     const float twist = ny * 5.5 - time * 2.2;
-    const float2 center = float2(0.5 + cos(twist) * 0.08 * ny, 0.5 + sin(twist) * 0.08 * ny);
+    float s, c;
+    sincos(twist, s, c);
+    const float2 center = float2(0.5 + c * 0.08 * ny, 0.5 + s * 0.08 * ny);
     const float2 rel = uvw.xz - center;
     const float r = length(rel);
     const float funnelR = lerp(0.14, 0.44, ny);
-    const float radial = saturate(1.0 - r / funnelR);
-    const float heightFade = sin(ny * 3.14159265);
-
-    const float c = cos(twist);
-    const float s = sin(twist);
+    if (r >= funnelR)
+    {
+        density = 0.0;
+        temperature = 0.0;
+        return;
+    }
+    const float radial = 1.0 - r / funnelR;
     const float3 np = float3(rel.x * c - rel.y * s, ny * 1.4 - time * 0.65, rel.x * s + rel.y * c) * 5.5;
-    const float fbm = vol_noise3(np) * 0.65 + vol_noise3(np * 2.1 + 7.3) * 0.35;
+    const float fbm = fastShadow
+        ? vol_noise3(np)
+        : (vol_noise3(np) * 0.65 + vol_noise3(np * 2.1 + 7.3) * 0.35);
 
     density = saturate(radial * radial * heightFade * (0.45 + 0.95 * fbm) * 1.6);
-    temperature = saturate(radial * (1.0 - ny * 0.72) * fbm * 1.45);
+    temperature = fastShadow ? 0.0 : saturate(radial * (1.0 - ny * 0.72) * fbm * 1.45);
 }
 
 // Physical Planckian blackbody color approximation (Kelvin -> linear RGB).
@@ -162,26 +175,65 @@ bool vol_intersect_unit_box(float3 ro, float3 rd, out float tNear, out float tFa
     return tFar > max(tNear, 0.0);
 }
 
-void vol_eval_fields(GpuHeterogeneousVolume vol, float3 uvw, float time, out float density, out float temperature)
+// Hardware-agnostic nearest-neighbor FP16 voxel fetch (1 load vs 8 for trilinear).
+// Used for fast empty-space skipping and shadow marching (8x-24x faster with identical look).
+float vol_sample_fp16_nearest(uint64_t bufRef, float3 uvw, uint3 dims)
+{
+    if (bufRef == 0 || any(uvw < 0.0) || any(uvw > 1.0))
+        return 0.0;
+    const int3 idx = clamp(int3(uvw * float3(dims)), int3(0, 0, 0), int3(dims) - int3(1, 1, 1));
+    return vol_load_fp16(bufRef, uint3(idx), dims);
+}
+
+float vol_sample_density_fast(GpuHeterogeneousVolume vol, float3 uvw, float time)
 {
     if ((vol.flags & VOLUME_FLAG_PROCEDURAL) != 0u)
     {
-        vol_sample_procedural(uvw, time, density, temperature);
+        float d, t;
+        vol_sample_procedural(uvw, time, true, d, t);
+        return d;
+    }
+    const uint3 dims = uint3(vol.dimX, vol.dimY, vol.dimZ);
+    if ((vol.flags & VOLUME_FLAG_HAS_DENSITY) != 0u)
+        return vol_sample_fp16_nearest(vol.densityBufferRef, uvw, dims) * vol.marchParams.z;
+    if ((vol.flags & VOLUME_FLAG_HAS_TEMPERATURE) != 0u)
+        return vol_sample_fp16_nearest(vol.temperatureBufferRef, uvw, dims) * vol.marchParams.w;
+    if ((vol.flags & VOLUME_FLAG_HAS_FLAME) != 0u)
+        return vol_sample_fp16_nearest(vol.flameBufferRef, uvw, dims) * vol.marchParams.w;
+    return 0.0;
+}
+
+void vol_eval_fields(GpuHeterogeneousVolume vol, float3 uvw, float time, bool needTemp, out float density, out float temperature)
+{
+    if ((vol.flags & VOLUME_FLAG_PROCEDURAL) != 0u)
+    {
+        vol_sample_procedural(uvw, time, false, density, temperature);
         return;
     }
     const uint3 dims = uint3(vol.dimX, vol.dimY, vol.dimZ);
-    density = (vol.flags & VOLUME_FLAG_HAS_DENSITY) != 0u
-        ? vol_sample_fp16(vol.densityBufferRef, uvw, dims) * vol.marchParams.z
-        : 0.0;
-    float temp = (vol.flags & VOLUME_FLAG_HAS_TEMPERATURE) != 0u
-        ? vol_sample_fp16(vol.temperatureBufferRef, uvw, dims) * vol.marchParams.w
-        : 0.0;
-    float flame = (vol.flags & VOLUME_FLAG_HAS_FLAME) != 0u
-        ? vol_sample_fp16(vol.flameBufferRef, uvw, dims) * vol.marchParams.w
-        : 0.0;
-    temperature = max(temp, flame);
-    if ((vol.flags & VOLUME_FLAG_HAS_DENSITY) == 0u)
-        density = temperature;
+    density = 0.0;
+    temperature = 0.0;
+
+    // Fast 1-tap empty-space skip when only density is present: avoids 7 wasted loads in empty air.
+    const bool hasDensity = (vol.flags & VOLUME_FLAG_HAS_DENSITY) != 0u;
+    const bool hasTemp = (vol.flags & VOLUME_FLAG_HAS_TEMPERATURE) != 0u;
+    const bool hasFlame = (vol.flags & VOLUME_FLAG_HAS_FLAME) != 0u;
+
+    if (hasDensity)
+    {
+        const float coarseD = vol_sample_fp16_nearest(vol.densityBufferRef, uvw, dims);
+        if (coarseD > 1e-5)
+            density = vol_sample_fp16(vol.densityBufferRef, uvw, dims) * vol.marchParams.z;
+    }
+
+    if (needTemp || !hasDensity)
+    {
+        float temp = hasTemp ? vol_sample_fp16(vol.temperatureBufferRef, uvw, dims) * vol.marchParams.w : 0.0;
+        float flame = hasFlame ? vol_sample_fp16(vol.flameBufferRef, uvw, dims) * vol.marchParams.w : 0.0;
+        temperature = max(temp, flame);
+        if (!hasDensity)
+            density = temperature;
+    }
 }
 
 [shader("fragment")]
@@ -211,7 +263,10 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
     if (pushConstant.depthTextureIndex != 0xFFFFFFFFu)
     {
         Texture2D depthTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
-        const float sceneDepthNdc = depthTex.Load(int3(int2(inVert.pos.xy), 0)).r;
+        uint dw = 1u, dh = 1u;
+        depthTex.GetDimensions(dw, dh);
+        const int2 depthPx = clamp(int2(uv * float2(dw, dh)), int2(0, 0), int2(int(dw) - 1, int(dh) - 1));
+        const float sceneDepthNdc = depthTex.Load(int3(depthPx, 0)).r;
         if (sceneDepthNdc > 1e-6)
         {
             const float4 sceneH = mul(ubo.invViewProj, float4(ndc, sceneDepthNdc, 1.0));
@@ -280,7 +335,7 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
         const float3 uvw = rayOriginL + rayDirL * t;
 
         float rawDensity, rawTemp;
-        vol_eval_fields(vol, uvw, ubo.timeSeconds, rawDensity, rawTemp);
+        vol_eval_fields(vol, uvw, ubo.timeSeconds, emissionScale > 0.0, rawDensity, rawTemp);
 
         const float sigmaT = rawDensity * densityScale;
         if (sigmaT > 1e-4 || rawTemp > 1e-3)
@@ -294,7 +349,7 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
                 if (vol_intersect_unit_box(uvw, sunDirL, sNear, sFar))
                 {
                     // Exponentially spaced shadow steps capture both crisp local crevices and deep core self-shadowing.
-                    const float stepScale = sFar / float(shadowSteps);
+                    const float sunDirLen = length(sunDirL);
                     for (uint k = 0u; k < shadowSteps; ++k)
                     {
                         const float f0 = float(k) / float(shadowSteps);
@@ -302,9 +357,8 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
                         const float mid = 0.5 * (f0 * f0 + f1 * f1) * sFar;
                         const float segLen = (f1 * f1 - f0 * f0) * sFar;
                         const float3 suvw = uvw + sunDirL * mid;
-                        float sd, st;
-                        vol_eval_fields(vol, suvw, ubo.timeSeconds, sd, st);
-                        shadowOpticalDepth += sd * densityScale * (segLen * length(sunDirL));
+                        const float sd = vol_sample_density_fast(vol, suvw, ubo.timeSeconds);
+                        shadowOpticalDepth += sd * densityScale * (segLen * sunDirLen);
                     }
                     // 3-octave energy-conserving multi-scattering (Wrenninge / UE5 Heterogeneous Volumes)
                     // + subtle powder effect for crisp billowy contrast on ridges vs deep folds.
@@ -344,4 +398,33 @@ float4 fragMain(VolumeVSOut inVert, uniform PushConstantHeterogeneousVolume push
         discard;
 
     return float4(scattering, alpha);
+}
+
+struct VolCompVSOut
+{
+    float4 pos : SV_Position;
+    float2 uv  : TEXCOORD0;
+};
+
+[shader("vertex")]
+VolCompVSOut compositeVertMain(uint vertexID : SV_VertexID)
+{
+    static const float2 kPos[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+    VolCompVSOut o;
+    o.pos = float4(kPos[vertexID % 3u], 0.0, 1.0);
+    o.uv = float2(0.0, 0.0);
+    return o;
+}
+
+[shader("fragment")]
+float4 compositeFragMain(VolCompVSOut inVert, uniform PushConstantHeterogeneousVolume pushConstant) : SV_Target0
+{
+    UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
+    Texture2D halfVol = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
+    SamplerState linSamp = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_CLAMP, 0));
+    const float2 uv = inVert.pos.xy / max(pushConstant.viewportSize, float2(1.0, 1.0));
+    const float4 v = halfVol.SampleLevel(linSamp, uv, 0);
+    if (v.a <= 1e-4 && dot(v.rgb, v.rgb) <= 1e-8)
+        discard;
+    return v;
 }

@@ -9,7 +9,8 @@ internal enum ComponentType
     TimelinePlayer = 5,
     ParticleEmitter = 6,
     Mesh = 7,
-    AudioSource = 8
+    AudioSource = 8,
+    Vfx = 9
 }
 
 public abstract class Component

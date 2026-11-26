@@ -21,6 +21,7 @@
 #include "NoxCore/Asset/MaterialSerializer.h"
 #include "NoxCore/Asset/NodeGraphSerializer.h"
 #include "NoxCore/Asset/TimelineImporter.h"
+#include "NoxCore/Asset/VfxAsset.h"
 #include "NoxCore/Audio/AudioGraph.h"
 #include "NoxCore/Core/Application.h"
 #include "NoxCore/Core/Log.h"
@@ -78,6 +79,7 @@ namespace Nox
         case AssetType::AudioMixer:        return { "Audio Mixer",    NoxUI::ThemeColor("AssetAudioMixer", { 0.60f, 0.64f, 0.84f, 1.0f }) };
         case AssetType::AcousticData:      return { "Acoustic Data",  NoxUI::ThemeColor("AssetAcousticData", { 0.44f, 0.78f, 0.82f, 1.0f }) };
         case AssetType::Volume:            return { "Volume",         NoxUI::ThemeColor("AssetVolume", { 0.72f, 0.44f, 0.96f, 1.0f }) };
+        case AssetType::Vfx:               return { "VFX",            NoxUI::ThemeColor("AssetVfx", { 1.00f, 0.45f, 0.28f, 1.0f }) };
         default:                           return { "File",           NoxUI::ThemeColor("AssetFile", { 0.62f, 0.66f, 0.74f, 1.0f }) };
         }
     }
@@ -294,7 +296,7 @@ namespace Nox
         constexpr NoxUI::UIThemeToken kFolderColor{ "ContentFolder", { 0.86f, 0.70f, 0.38f, 1.0f } };
         constexpr NoxUI::UIThemeToken kScriptColor{ "ContentScript", { 0.44f, 0.62f, 0.95f, 1.0f } };
 
-        constexpr const char* kFilterNames[] = { "All Types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio", "Scripts", "Volumes" };
+        constexpr const char* kFilterNames[] = { "All Types", "Meshes", "Materials", "Textures", "Prefabs", "Scenes", "Animation", "Audio", "Scripts", "Volumes", "VFX" };
 
         std::string ToLower(std::string_view text)
         {
@@ -1477,6 +1479,7 @@ namespace Nox
         case 7: return type == AssetType::AudioClip || type == AssetType::AudioGraph || type == AssetType::AudioMixer;
         case 8: return isScript;
         case 9: return type == AssetType::Volume;
+        case 10: return type == AssetType::Vfx;
         default: return true;
         }
     }
@@ -2176,6 +2179,20 @@ namespace Nox
         AdoptNewFile(path);
     }
 
+    void ContentBrowserPanel::CreateVfx()
+    {
+        const std::filesystem::path path = UniquePath(m_CurrentDirectory, "NewVfx", ".nvfx");
+        VfxAsset vfx;
+        vfx.LoadPreset("Teleport");
+        vfx.Name = path.stem().string();
+        if (!vfx.Save(path))
+        {
+            Notify(NoxUI::UINotificationSeverity::Error, "VFX System not created", path.generic_string());
+            return;
+        }
+        AdoptNewFile(path);
+    }
+
     void ContentBrowserPanel::CreateScript()
     {
         NoxUI::UIContext* ctx = NoxUI::UIContext::GetCurrent();
@@ -2448,6 +2465,8 @@ namespace Nox
                           "A procedural sound (MetaSounds' Source), played by an Audio Source like a clip." });
         items.push_back({ "Timeline", "", [this]() { CreateTimeline(); }, false, true, false, false,
                           "Keyed positions, lights, camera and events over time, played by a Timeline Player." });
+        items.push_back({ "VFX System", "", [this]() { CreateVfx(); }, false, true, false, false,
+                          "Multi-layer GPU VFX asset (.nvfx): particles, trails, beams, decals, distortion, volumes, fog, lights." });
         items.push_back({ "", "", {}, true });
         items.push_back({ "C# Script", "", [this]() { CreateScript(); }, false, true, false, false,
                           "A behaviour class from the template, in Scripts/Source." });

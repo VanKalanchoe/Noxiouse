@@ -28,6 +28,7 @@
 #include "NoxCore/Audio/SpatialAudio.h"
 #include "NoxCore/Asset/Material.h"
 #include "NoxCore/Asset/VolumeAsset.h"
+#include "NoxCore/Asset/VfxAsset.h"
 #include "NoxCore/Renderer/Mesh.h"
 #include "NoxCore/NodeGraph/NodeGraphAsset.h"
 #include "NoxCore/Physics/Physics2D.h"
@@ -1388,20 +1389,20 @@ namespace Nox
             [this]() { SceneGraph::UpdateWorldTransforms(m_Registry, m_EntityMap, m_CommandBuffers, m_MovedEntities); });
         // Particles spawn where their emitter is now: after propagation.
         m_UpdateSystems.AddSystem("Particles",
-            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, VolumeComponent>(),
+            ComponentAccess().Read<WorldTransformComponent>().Write<ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, VolumeComponent, VfxComponent>(),
             [this]() { UpdateParticles(); });
 
         // Submission (after BeginScene). No conflicts: they run in parallel. Meshes are not submitted: the GPU scene keeps
         // them (SyncGpuScene).
         m_SubmitSystems.AddSystem("Submit Lights",
             ComponentAccess().Read<WorldTransformComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
-                                   RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent>().Write<LightSubmission>(),
+                                   RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, VfxComponent>().Write<LightSubmission>(),
             [this]() { SubmitLights(); });
         m_SubmitSystems.AddSystem("Submit 2D",
             ComponentAccess().Read<WorldTransformComponent, SpriteRendererComponent, CircleRendererComponent, TextComponent>().Write<Renderer2DSubmission>(),
             [this]() { Submit2D(); });
         m_SubmitSystems.AddSystem("Submit Particles",
-            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent>().Write<ParticleSubmission>(),
+            ComponentAccess().Read<WorldTransformComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, LocalFogVolumeComponent, VfxComponent>().Write<ParticleSubmission>(),
             [this]() { SubmitParticles(); });
         m_SubmitSystems.AddSystem("Submit Post Process",
             ComponentAccess().Read<WorldTransformComponent, PostProcessVolumeComponent>().Write<PostProcessSubmission>(),
@@ -1808,6 +1809,93 @@ namespace Nox
             ParticleSystem::Restart(m_Registry.get<ParticleEmitterComponent>(entity));
     }
 
+    namespace
+    {
+        glm::dmat4 ComposeVfxLayerWorld(const glm::dmat4& entityWorld, const VfxLayer& layer, float scale, float unit)
+        {
+            const glm::dmat4 offset = glm::translate(glm::dmat4(1.0), glm::dvec3(layer.LocalOffset * (unit * scale)));
+            const glm::dmat4 rot = glm::dmat4(glm::toMat4(glm::quat(glm::radians(layer.LocalRotation))));
+            return entityWorld * offset * rot;
+        }
+
+        bool IsVfxLayerActive(const VfxLayer& layer, float time)
+        {
+            if (!layer.Enabled)
+                return false;
+            if (time < layer.StartDelay)
+                return false;
+            if (layer.Duration > 0.0f && time > layer.StartDelay + layer.Duration)
+                return false;
+            return true;
+        }
+
+        float ResolveVfxIntensity(const VfxAsset& asset, const VfxComponent& vfx)
+        {
+            if (auto it = vfx.Runtime.FloatParams.find("Intensity"); it != vfx.Runtime.FloatParams.end())
+                return std::max(it->second, 0.0f);
+            for (const auto& p : asset.Parameters)
+            {
+                if (p.Type == VfxParamType::Float && p.Name == "Intensity")
+                    return std::max(p.FloatValue, 0.0f);
+            }
+            return 1.0f;
+        }
+
+        glm::vec4 ResolveVfxTint(const VfxComponent& vfx)
+        {
+            glm::vec4 tint = vfx.ColorTint;
+            if (auto it = vfx.Runtime.ColorParams.find("Color"); it != vfx.Runtime.ColorParams.end())
+                tint *= it->second;
+            return tint;
+        }
+
+        void UpdateTrailNodes(TrailSimulation& sim, const TrailRendererComponent& trail, const glm::dvec3& headPos, float dt, float unit, bool emitting)
+        {
+            const float life = std::max(trail.Lifetime, 0.02f);
+            sim.Time += dt;
+            for (auto& node : sim.Nodes)
+                node.Age += dt;
+            std::erase_if(sim.Nodes, [life](const TrailSimulation::Node& n) { return n.Age >= life; });
+
+            if (!emitting)
+                return;
+
+            const double minDist = static_cast<double>(std::max(trail.MinVertexDistance, 0.005f) * unit);
+            if (sim.Nodes.empty())
+            {
+                sim.Nodes.push_back({ headPos, 0.0f });
+            }
+            else if (sim.Nodes.size() == 1u)
+            {
+                if (glm::length(headPos - sim.Nodes[0].Position) >= minDist)
+                    sim.Nodes.push_back({ headPos, 0.0f });
+            }
+            else
+            {
+                const double dist = glm::length(headPos - sim.Nodes[sim.Nodes.size() - 2u].Position);
+                if (dist >= minDist)
+                {
+                    if (glm::length(headPos - sim.Nodes.back().Position) > 1e-4 * unit)
+                    {
+                        sim.Nodes.push_back({ headPos, 0.0f });
+                        if (sim.Nodes.size() > 512u)
+                            sim.Nodes.erase(sim.Nodes.begin());
+                    }
+                    else
+                    {
+                        sim.Nodes.back().Position = headPos;
+                        sim.Nodes.back().Age = 0.0f;
+                    }
+                }
+                else
+                {
+                    sim.Nodes.back().Position = headPos;
+                    sim.Nodes.back().Age = 0.0f;
+                }
+            }
+        }
+    }
+
     void Scene::UpdateParticles()
     {
         const float dt = std::clamp(m_FrameInput.Timestep, 0.0f, 0.1f);
@@ -1818,52 +1906,7 @@ namespace Nox
         for (auto entity : trailView)
         {
             auto [trail, world] = trailView.get<TrailRendererComponent, WorldTransformComponent>(entity);
-            const float life = std::max(trail.Lifetime, 0.02f);
-            trail.Simulation.Time += dt;
-            for (auto& node : trail.Simulation.Nodes)
-                node.Age += dt;
-            std::erase_if(trail.Simulation.Nodes, [life](const TrailSimulation::Node& n) { return n.Age >= life; });
-
-            if (trail.Emitting)
-            {
-                const glm::dvec3 headPos(world.WorldMatrix[3]);
-                const double minDist = static_cast<double>(std::max(trail.MinVertexDistance, 0.005f) * unit);
-                if (trail.Simulation.Nodes.empty())
-                {
-                    trail.Simulation.Nodes.push_back({ headPos, 0.0f });
-                }
-                else if (trail.Simulation.Nodes.size() == 1u)
-                {
-                    if (glm::length(headPos - trail.Simulation.Nodes[0].Position) >= minDist)
-                        trail.Simulation.Nodes.push_back({ headPos, 0.0f });
-                }
-                else
-                {
-                    // Measure distance from the last anchored node (size - 2), keeping back() as the live head.
-                    const double dist = glm::length(headPos - trail.Simulation.Nodes[trail.Simulation.Nodes.size() - 2u].Position);
-                    if (dist >= minDist)
-                    {
-                        // Lock the current live head in place (already near minDist from size-2) only if it's distinct from headPos,
-                        // otherwise just append headPos so we never emit a zero-length segment at the front.
-                        if (glm::length(headPos - trail.Simulation.Nodes.back().Position) > 1e-4 * unit)
-                        {
-                            trail.Simulation.Nodes.push_back({ headPos, 0.0f });
-                            if (trail.Simulation.Nodes.size() > 512u)
-                                trail.Simulation.Nodes.erase(trail.Simulation.Nodes.begin());
-                        }
-                        else
-                        {
-                            trail.Simulation.Nodes.back().Position = headPos;
-                            trail.Simulation.Nodes.back().Age = 0.0f;
-                        }
-                    }
-                    else
-                    {
-                        trail.Simulation.Nodes.back().Position = headPos;
-                        trail.Simulation.Nodes.back().Age = 0.0f;
-                    }
-                }
-            }
+            UpdateTrailNodes(trail.Simulation, trail, glm::dvec3(world.WorldMatrix[3]), dt, unit, trail.Emitting);
         }
 
         auto beamView = m_Registry.view<BeamRendererComponent>(entt::exclude<InactiveInHierarchyComponent>);
@@ -1876,6 +1919,92 @@ namespace Nox
             auto& vol = volumeView.get<VolumeComponent>(entity);
             if (vol.Enabled && vol.Playing)
                 vol.CurrentTime += dt * vol.PlaybackSpeed;
+        }
+
+        // Step V4: Update unified multi-layer VfxComponent (live preview even in Editor viewport).
+        auto vfxView = m_Registry.view<VfxComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : vfxView)
+        {
+            auto [vfx, world] = vfxView.get<VfxComponent, WorldTransformComponent>(entity);
+            if (vfx.Vfx == 0)
+                continue;
+            const VfxAsset* asset = AssetManager::FindLoadedAsset<VfxAsset>(vfx.Vfx);
+            if (!asset)
+                continue;
+
+            const size_t layerCount = asset->Layers.size();
+            if (vfx.Runtime.ParticleSims.size() != layerCount)
+            {
+                vfx.Runtime.ParticleSims.resize(layerCount);
+                for (auto& sim : vfx.Runtime.ParticleSims)
+                    sim.GpuNeedsReset = true;
+            }
+            if (vfx.Runtime.TrailSims.size() != layerCount)
+                vfx.Runtime.TrailSims.resize(layerCount);
+            if (vfx.Runtime.LayerTimes.size() != layerCount)
+                vfx.Runtime.LayerTimes.assign(layerCount, 0.0f);
+
+            if (vfx.Runtime.NeedsRestart)
+            {
+                vfx.Runtime.Time = 0.0f;
+                for (auto& sim : vfx.Runtime.ParticleSims)
+                {
+                    sim = ParticleSimulation{};
+                    sim.GpuNeedsReset = true;
+                }
+                for (auto& tsim : vfx.Runtime.TrailSims)
+                    tsim = TrailSimulation{};
+                std::fill(vfx.Runtime.LayerTimes.begin(), vfx.Runtime.LayerTimes.end(), 0.0f);
+                vfx.Runtime.NeedsRestart = false;
+            }
+
+            const float scaledDt = vfx.Playing ? (dt * std::max(vfx.PlaybackSpeed, 0.0f)) : 0.0f;
+            if (vfx.Playing)
+            {
+                vfx.Runtime.Time += scaledDt;
+                if (asset->Duration > 0.0f && vfx.Runtime.Time >= asset->Duration)
+                {
+                    if (vfx.Looping && asset->Looping)
+                    {
+                        vfx.Runtime.Time = std::fmod(vfx.Runtime.Time, asset->Duration);
+                    }
+                    else
+                    {
+                        vfx.Runtime.Time = asset->Duration;
+                        vfx.Playing = false;
+                    }
+                }
+            }
+
+            const float scale = std::max(vfx.Scale, 0.01f);
+            for (size_t i = 0; i < layerCount; ++i)
+            {
+                const VfxLayer& layer = asset->Layers[i];
+                const bool active = IsVfxLayerActive(layer, vfx.Runtime.Time);
+                const glm::dmat4 layerWorld = ComposeVfxLayerWorld(world.WorldMatrix, layer, scale, unit);
+
+                if (layer.Type == VfxLayerType::Particles)
+                {
+                    ParticleEmitterComponent tmp = layer.Particle;
+                    tmp.Simulation = std::move(vfx.Runtime.ParticleSims[i]);
+                    tmp.Emitting = vfx.Playing && active && layer.Particle.Emitting;
+                    if (tmp.GpuSimulated)
+                        ParticleSystem::StepGpuTimeline(tmp, scaledDt);
+                    else
+                        ParticleSystem::Simulate(tmp, layerWorld, scaledDt);
+                    vfx.Runtime.ParticleSims[i] = std::move(tmp.Simulation);
+                }
+                else if (layer.Type == VfxLayerType::Trail)
+                {
+                    UpdateTrailNodes(vfx.Runtime.TrailSims[i], layer.Trail, glm::dvec3(layerWorld[3]),
+                                     dt, unit, vfx.Playing && active && layer.Trail.Emitting);
+                }
+                else if (layer.Type == VfxLayerType::Beam || layer.Type == VfxLayerType::Volume)
+                {
+                    if (vfx.Playing && active)
+                        vfx.Runtime.LayerTimes[i] += scaledDt * (layer.Type == VfxLayerType::Volume ? layer.Volume.PlaybackSpeed : 1.0f);
+                }
+            }
         }
 
         if (!m_FrameInput.StepAnimation)
@@ -2369,6 +2498,488 @@ namespace Nox
                                                static_cast<float>(std::clamp(vol.ShadowSteps, 0u, 16u)),
                                                invMaxDensity, invMaxTemp);
             m_renderer->SubmitHeterogeneousVolume(sub);
+        }
+
+        // Step N3: Submit LocalFogVolumeComponent for VolumetricFog.slang froxel injection.
+        auto localFogView = m_Registry.view<LocalFogVolumeComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : localFogView)
+        {
+            const auto [fog, world] = localFogView.get<LocalFogVolumeComponent, WorldTransformComponent>(entity);
+            if (!fog.Enabled)
+                continue;
+
+            const glm::vec3 halfExtentsWU = glm::max(fog.Extents, glm::vec3(0.05f)) * unit;
+            const glm::mat4 model = Math::RelativeTo(world.WorldMatrix, renderOrigin) * glm::scale(glm::mat4(1.0f), halfExtentsWU);
+            shaderio::GpuLocalFogVolume gpu{};
+            gpu.invModel = glm::inverse(model);
+            gpu.albedoAndDensity = glm::vec4(fog.Albedo, std::max(fog.Density, 0.0f) / std::max(unit, 1e-4f));
+            gpu.emissiveAndFalloff = glm::vec4(fog.EmissiveColor * (std::max(fog.EmissiveIntensity, 0.0f) / std::max(unit, 1e-4f)),
+                                               glm::clamp(fog.EdgeFalloff, 0.01f, 1.0f));
+            gpu.noiseParams = glm::vec4(glm::clamp(fog.NoiseStrength, 0.0f, 1.0f),
+                                        std::max(fog.NoiseScale, 0.01f) / std::max(unit, 1e-4f),
+                                        fog.NoiseSpeed,
+                                        static_cast<float>(fog.Shape));
+            m_renderer->SubmitLocalFogVolume(gpu);
+        }
+
+        // Step V4: Submit unified multi-layer VfxComponent (.nvfx) layers.
+        auto vfxView = m_Registry.view<VfxComponent, WorldTransformComponent>(entt::exclude<InactiveInHierarchyComponent>);
+        for (auto entity : vfxView)
+        {
+            auto [vfx, world] = vfxView.get<VfxComponent, WorldTransformComponent>(entity);
+            if (vfx.Vfx == 0)
+                continue;
+            const VfxAsset* asset = AssetManager::FindLoadedAsset<VfxAsset>(vfx.Vfx);
+            if (!asset)
+            {
+                missingAssets.push_back(vfx.Vfx);
+                continue;
+            }
+
+            const uint64_t entityKey = m_Registry.all_of<IDComponent>(entity)
+                ? static_cast<uint64_t>(m_Registry.get<IDComponent>(entity).ID)
+                : static_cast<uint64_t>(entt::to_integral(entity));
+            const float scale = std::max(vfx.Scale, 0.01f);
+            const float intensityMul = ResolveVfxIntensity(*asset, vfx);
+            const glm::vec4 tint = ResolveVfxTint(vfx);
+            const float dt = std::clamp(m_FrameInput.Timestep, 0.0f, 0.1f);
+            const float scaledDt = vfx.Playing ? (dt * std::max(vfx.PlaybackSpeed, 0.0f)) : 0.0f;
+
+            for (size_t i = 0; i < asset->Layers.size(); ++i)
+            {
+                const VfxLayer& layer = asset->Layers[i];
+                if (!IsVfxLayerActive(layer, vfx.Runtime.Time))
+                    continue;
+
+                const glm::dmat4 layerWorld = ComposeVfxLayerWorld(world.WorldMatrix, layer, scale, unit);
+                const uint64_t layerKey = entityKey ^ ((static_cast<uint64_t>(i) + 1ull) * 0x9E3779B97F4A7C15ull);
+
+                switch (layer.Type)
+                {
+                case VfxLayerType::Particles:
+                {
+                    if (i >= vfx.Runtime.ParticleSims.size())
+                        break;
+                    ParticleSimulation& sim = vfx.Runtime.ParticleSims[i];
+                    const ParticleEmitterComponent& em = layer.Particle;
+                    if (!em.GpuSimulated && sim.Particles.empty())
+                        break;
+
+                    Renderer::ParticleBatchSettings settings;
+                    if (em.Texture != 0)
+                    {
+                        if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(em.Texture))
+                            settings.TextureSlot = tex->GetDescriptorIndexSlot();
+                        else
+                            missingAssets.push_back(em.Texture);
+                    }
+                    settings.FlipbookColumns = std::max(em.FlipbookColumns, 1u);
+                    settings.FlipbookRows = std::max(em.FlipbookRows, 1u);
+                    settings.Additive = em.Blend == ParticleBlend::Additive;
+                    settings.Lit = em.Lit;
+                    settings.Soft = em.SoftParticles;
+                    settings.SoftDistance = WorldUnits::FromMeters(std::max(em.SoftDistance, 0.0f));
+
+                    if (em.GpuSimulated)
+                    {
+                        const glm::mat4 layerWorldF(layerWorld);
+                    glm::mat3 basis(layerWorldF);
+                        for (int col = 0; col < 3; ++col)
+                        {
+                            const float len = glm::length(basis[col]);
+                            if (len > 1e-6f)
+                                basis[col] /= len;
+                        }
+                        shaderio::GpuVfxEmitterParams gpuParams{};
+                        gpuParams.origin = glm::vec3(glm::dvec3(layerWorld[3]) - renderOrigin);
+                        gpuParams.dt = scaledDt;
+                        gpuParams.basisX = basis[0];
+                        gpuParams.time = sim.Time;
+                        gpuParams.basisY = basis[1];
+                        gpuParams.spawnCount = vfx.Playing ? sim.PendingGpuSpawnCount : 0u;
+                        gpuParams.basisZ = basis[2];
+                        gpuParams.maxParticles = std::max(em.MaxParticles, 64u);
+                        gpuParams.shape = static_cast<uint32_t>(em.Shape);
+                        gpuParams.coneAngleRad = glm::radians(em.ConeAngle);
+                        gpuParams.localSpace = em.LocalSpace ? 1u : 0u;
+                        gpuParams.shapeSize = em.ShapeSize * (unit * scale);
+                        gpuParams.gravity = em.Gravity * 9.81f * unit;
+                        gpuParams.velocity = em.Velocity * (unit * scale);
+                        gpuParams.drag = std::max(em.Drag, 0.0f);
+                        gpuParams.velocityRandom = em.VelocityRandom * (unit * scale);
+                        gpuParams.lifetimeMin = std::max(em.LifetimeMin, 0.01f);
+                        gpuParams.lifetimeMax = std::max(em.LifetimeMax, gpuParams.lifetimeMin);
+                        gpuParams.spinMinRad = glm::radians(em.SpinMin);
+                        gpuParams.spinMaxRad = glm::radians(em.SpinMax);
+                        gpuParams.sizeStart = std::max(em.SizeStart, 0.0f) * (unit * scale);
+                        gpuParams.sizeEnd = std::max(em.SizeEnd, 0.0f) * (unit * scale);
+                        gpuParams.sizeRandom = std::clamp(em.SizeRandom, 0.0f, 1.0f);
+                        gpuParams.intensity = std::max(em.Intensity * intensityMul, 0.0f);
+                        gpuParams.flipbookCols = settings.FlipbookColumns;
+                        gpuParams.flipbookRows = settings.FlipbookRows;
+                        gpuParams.flipbookFPS = std::max(em.FlipbookFPS, 0.0f);
+                        gpuParams.colorStart = em.ColorStart * tint;
+                        gpuParams.colorEnd = em.ColorEnd * tint;
+
+                        uint32_t modFlags = 0u;
+                        if (em.CurlNoiseEnabled)
+                        {
+                            modFlags |= shaderio::VFX_MOD_CURL_NOISE;
+                            gpuParams.curlParams = glm::vec4(em.CurlNoiseStrength * (unit * scale),
+                                                             em.CurlNoiseFrequency / std::max(unit * scale, 1e-4f),
+                                                             em.CurlNoiseScrollSpeed, 0.0f);
+                        }
+                        if (em.VortexEnabled)
+                        {
+                            modFlags |= shaderio::VFX_MOD_VORTEX;
+                            glm::vec3 axis = em.VortexAxis;
+                            const float axisLen = glm::length(axis);
+                            axis = axisLen > 1e-4f ? (axis / axisLen) : glm::vec3(0.0f, 1.0f, 0.0f);
+                            if (!em.LocalSpace)
+                                axis = glm::normalize(basis * axis);
+                            gpuParams.vortexAxisAndStrength = glm::vec4(axis, em.VortexStrength * (unit * scale));
+                            gpuParams.vortexParams = glm::vec4(em.VortexRadialPull * (unit * scale), em.VortexRadius * (unit * scale), 0.0f, 0.0f);
+                        }
+                        if (em.AttractorEnabled)
+                        {
+                            modFlags |= shaderio::VFX_MOD_ATTRACTOR;
+                            const glm::vec3 localOff = em.AttractorOffset * (unit * scale);
+                            const glm::vec3 target = em.LocalSpace ? localOff : (gpuParams.origin + basis * localOff);
+                            gpuParams.attractorTargetAndStrength = glm::vec4(target, em.AttractorStrength * (unit * scale));
+                            gpuParams.attractorParams = glm::vec4(em.AttractorRadius * (unit * scale), em.AttractorKillRadius * (unit * scale), 0.0f, 0.0f);
+                        }
+                        if (em.DepthCollisionEnabled)
+                        {
+                            modFlags |= shaderio::VFX_MOD_DEPTH_COLLISION;
+                            if (em.CollisionKillOnHit)
+                                modFlags |= shaderio::VFX_MOD_KILL_ON_COLLIDE;
+                            gpuParams.collisionParams = glm::vec4(std::clamp(em.CollisionRestitution, 0.0f, 1.0f),
+                                                                  std::clamp(em.CollisionFriction, 0.0f, 1.0f),
+                                                                  std::max(em.CollisionThickness, 0.02f) * unit, 0.0f);
+                        }
+                        if (em.Shape == ParticleShape::MeshSurface)
+                        {
+                            modFlags |= shaderio::VFX_MOD_MESH_SURFACE;
+                            gpuParams.collisionParams2.y = em.MeshSurfaceNormalSpeed * unit;
+                        }
+                        if (em.ColorOverLife.size() >= 2 || em.SizeOverLife.size() >= 2)
+                        {
+                            modFlags |= shaderio::VFX_MOD_CURVES;
+                            for (int k = 0; k < 16; ++k)
+                            {
+                                const float t = static_cast<float>(k) / 15.0f;
+                                gpuParams.colorCurveLut[k] = ParticleSystem::ColorOverLife(em, t) * tint;
+                                gpuParams.sizeCurveLut[k >> 2][k & 3] = std::max(ParticleSystem::SizeOverLife(em, t), 0.0f) * (unit * scale);
+                            }
+                        }
+                        gpuParams.moduleFlags = modFlags;
+
+                        Renderer::VfxMeshParticleOptions meshOpts{};
+                        if (em.RenderMode == ParticleRenderMode::Mesh)
+                        {
+                            meshOpts.Enabled = true;
+                            meshOpts.AlignToVelocity = em.AlignToVelocity;
+                            if (em.ParticleMesh != 0)
+                            {
+                                const MeshHandle* sub = nullptr;
+                                if (const StaticMesh* sm = AssetManager::FindLoadedAsset<StaticMesh>(em.ParticleMesh))
+                                {
+                                    if (sm->GetSubMeshCount() > 0) sub = &sm->GetSubMesh(0);
+                                }
+                                else if (const Mesh* m = AssetManager::FindLoadedAsset<Mesh>(em.ParticleMesh))
+                                {
+                                    if (m->GetSubMeshCount() > 0) sub = &m->GetSubMesh(0);
+                                }
+                                else
+                                {
+                                    missingAssets.push_back(em.ParticleMesh);
+                                }
+                                if (sub && sub->IsValid() && sub->rtIndices.count >= 3u)
+                                {
+                                    meshOpts.VerticesOffset = sub->vertices.offset;
+                                    meshOpts.IndicesOffset = sub->rtIndices.offset;
+                                    meshOpts.TriangleCount = sub->rtIndices.count / 3u;
+                                }
+                            }
+                            const uint32_t triCount = meshOpts.TriangleCount > 0u ? meshOpts.TriangleCount : 8u;
+                            gpuParams.meshRenderChunkCount = (triCount + 31u) / 32u;
+                        }
+
+                        const bool restart = sim.GpuNeedsReset;
+                        sim.GpuNeedsReset = false;
+                        m_renderer->SubmitGpuParticleEmitter(layerKey, settings, gpuParams, restart, static_cast<int32_t>(entt::to_integral(entity)), meshOpts);
+                    }
+                    else
+                    {
+                        particles.clear();
+                        particles.reserve(sim.Particles.size());
+                        for (const ParticleSimulation::Particle& p : sim.Particles)
+                        {
+                            const ParticleSystem::Appearance app = ParticleSystem::Evaluate(em, p, layerWorld, renderOrigin, scaledDt);
+                            if (app.Color.a <= 0.0f || app.Size <= 0.0f)
+                                continue;
+                            shaderio::GpuParticle gpu{};
+                            gpu.position = app.Position;
+                            gpu.size = app.Size * scale;
+                            gpu.color = app.Color * tint * glm::vec4(glm::vec3(intensityMul), 1.0f);
+                            gpu.rotation = p.Rotation;
+                            gpu.frame = app.Frame;
+                            gpu.previousPosition = app.PreviousPosition;
+                            particles.push_back(gpu);
+                        }
+                        m_renderer->SubmitParticles(settings, particles);
+                    }
+                    break;
+                }
+                case VfxLayerType::Trail:
+                {
+                    if (i >= vfx.Runtime.TrailSims.size())
+                        break;
+                    const auto& nodes = vfx.Runtime.TrailSims[i].Nodes;
+                    if (nodes.size() < 2u)
+                        break;
+                    const TrailRendererComponent& tr = layer.Trail;
+                    Renderer::VfxRibbonSettings settings;
+                    if (tr.Texture != 0)
+                    {
+                        if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(tr.Texture))
+                            settings.TextureSlot = tex->GetDescriptorIndexSlot();
+                        else
+                            missingAssets.push_back(tr.Texture);
+                    }
+                    settings.Additive = tr.Blend == ParticleBlend::Additive;
+                    settings.Soft = tr.SoftEdges;
+                    settings.Beam = false;
+                    settings.SoftDistance = std::max(tr.SoftDistance, 0.0f) * unit;
+                    settings.UvTileU = tr.TextureTileU;
+                    settings.UvScrollU = tr.TextureScrollU;
+
+                    const float life = std::max(tr.Lifetime, 0.02f);
+                    const float intensity = std::max(tr.Intensity * intensityMul, 0.0f);
+                    ribbonNodes.clear();
+                    ribbonNodes.reserve(nodes.size());
+                    for (size_t idx = nodes.size(); idx-- > 0;)
+                    {
+                        const float t = glm::clamp(nodes[idx].Age / life, 0.0f, 1.0f);
+                        const glm::vec4 col = glm::mix(tr.ColorStart, tr.ColorEnd, t) * tint;
+                        shaderio::GpuVfxRibbonNode gpu{};
+                        gpu.position = glm::vec3(nodes[idx].Position - renderOrigin);
+                        gpu.width = std::max(glm::mix(tr.WidthStart, tr.WidthEnd, t), 0.0f) * (unit * scale);
+                        gpu.color = glm::vec4(glm::vec3(col) * intensity, glm::clamp(col.a, 0.0f, 1.0f));
+                        gpu.u = t;
+                        ribbonNodes.push_back(gpu);
+                    }
+                    m_renderer->SubmitVfxRibbon(settings, ribbonNodes);
+                    break;
+                }
+                case VfxLayerType::Beam:
+                {
+                    const BeamRendererComponent& beam = layer.Beam;
+                    if (!beam.Enabled)
+                        break;
+                    const glm::dvec3 startWorld(layerWorld[3]);
+                    const glm::vec3 offsetWU = beam.TargetOffset * (unit * scale);
+                    glm::dvec3 endWorld = startWorld + glm::dvec3(offsetWU);
+                    if (beam.LocalTarget)
+                    {
+                        const glm::mat4 layerWorldF(layerWorld);
+                    glm::mat3 basis(layerWorldF);
+                        for (int col = 0; col < 3; ++col)
+                        {
+                            const float len = glm::length(basis[col]);
+                            if (len > 1e-6f) basis[col] /= len;
+                        }
+                        endWorld = startWorld + glm::dvec3(basis * offsetWU);
+                    }
+                    const glm::vec3 startRender = glm::vec3(startWorld - renderOrigin);
+                    const glm::vec3 endRender = glm::vec3(endWorld - renderOrigin);
+                    const glm::vec3 delta = endRender - startRender;
+                    const float beamLen = glm::length(delta);
+                    if (beamLen < 1e-4f)
+                        break;
+
+                    const glm::vec3 dir = delta / beamLen;
+                    const glm::vec3 refUp = std::abs(dir.y) < 0.95f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+                    const glm::vec3 perpA = glm::normalize(glm::cross(dir, refUp));
+                    const glm::vec3 perpB = glm::cross(dir, perpA);
+
+                    const uint32_t segments = std::clamp(beam.Segments, 4u, 128u);
+                    const float amp = beam.NoiseAmplitude * (unit * scale);
+                    const float freq = beam.NoiseFrequency;
+                    const float layerTime = i < vfx.Runtime.LayerTimes.size() ? vfx.Runtime.LayerTimes[i] : vfx.Runtime.Time;
+                    const float phase = layerTime * beam.NoiseSpeed;
+                    const float intensity = std::max(beam.Intensity * intensityMul, 0.0f);
+
+                    ribbonNodes.clear();
+                    ribbonNodes.reserve(segments + 1u);
+                    for (uint32_t s = 0; s <= segments; ++s)
+                    {
+                        const float u = static_cast<float>(s) / static_cast<float>(segments);
+                        glm::vec3 pos = glm::mix(startRender, endRender, u);
+                        if (amp > 1e-5f && s > 0u && s < segments)
+                        {
+                            const float envelope = std::sin(u * 3.14159265f);
+                            const float j1 = std::sin(u * freq * 11.3f + phase) * 0.6f + std::sin(u * freq * 27.1f - phase * 1.7f) * 0.4f;
+                            const float j2 = std::cos(u * freq * 13.7f - phase * 1.3f) * 0.6f + std::sin(u * freq * 31.9f + phase * 2.1f) * 0.4f;
+                            pos += (perpA * j1 + perpB * j2) * (amp * envelope);
+                        }
+                        const glm::vec4 col = glm::mix(beam.ColorStart, beam.ColorEnd, u) * tint;
+                        shaderio::GpuVfxRibbonNode gpu{};
+                        gpu.position = pos;
+                        gpu.width = std::max(glm::mix(beam.WidthStart, beam.WidthEnd, u), 0.0f) * (unit * scale);
+                        gpu.color = glm::vec4(glm::vec3(col) * intensity, glm::clamp(col.a, 0.0f, 1.0f));
+                        gpu.u = u;
+                        ribbonNodes.push_back(gpu);
+                    }
+
+                    Renderer::VfxRibbonSettings settings;
+                    if (beam.Texture != 0)
+                    {
+                        if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(beam.Texture))
+                            settings.TextureSlot = tex->GetDescriptorIndexSlot();
+                        else
+                            missingAssets.push_back(beam.Texture);
+                    }
+                    settings.Additive = beam.Blend == ParticleBlend::Additive;
+                    settings.Soft = false;
+                    settings.Beam = true;
+                    settings.UvTileU = beam.TextureTileU;
+                    settings.UvScrollU = beam.TextureScrollU;
+                    m_renderer->SubmitVfxRibbon(settings, ribbonNodes);
+                    break;
+                }
+                case VfxLayerType::Decal:
+                {
+                    const DecalComponent& decal = layer.Decal;
+                    if (!decal.Enabled)
+                        break;
+                    const glm::vec3 sizeWU = glm::max(decal.Size, glm::vec3(0.01f)) * (unit * scale);
+                    const glm::mat4 model = Math::RelativeTo(layerWorld, renderOrigin) * glm::scale(glm::mat4(1.0f), sizeWU);
+                    shaderio::GpuVfxDecal gpu{};
+                    gpu.model = model;
+                    gpu.invModel = glm::inverse(model);
+                    gpu.color = decal.Color * tint;
+                    gpu.textureIndex = 0xFFFFFFFFu;
+                    if (decal.Texture != 0)
+                    {
+                        if (const Texture2D* tex = AssetManager::FindLoadedAsset<Texture2D>(decal.Texture))
+                            gpu.textureIndex = tex->GetDescriptorIndexSlot();
+                        else
+                            missingAssets.push_back(decal.Texture);
+                    }
+                    gpu.emissiveIntensity = std::max(decal.EmissiveIntensity * intensityMul, 0.0f);
+                    gpu.normalFade = glm::clamp(decal.NormalFade, 0.0f, 1.0f);
+                    gpu.edgeFade = glm::clamp(decal.EdgeFade, 0.0f, 0.5f);
+                    gpu.flags = decal.Blend == ParticleBlend::Additive ? 1u : 0u;
+                    m_renderer->SubmitVfxDecal(gpu);
+                    break;
+                }
+                case VfxLayerType::Distortion:
+                {
+                    const DistortionComponent& dist = layer.Distortion;
+                    if (!dist.Enabled)
+                        break;
+                    const glm::mat4 layerWorldF(layerWorld);
+                    glm::mat3 basis(layerWorldF);
+                    for (int col = 0; col < 3; ++col)
+                    {
+                        const float len = glm::length(basis[col]);
+                        if (len > 1e-6f) basis[col] /= len;
+                    }
+                    shaderio::GpuVfxDistortion gpu{};
+                    gpu.position = glm::vec3(glm::dvec3(layerWorld[3]) - renderOrigin);
+                    gpu.radius = std::max(dist.Radius, 0.05f) * (unit * scale);
+                    gpu.right = basis[0];
+                    gpu.strength = dist.Strength * intensityMul;
+                    gpu.up = basis[2];
+                    gpu.ringWidth = glm::clamp(dist.RingWidth, 0.04f, 1.0f);
+                    gpu.rimTint = dist.RimTint * tint;
+                    gpu.mode = static_cast<uint32_t>(dist.Mode);
+                    gpu.speed = dist.Speed;
+                    gpu.chromaticAberration = glm::clamp(dist.ChromaticAberration, 0.0f, 1.0f);
+                    gpu.cameraFacing = dist.CameraFacing ? 1u : 0u;
+                    m_renderer->SubmitVfxDistortion(gpu);
+                    break;
+                }
+                case VfxLayerType::Volume:
+                {
+                    const VolumeComponent& vol = layer.Volume;
+                    if (!vol.Enabled)
+                        break;
+                    const VolumeAsset* volAsset = nullptr;
+                    if (vol.Volume != 0)
+                    {
+                        volAsset = AssetManager::FindLoadedAsset<VolumeAsset>(vol.Volume);
+                        if (!volAsset)
+                            missingAssets.push_back(vol.Volume);
+                    }
+                    uint32_t frameIdx = 0u;
+                    glm::vec3 aabbMin(-0.5f);
+                    glm::vec3 aabbMax(0.5f);
+                    float invMaxDensity = 1.0f;
+                    float invMaxTemp = 1.0f;
+                    const float layerTime = i < vfx.Runtime.LayerTimes.size() ? vfx.Runtime.LayerTimes[i] : vfx.Runtime.Time;
+                    if (volAsset && volAsset->IsValid())
+                    {
+                        const VolumeHeader& hdr = volAsset->GetHeader();
+                        const uint32_t totalFrames = std::max(hdr.FrameCount, 1u);
+                        const float rawFrame = std::max(layerTime, 0.0f) * std::max(hdr.Fps, 1.0f);
+                        frameIdx = vol.Looping
+                            ? (static_cast<uint32_t>(rawFrame) % totalFrames)
+                            : std::min(static_cast<uint32_t>(rawFrame), totalFrames - 1u);
+                        const VolumeFrameRecord& rec = volAsset->GetFrame(frameIdx);
+                        const glm::vec3 seqExtent = hdr.AabbMax - hdr.AabbMin;
+                        const float seqMaxDim = std::max({ seqExtent.x, seqExtent.y, seqExtent.z, 1e-3f });
+                        const glm::vec3 seqPivot = 0.5f * (hdr.AabbMin + hdr.AabbMax);
+                        aabbMin = (rec.AabbMin - seqPivot) / seqMaxDim;
+                        aabbMax = (rec.AabbMax - seqPivot) / seqMaxDim;
+                        invMaxDensity = hdr.MaxDensity > 1e-4f ? (1.0f / hdr.MaxDensity) : 1.0f;
+                        invMaxTemp = hdr.MaxTemperature > 1e-4f ? (1.0f / hdr.MaxTemperature) : 1.0f;
+                    }
+                    const glm::vec3 scaledMin = aabbMin * (vol.BoundsScale * scale * unit);
+                    const glm::vec3 scaledExtent = glm::max((aabbMax - aabbMin) * (vol.BoundsScale * scale * unit), glm::vec3(0.01f * unit));
+                    const glm::mat4 entityRel = Math::RelativeTo(layerWorld, renderOrigin);
+                    const glm::mat4 boxToWorld = entityRel * glm::translate(glm::mat4(1.0f), scaledMin) * glm::scale(glm::mat4(1.0f), scaledExtent);
+
+                    Renderer::GpuVolumeSubmission sub{};
+                    sub.EntityId = layerKey;
+                    sub.Asset = volAsset;
+                    sub.FrameIndex = frameIdx;
+                    sub.Params.model = boxToWorld;
+                    sub.Params.invModel = glm::inverse(boxToWorld);
+                    sub.Params.albedoAndDensity = glm::vec4(vol.Albedo * glm::vec3(tint), std::max(vol.DensityScale, 0.0f));
+                    sub.Params.emissionParams = glm::vec4(std::max(vol.EmissionScale * intensityMul, 0.0f), vol.BlackbodyTemperature,
+                                                          glm::clamp(vol.Anisotropy, -0.9f, 0.9f), std::max(vol.AmbientStrength, 0.0f));
+                    sub.Params.marchParams = glm::vec4(static_cast<float>(std::clamp(vol.StepCount, 16u, 192u)),
+                                                       static_cast<float>(std::clamp(vol.ShadowSteps, 0u, 16u)),
+                                                       invMaxDensity, invMaxTemp);
+                    m_renderer->SubmitHeterogeneousVolume(sub);
+                    break;
+                }
+                case VfxLayerType::LocalFog:
+                {
+                    const LocalFogVolumeComponent& fog = layer.LocalFog;
+                    if (!fog.Enabled)
+                        break;
+                    const glm::vec3 halfExtentsWU = glm::max(fog.Extents, glm::vec3(0.05f)) * (unit * scale);
+                    const glm::mat4 model = Math::RelativeTo(layerWorld, renderOrigin) * glm::scale(glm::mat4(1.0f), halfExtentsWU);
+                    shaderio::GpuLocalFogVolume gpu{};
+                    gpu.invModel = glm::inverse(model);
+                    gpu.albedoAndDensity = glm::vec4(fog.Albedo * glm::vec3(tint), std::max(fog.Density, 0.0f) / std::max(unit, 1e-4f));
+                    gpu.emissiveAndFalloff = glm::vec4(fog.EmissiveColor * glm::vec3(tint) * (std::max(fog.EmissiveIntensity * intensityMul, 0.0f) / std::max(unit, 1e-4f)),
+                                                       glm::clamp(fog.EdgeFalloff, 0.01f, 1.0f));
+                    gpu.noiseParams = glm::vec4(glm::clamp(fog.NoiseStrength, 0.0f, 1.0f),
+                                                std::max(fog.NoiseScale, 0.01f) / std::max(unit, 1e-4f),
+                                                fog.NoiseSpeed,
+                                                static_cast<float>(fog.Shape));
+                    m_renderer->SubmitLocalFogVolume(gpu);
+                    break;
+                }
+                case VfxLayerType::PointLight:
+                    // Submitted in SubmitLights() so it participates in RT shadows, GI & deferred lighting.
+                    break;
+                }
+            }
         }
     }
 
@@ -3974,7 +4585,7 @@ namespace Nox
         using DuplicatableComponents = ComponentGroup<
             MeshComponent, MaterialComponent, MetadataComponent, ModelInstanceComponent, PrefabInstanceComponent, DirectionalLightComponent,
             PointLightComponent, SpotLightComponent, RectLightComponent, DiscLightComponent, ReflectionProbeComponent, IrradianceVolumeComponent, EnvironmentLightComponent, AnimatorComponent, TimelinePlayerComponent,
-            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
+            AudioSourceComponent, ImpactSoundComponent, AudioListenerComponent, AudioVolumeComponent, AcousticProbeVolumeComponent, PostProcessVolumeComponent, FolderComponent, ParticleEmitterComponent, TrailRendererComponent, BeamRendererComponent, DecalComponent, DistortionComponent, VolumeComponent, LocalFogVolumeComponent, VfxComponent, SpriteRendererComponent, CircleRendererComponent, CameraComponent,
             ScriptComponent, RigidBody2DComponent, BoxCollider2DComponent,
             CircleCollider2DComponent, RigidBody3DComponent, BoxCollider3DComponent, SphereCollider3DComponent, CapsuleCollider3DComponent,
             CylinderCollider3DComponent, PlaneCollider3DComponent, MeshCollider3DComponent, PhysicsJoint3DComponent, CollisionFilter3DComponent,
@@ -4317,6 +4928,35 @@ namespace Nox
             }
         }
         {
+            const float unit = WorldUnits::PerMeter();
+            auto vfxView = m_Registry.view<WorldTransformComponent, VfxComponent>(entt::exclude<InactiveInHierarchyComponent>);
+            for (auto entity : vfxView)
+            {
+                const auto [wtc, vfx] = vfxView.get<WorldTransformComponent, VfxComponent>(entity);
+                if (vfx.Vfx == 0)
+                    continue;
+                const VfxAsset* asset = AssetManager::FindLoadedAsset<VfxAsset>(vfx.Vfx);
+                if (!asset)
+                    continue;
+                const float scale = std::max(vfx.Scale, 0.01f);
+                const float intensityMul = ResolveVfxIntensity(*asset, vfx);
+                const glm::vec4 tint = ResolveVfxTint(vfx);
+                for (const VfxLayer& layer : asset->Layers)
+                {
+                    if (layer.Type != VfxLayerType::PointLight || !IsVfxLayerActive(layer, vfx.Runtime.Time))
+                        continue;
+                    const float pulse = layer.Light.PulseSpeed > 0.0f
+                        ? (0.8f + 0.2f * std::sin(vfx.Runtime.Time * layer.Light.PulseSpeed))
+                        : 1.0f;
+                    PointLightComponent pl{};
+                    pl.Color = layer.Light.Color * glm::vec3(tint);
+                    pl.Intensity = std::max(layer.Light.Intensity * intensityMul * pulse, 0.0f);
+                    pl.Radius = std::max(layer.Light.Radius * scale, 0.05f);
+                    m_renderer->SubmitLight(ComposeVfxLayerWorld(wtc.WorldMatrix, layer, scale, unit), pl);
+                }
+            }
+        }
+        {
             auto view = m_Registry.view<WorldTransformComponent, SpotLightComponent>(entt::exclude<InactiveInHierarchyComponent>);
             for (auto entity : view)
             {
@@ -4592,6 +5232,16 @@ namespace Nox
 
     template <>
     void Scene::OnComponentAdded<VolumeComponent>(Entity entity, VolumeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<LocalFogVolumeComponent>(Entity entity, LocalFogVolumeComponent& component)
+    {
+    }
+
+    template <>
+    void Scene::OnComponentAdded<VfxComponent>(Entity entity, VfxComponent& component)
     {
     }
 

@@ -14,6 +14,7 @@
 #include "PrefabImporter.h"
 #include "TimelineImporter.h"
 #include "VolumeImporter.h"
+#include "VfxAsset.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Project/Project.h"
 #include "NoxCore/Renderer/Font.h"
@@ -99,6 +100,13 @@ namespace Nox
         }},
         { AssetType::Volume, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
             return Ref<Asset>(VolumeImporter::ImportVolume(h, meta));
+        }},
+        { AssetType::Vfx, [](AssetHandle h, const AssetMetadata& meta) -> Ref<Asset> {
+            Ref<VfxAsset> vfx = CreateRef<VfxAsset>();
+            if (!vfx->Load(Project::GetActiveAssetDirectory() / meta.FilePath))
+                return {};
+            vfx->Handle = h;
+            return Ref<Asset>(vfx);
         }}
     };
     

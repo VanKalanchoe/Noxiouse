@@ -70,6 +70,25 @@ float4 fog_history(UniformBufferObject ubo, PushConstantVolumetricFog pushConsta
     return lerp(history.SampleLevel(linearClamp, float3(uv, lower), 0.0), history.SampleLevel(linearClamp, float3(uv, upper), 0.0), slice - lower);
 }
 
+float fog_hash31(float3 p)
+{
+    p = frac(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return frac((p.x + p.y) * p.z);
+}
+
+float fog_noise3(float3 x)
+{
+    const float3 i = floor(x);
+    const float3 f = frac(x);
+    const float3 u = f * f * (3.0 - 2.0 * f);
+    return lerp(
+        lerp(lerp(fog_hash31(i + float3(0,0,0)), fog_hash31(i + float3(1,0,0)), u.x),
+             lerp(fog_hash31(i + float3(0,1,0)), fog_hash31(i + float3(1,1,0)), u.x), u.y),
+        lerp(lerp(fog_hash31(i + float3(0,0,1)), fog_hash31(i + float3(1,0,1)), u.x),
+             lerp(fog_hash31(i + float3(0,1,1)), fog_hash31(i + float3(1,1,1)), u.x), u.y), u.z);
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog pushConstant)
@@ -88,8 +107,54 @@ void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog
 
     // The height fog's density there (per world unit).
     const float falloff = max(ubo.heightFogFalloff, 0.0);
-    const float extinction = ubo.heightFogDensity * exp(-falloff * (position.y - ubo.heightFogBaseY)) * pushConstant.extinctionScale;
-    float3 scattered = float3(0.0);
+    const float globalExtinction = ubo.heightFogDensity * exp(-falloff * (position.y - ubo.heightFogBaseY)) * pushConstant.extinctionScale;
+
+    // Step N3: Inject local procedural fog volumes (Box / Sphere / Cylinder with 3D mist noise & optional emissive glow).
+    float localExtinction = 0.0;
+    float3 localAlbedoWeighted = float3(0.0);
+    float3 localEmission = float3(0.0);
+    if (pushConstant.localFogVolumeCount > 0u && pushConstant.localFogVolumesReference != 0)
+    {
+        BufferRef<GpuLocalFogVolume> localVols = BufferRef<GpuLocalFogVolume>(pushConstant.localFogVolumesReference);
+        for (uint vi = 0u; vi < pushConstant.localFogVolumeCount; ++vi)
+        {
+            const GpuLocalFogVolume v = localVols[vi];
+            const float3 lp = mul(v.invModel, float4(position, 1.0)).xyz;
+            const uint shape = uint(v.noiseParams.w + 0.5);
+            float d;
+            if (shape == 1u) // Sphere
+                d = length(lp);
+            else if (shape == 2u) // Cylinder
+                d = max(length(lp.xz), abs(lp.y));
+            else // Box
+                d = max(abs(lp.x), max(abs(lp.y), abs(lp.z)));
+
+            if (d >= 1.0)
+                continue;
+
+            const float edge = max(v.emissiveAndFalloff.w, 1e-3);
+            float mask = saturate((1.0 - d) / edge);
+            mask = mask * mask * (3.0 - 2.0 * mask);
+
+            if (v.noiseParams.x > 1e-3)
+            {
+                const float3 np = position * v.noiseParams.y + float3(0.0, -ubo.timeSeconds * v.noiseParams.z, ubo.timeSeconds * v.noiseParams.z * 0.43);
+                const float n = fog_noise3(np) * 0.65 + fog_noise3(np * 2.15 + 13.7) * 0.35;
+                mask *= lerp(1.0, saturate(n * 1.45), v.noiseParams.x);
+            }
+
+            const float ext = v.albedoAndDensity.w * mask;
+            localExtinction += ext;
+            localAlbedoWeighted += v.albedoAndDensity.rgb * ext;
+            localEmission += v.emissiveAndFalloff.rgb * mask;
+        }
+    }
+
+    const float extinction = globalExtinction + localExtinction;
+    const float3 effectiveAlbedo = extinction > 1e-7
+        ? (pushConstant.albedo * globalExtinction + localAlbedoWeighted) / extinction
+        : pushConstant.albedo;
+    float3 scattered = localEmission;
     if (extinction > 0.0)
     {
         const float noise = frac(52.9829189 * frac(0.06711056 * float(id.x) + 0.00583715 * float(id.y) + 0.1 * float(id.z)) + pushConstant.jitter);
@@ -141,7 +206,7 @@ void lightMain(uint3 id : SV_DispatchThreadID, uniform PushConstantVolumetricFog
             light += 0.5 * (irradiance.SampleLevel(irradianceSampler, float3(0.0, 1.0, 0.0), 0.0).rgb +
                             irradiance.SampleLevel(irradianceSampler, direction, 0.0).rgb) * ubo.scaleIBLAmbient;
         }
-        scattered = light * extinction * pushConstant.albedo;
+        scattered += light * extinction * effectiveAlbedo;
     }
     float4 result = float4(scattered, extinction);
 

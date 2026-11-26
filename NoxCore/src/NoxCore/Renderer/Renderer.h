@@ -483,6 +483,7 @@ namespace Nox
             shaderio::GpuHeterogeneousVolume Params{};
         };
         void SubmitHeterogeneousVolume(const GpuVolumeSubmission& submission);
+        void SubmitLocalFogVolume(const shaderio::GpuLocalFogVolume& volume);
         void SubmitLight(const glm::dmat4& transform, const DirectionalLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const PointLightComponent& light);
         void SubmitLight(const glm::dmat4& transform, const SpotLightComponent& light);
@@ -1804,7 +1805,8 @@ namespace Nox
         // Heterogeneous Volumes (step N2)
         struct GpuVolumeChannelSlot
         {
-            nri::Buffer Buffer;
+            nri::Buffer Staging; // Host-mapped upload staging buffer (NRI_BUFFER_USAGE_UNIFORM)
+            nri::Buffer Device;  // VRAM-resident storage buffer (NRI_BUFFER_USAGE_STORAGE_STATIC)
             void* Mapped = nullptr;
             uint64_t Capacity = 0;
         };
@@ -1827,7 +1829,13 @@ namespace Nox
         std::vector<nri::Buffer> m_vfxVolumeBuffers;
         std::vector<void*> m_vfxVolumeBuffersMapped;
         uint64_t m_vfxVolumeBufferCapacity = 0;
+        std::vector<shaderio::GpuLocalFogVolume> m_localFogVolumes;
+        std::vector<nri::Buffer> m_localFogVolumeBuffers;
+        std::vector<void*> m_localFogVolumeBuffersMapped;
+        uint64_t m_localFogVolumeBufferCapacity = 0;
+
         nri::Pipeline m_vfxVolumePipeline;
+        nri::Pipeline m_vfxVolumeCompositePipeline;
 
         void createVfxGraphicsPipelines(bool forceCompile = false);
         void addVfxDecalPass();

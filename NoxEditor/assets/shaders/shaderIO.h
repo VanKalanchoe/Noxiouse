@@ -1799,6 +1799,15 @@ struct PushConstantSSGIDenoise
 
 // Volumetric fog (RS6; VolumetricFog.slang): lightMain lights each froxel (the height fog's density, the sun and local lights with the
 // frame's shadow maps or a sun ray, the sky around) and blends it with last frame's; integrateMain accumulates along each column.
+// Local Volumetric Fog Volume injected into VolumetricFog.slang froxels (docs/VFX_And_Volumes_Plan_2026-11.md step N3).
+struct GpuLocalFogVolume
+{
+    mat4 invModel;             // render space -> unit local space [-1, 1]^3
+    vec4 albedoAndDensity;     // rgb = scatter albedo, w = extinction per world unit
+    vec4 emissiveAndFalloff;   // rgb = emissive radiance per world unit, w = edgeFalloff (0..1)
+    vec4 noiseParams;          // x = noiseStrength, y = noiseScale (cycles/wu), z = noiseSpeed, w = shape (0 Box, 1 Sphere, 2 Cyl)
+};
+
 struct PushConstantVolumetricFog
 {
     mat4 invViewProj;
@@ -1817,6 +1826,9 @@ struct PushConstantVolumetricFog
     float jitter;          // [0, 1): this frame's depth offset in each froxel
     vec3 albedo;           // scattering / extinction
     uint32_t localLights;  // 1: point / spot lights scatter too
+    uint64_t localFogVolumesReference; // GpuLocalFogVolume[] (step N3), 0 if none
+    uint32_t localFogVolumeCount;
+    uint32_t padFog0;
 };
 
 struct PushConstantSSAOBlur

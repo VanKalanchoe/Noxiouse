@@ -541,6 +541,72 @@ namespace Nox
             return emitter ? static_cast<int32_t>(emitter->Simulation.Particles.size()) : 0;
         }
 
+        // Nox.VfxComponent (Step V4 unified multi-layer .nvfx).
+        VfxComponent* FindVfx(uint64_t entityID)
+        {
+            if (!s_Scene) return nullptr;
+            Entity entity = s_Scene->GetEntityByUUID(UUID(entityID));
+            return entity && entity.HasComponent<VfxComponent>() ? &entity.GetComponent<VfxComponent>() : nullptr;
+        }
+
+        void VfxPlay(uint64_t entityID, Coral::Bool32 restart)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+            {
+                vfx->Playing = true;
+                if (restart)
+                    vfx->Runtime.NeedsRestart = true;
+            }
+        }
+
+        void VfxStop(uint64_t entityID)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+                vfx->Playing = false;
+        }
+
+        Coral::Bool32 VfxIsPlaying(uint64_t entityID)
+        {
+            const VfxComponent* vfx = FindVfx(entityID);
+            return vfx && vfx->Playing;
+        }
+
+        float VfxGetScale(uint64_t entityID)
+        {
+            const VfxComponent* vfx = FindVfx(entityID);
+            return vfx ? vfx->Scale : 1.0f;
+        }
+
+        void VfxSetScale(uint64_t entityID, float scale)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+                vfx->Scale = std::max(scale, 0.01f);
+        }
+
+        void VfxSetColorTint(uint64_t entityID, float r, float g, float b, float a)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+                vfx->ColorTint = { r, g, b, a };
+        }
+
+        void VfxSetFloat(uint64_t entityID, Coral::String name, float value)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+                vfx->Runtime.FloatParams[std::string(name)] = value;
+        }
+
+        void VfxSetVec3(uint64_t entityID, Coral::String name, float x, float y, float z)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+                vfx->Runtime.Vec3Params[std::string(name)] = { x, y, z };
+        }
+
+        void VfxSetColor(uint64_t entityID, Coral::String name, float r, float g, float b, float a)
+        {
+            if (VfxComponent* vfx = FindVfx(entityID))
+                vfx->Runtime.ColorParams[std::string(name)] = { r, g, b, a };
+        }
+
         // Nox.RigidBody3DComponent: forces and velocities of the entity's physics body (Play / Simulate only).
         template <typename Function>
         void WithRigidBody(uint64_t entityID, Function function)
@@ -629,6 +695,7 @@ namespace Nox
                 case 6: return entity.HasComponent<ParticleEmitterComponent>();
                 case 7: return entity.HasComponent<MeshComponent>();
                 case 8: return entity.HasComponent<AudioSourceComponent>();
+                case 9: return entity.HasComponent<VfxComponent>();
                 default: return false;
             }
         }
@@ -1816,6 +1883,15 @@ namespace Nox
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Stop", reinterpret_cast<void*>(&ParticlesStop));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_Emit", reinterpret_cast<void*>(&ParticlesEmit));
         assembly.AddInternalCall("Nox.InternalCalls", "Particles_IsEmitting", reinterpret_cast<void*>(&ParticlesIsEmitting));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_Play", reinterpret_cast<void*>(&VfxPlay));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_Stop", reinterpret_cast<void*>(&VfxStop));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_IsPlaying", reinterpret_cast<void*>(&VfxIsPlaying));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_GetScale", reinterpret_cast<void*>(&VfxGetScale));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetScale", reinterpret_cast<void*>(&VfxSetScale));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetColorTint", reinterpret_cast<void*>(&VfxSetColorTint));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetFloat", reinterpret_cast<void*>(&VfxSetFloat));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetVec3", reinterpret_cast<void*>(&VfxSetVec3));
+        assembly.AddInternalCall("Nox.InternalCalls", "Vfx_SetColor", reinterpret_cast<void*>(&VfxSetColor));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_SetMorphWeight", reinterpret_cast<void*>(&MeshSetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_GetMorphWeight", reinterpret_cast<void*>(&MeshGetMorphWeight));
         assembly.AddInternalCall("Nox.InternalCalls", "Mesh_ClearMorphWeight", reinterpret_cast<void*>(&MeshClearMorphWeight));
