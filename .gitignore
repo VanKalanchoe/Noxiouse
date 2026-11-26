@@ -308,3 +308,5 @@ Facerun/Assets/StreamingTest
 # Runtime shader caches (NoxRHI Slang cache + NoxUI built-in shader cache)
 **/shader_cache/
 **/shader_cache_noxui/
+NoxEditor/assets/vfx/TornadoLoopingVDB
+Facerun/Assets/VFX/TornadoVDB

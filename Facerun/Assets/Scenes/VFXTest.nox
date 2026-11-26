@@ -1,98 +1,141 @@
 Scene: Untitled
 Entities:
-  - Entity: 2996522294294709520
+  - Entity: 6431115465190982195
     TagComponent:
-      Tag: Procedural Volumetric
+      Tag: VFXTest
     TransformComponent:
-      Translation: [0, 0, 0]
-      Rotation: [-1.5707964, 0, 0]
+      Translation: [0, 20, 0]
+      Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    VolumeComponent:
-      Enabled: true
-      Volume: 12405769930997593263
+    VfxComponent:
+      Vfx: 12807476084967674388
       Playing: true
       Looping: true
       PlaybackSpeed: 1
-      DensityScale: 30
-      Albedo: [0.84313726, 0.64705884, 0.4509804]
-      Anisotropy: 0.35
-      EmissionScale: 26
-      BlackbodyTemperature: 5750
-      AmbientStrength: 0.2
-      StepCount: 96
-      ShadowSteps: 12
-      BoundsScale: [6, 6, 6]
-  - Entity: 10146734232425244883
+      Scale: 1
+      ColorTint: [1, 1, 1, 1]
+  - Entity: 16772593587678668125
     TagComponent:
-      Tag: Trail
+      Tag: PointLight
     Active: false
     TransformComponent:
-      Translation: [54.12828063964844, 191.30210876464844, 23.175060272216797]
+      Translation: [-52.49552536010742, 108.92807006835938, -5.6903076171875]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    TrailRendererComponent:
-      Emitting: true
-      Lifetime: 0.6
-      MinVertexDistance: 0.05
-      WidthStart: 0.3
-      WidthEnd: 0.02
-      ColorStart: [0.3, 0.75, 1, 1]
-      ColorEnd: [0.1, 0.25, 1, 0]
-      Intensity: 4
+    PointLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 5
+      Range: 1000
+      Radius: 5
+      ShadowSamples: 1
+  - Entity: 1581206929919416548
+    TagComponent:
+      Tag: VolumetricFog
+    Active: false
+    TransformComponent:
+      Translation: [0, 1.5, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    LocalFogVolumeComponent:
+      Enabled: true
+      Shape: Box
+      Extents: [3, 2, 3]
+      Density: 0.6
+      Albedo: [0.75, 0.85, 1]
+      EmissiveColor: [0.15686275, 0.627451, 1]
+      EmissiveIntensity: 1.5
+      EdgeFalloff: 0.45
+      NoiseStrength: 0.5
+      NoiseScale: 0.5
+      NoiseSpeed: 0.4
+  - Entity: 14842273627986004197
+    TagComponent:
+      Tag: ScreenSpaceDistortion
+    Active: false
+    TransformComponent:
+      Translation: [0, 60.02885437011719, 177.18588256835938]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    DistortionComponent:
+      Enabled: true
+      Mode: PortalSwirl
+      Radius: 2.5
+      Strength: 0.04
+      RingWidth: 0.25
+      Speed: 1.5
+      ChromaticAberration: 0.25
+      RimTint: [0.4, 0.8, 1, 0.35]
+      CameraFacing: true
+  - Entity: 8128056638387387445
+    TagComponent:
+      Tag: Cube
+    Active: false
+    TransformComponent:
+      Translation: [0, 105, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 11025342519802008604
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 11022713676092770360
+    TagComponent:
+      Tag: Projected Decal
+    Active: false
+    TransformComponent:
+      Translation: [4.8833160400390625, 30.585819244384766, 1.696075439453125]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    DecalComponent:
+      Enabled: true
+      Size: [3, 1.5, 3]
+      Color: [1, 0.55, 0.15, 1]
+      EmissiveIntensity: 4
+      Blend: Additive
+      Texture: 0
+      NormalFade: 0.35
+      EdgeFade: 0.15
+  - Entity: 6705288518334031356
+    TagComponent:
+      Tag: Beam
+    Active: false
+    TransformComponent:
+      Translation: [0, 150, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    BeamRendererComponent:
+      Enabled: true
+      TargetOffset: [0, 0, 5]
+      TargetEntity: 0
+      LocalTarget: true
+      Segments: 24
+      WidthStart: 0.12
+      WidthEnd: 0.12
+      NoiseAmplitude: 0
+      NoiseFrequency: 2
+      NoiseSpeed: 18
+      ColorStart: [0.45, 0.85, 1, 1]
+      ColorEnd: [0.85, 0.95, 1, 1]
+      Intensity: 5
       Blend: Additive
       Texture: 0
       TextureTileU: 1
-      TextureScrollU: 0
-      SoftEdges: true
-      SoftDistance: 0.2
-  - Entity: 11846806231363535392
+      TextureScrollU: -2
+  - Entity: 14123991644088834448
     TagComponent:
-      Tag: Enviroment
+      Tag: Floor
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    EnvironmentLightComponent:
-      Source: ProceduralSky
-      TexturePath: ""
-      RadianceScale: [1, 1, 1]
-      Rotation: 0
-      Enabled: true
-      RayleighScale: 1
-      MieScale: 1
-      OzoneScale: 1
-      MieAnisotropy: 0.8
-      GroundAlbedo: [0.3, 0.3, 0.3]
-      AltitudeKm: 0
-      AerialPerspectiveScale: 1
-      Clouds: true
-      CloudCoverage: 0.35
-      CloudDensity: 1
-      CloudBottomKm: 1.5
-      CloudThicknessKm: 2
-      CloudScaleKm: 8
-      CloudOffsetKm: [0, 0]
-      CloudWind: [0, 0]
-      SunThroughAtmosphere: true
-      Moon: true
-      MoonIntensity: 0.004
-      MoonColor: [0.75, 0.85, 1]
-      MoonAngularDiameter: 0.53
-      MoonOppositeSun: true
-      MoonElevation: 40
-      MoonAzimuth: 200
-      Stars: true
-      StarIntensity: 1
-      HeightFog: false
-      FogDensity: 0.5
-      FogHeightFalloff: 5
-      FogHeight: 0
-      FogStartDistance: 0
-      FogMaxOpacity: 1
-      FogColor: [1, 1, 1]
-      FogFromEnvironment: true
-      FogSunScattering: 0.05
-      FogSunExponent: 8
+      Scale: [100, 1, 100]
+    MeshComponent:
+      MeshHandle: 10000201986349826000
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
   - Entity: 5683023298584899068
     TagComponent:
       Tag: Particle
@@ -152,91 +195,97 @@ Entities:
       RenderMode: Mesh
       ParticleMesh: 0
       AlignToVelocity: true
-  - Entity: 14123991644088834448
+  - Entity: 11846806231363535392
     TagComponent:
-      Tag: Floor
+      Tag: Enviroment
     TransformComponent:
       Translation: [0, 0, 0]
       Rotation: [0, 0, 0]
-      Scale: [100, 1, 100]
-    MeshComponent:
-      MeshHandle: 10000201986349826000
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-  - Entity: 6705288518334031356
+      Scale: [1, 1, 1]
+    EnvironmentLightComponent:
+      Source: ProceduralSky
+      TexturePath: ""
+      RadianceScale: [1, 1, 1]
+      Rotation: 0
+      Enabled: true
+      RayleighScale: 1
+      MieScale: 1
+      OzoneScale: 1
+      MieAnisotropy: 0.8
+      GroundAlbedo: [0.3, 0.3, 0.3]
+      AltitudeKm: 0
+      AerialPerspectiveScale: 1
+      Clouds: true
+      CloudCoverage: 0.35
+      CloudDensity: 1
+      CloudBottomKm: 1.5
+      CloudThicknessKm: 2
+      CloudScaleKm: 8
+      CloudOffsetKm: [0, 0]
+      CloudWind: [0, 0]
+      SunThroughAtmosphere: true
+      Moon: true
+      MoonIntensity: 0.004
+      MoonColor: [0.75, 0.85, 1]
+      MoonAngularDiameter: 0.53
+      MoonOppositeSun: true
+      MoonElevation: 40
+      MoonAzimuth: 200
+      Stars: true
+      StarIntensity: 1
+      HeightFog: false
+      FogDensity: 0.5
+      FogHeightFalloff: 5
+      FogHeight: 0
+      FogStartDistance: 0
+      FogMaxOpacity: 1
+      FogColor: [1, 1, 1]
+      FogFromEnvironment: true
+      FogSunScattering: 0.05
+      FogSunExponent: 8
+  - Entity: 10146734232425244883
     TagComponent:
-      Tag: Beam
+      Tag: Trail
     Active: false
     TransformComponent:
-      Translation: [0, 150, 0]
+      Translation: [54.12828063964844, 191.30210876464844, 23.175060272216797]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
-    BeamRendererComponent:
-      Enabled: true
-      TargetOffset: [0, 0, 5]
-      TargetEntity: 0
-      LocalTarget: true
-      Segments: 24
-      WidthStart: 0.12
-      WidthEnd: 0.12
-      NoiseAmplitude: 0
-      NoiseFrequency: 2
-      NoiseSpeed: 18
-      ColorStart: [0.45, 0.85, 1, 1]
-      ColorEnd: [0.85, 0.95, 1, 1]
-      Intensity: 5
+    TrailRendererComponent:
+      Emitting: true
+      Lifetime: 0.6
+      MinVertexDistance: 0.05
+      WidthStart: 0.3
+      WidthEnd: 0.02
+      ColorStart: [0.3, 0.75, 1, 1]
+      ColorEnd: [0.1, 0.25, 1, 0]
+      Intensity: 4
       Blend: Additive
       Texture: 0
       TextureTileU: 1
-      TextureScrollU: -2
-  - Entity: 11022713676092770360
+      TextureScrollU: 0
+      SoftEdges: true
+      SoftDistance: 0.2
+  - Entity: 2996522294294709520
     TagComponent:
-      Tag: Projected Decal
+      Tag: Procedural Volumetric
     Active: false
     TransformComponent:
-      Translation: [4.8833160400390625, 30.585819244384766, 1.696075439453125]
-      Rotation: [0, 0, 0]
+      Translation: [0, 0, 0]
+      Rotation: [-1.5707964, 0, 0]
       Scale: [1, 1, 1]
-    DecalComponent:
+    VolumeComponent:
       Enabled: true
-      Size: [3, 1.5, 3]
-      Color: [1, 0.55, 0.15, 1]
-      EmissiveIntensity: 4
-      Blend: Additive
-      Texture: 0
-      NormalFade: 0.35
-      EdgeFade: 0.15
-  - Entity: 8128056638387387445
-    TagComponent:
-      Tag: Cube
-    Active: false
-    TransformComponent:
-      Translation: [0, 105, 0]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    MeshComponent:
-      MeshHandle: 11025342519802008604
-      SubmeshIndex: 0
-      SubmeshCount: 1
-    MaterialComponent:
-      {}
-  - Entity: 14842273627986004197
-    TagComponent:
-      Tag: ScreenSpaceDistortion
-    Active: false
-    TransformComponent:
-      Translation: [0, 60.02885437011719, 177.18588256835938]
-      Rotation: [0, 0, 0]
-      Scale: [1, 1, 1]
-    DistortionComponent:
-      Enabled: true
-      Mode: PortalSwirl
-      Radius: 2.5
-      Strength: 0.04
-      RingWidth: 0.25
-      Speed: 1.5
-      ChromaticAberration: 0.25
-      RimTint: [0.4, 0.8, 1, 0.35]
-      CameraFacing: true
+      Volume: 0
+      Playing: true
+      Looping: true
+      PlaybackSpeed: 1
+      DensityScale: 30
+      Albedo: [0.84313726, 0.64705884, 0.4509804]
+      Anisotropy: 0.35
+      EmissionScale: 26
+      BlackbodyTemperature: 5750
+      AmbientStrength: 0.2
+      StepCount: 96
+      ShadowSteps: 12
+      BoundsScale: [6, 6, 6]
