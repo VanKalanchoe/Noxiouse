@@ -390,7 +390,7 @@ window.NOX_DOCS_PAGES = [
             "  - `GBufferMaterial.slang` resolves visible pixels once with analytic ray-differential barycentrics (`ddx`/`ddy`), Tokuyoshi-Kaplanyan geometric specular AA, mip/virtual-texture feedback, and full OpenPBR / glTF 2.0 extension lobes.",
             "- **Streaming Virtual Texturing ([`VirtualTextureStreamer.cpp`](file:///E:/dev/noxiouse/NoxCore/src/NoxCore/Renderer/VirtualTextureStreamer.cpp))**: Streams `128x128` (+4px border = `136x136`) tiles into 5 format-specific 4096×4096 physical tile cache atlases (BC7 sRGB/Linear, BC5, BC4, RGBA8) with LRU eviction.",
             "- **Decoupled RT, Cascaded DDGI, Async Screen-Probe GI, ReSTIR & Hardware Path Tracer**:",
-            "  - **RT Shadows (`ShadowMask.slang`)** denoised by **NRD SIGMA**.",
+            "  - **RT Shadows (`ShadowMask.slang`)** denoised by **NRD SIGMA**. NRD's denoising range is `NRDDenoisingRangeMeters` (100 km) in the project's units (`Renderer::beginNRDFrame`, for every NRD denoiser): NRD leaves pixels beyond it unwritten.",
             "  - **RT Reflections (`Reflection.slang`)** denoised by **NRD REBLUR / RELAX**.",
             "  - **Cascaded Toroidal DDGI (`DDGI*.slang`)** with probe relocation and Chebyshev visibility.",
             "  - **Lumen-Style Async-Compute Screen-Probe GI (`ScreenProbe*.slang`)** with 3D `EmissiveLightGrid` RIS NEE.",

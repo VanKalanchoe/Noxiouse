@@ -7198,12 +7198,8 @@ namespace Nox
         m_noxUIInitialized = false;
     }
 
-    bool Renderer::evaluateNRDShadows(nri::CommandBuffer& cmd, NriTexture inPenumbra, NriTexture inMV, NriTexture inNormalRough,
-                                      NriTexture inViewZ, NriTexture outShadow, const float lightDir[3], glm::vec2 mvScale,
-                                      uint32_t frameIdx, bool resetHistory)
+    bool Renderer::beginNRDFrame(glm::vec2 mvScale, uint32_t frameIdx, bool resetHistory)
     {
-        if (!m_denoiser)
-            return false;
         nri::DenoiserCommonSettings common{};
         std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
         std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
@@ -7211,9 +7207,23 @@ namespace Nox
         std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
         common.motionVectorScale[0] = mvScale.x;
         common.motionVectorScale[1] = mvScale.y;
+        // NRD's lengths are the scene's: it leaves every pixel farther than this untouched -- SIGMA's and REBLUR's last passes return
+        // before writing their output there -- so it must reach past any surface, and the sky's view Z (nrd_sky_view_z, 4x this)
+        // lies beyond it. NoxRHI's own default (5000) is 50 m in centimetre projects: every farther surface kept an earlier frame's
+        // denoised value in the transient output (shadows sliding with the camera).
+        common.denoisingRange = WorldUnits::FromMeters(shaderio::NRDDenoisingRangeMeters);
         common.frameIndex = frameIdx;
         common.resetHistory = resetHistory;
-        if (!m_denoiser.beginFrame(common))
+        return m_denoiser.beginFrame(common); // (once per frame: the first call's settings stand)
+    }
+
+    bool Renderer::evaluateNRDShadows(nri::CommandBuffer& cmd, NriTexture inPenumbra, NriTexture inMV, NriTexture inNormalRough,
+                                      NriTexture inViewZ, NriTexture outShadow, const float lightDir[3], glm::vec2 mvScale,
+                                      uint32_t frameIdx, bool resetHistory)
+    {
+        if (!m_denoiser)
+            return false;
+        if (!beginNRDFrame(mvScale, frameIdx, resetHistory))
             return false;
         nri::DenoiserSigmaSettings sigma{};
         sigma.lightDirection[0] = lightDir[0];
@@ -7236,16 +7246,7 @@ namespace Nox
     {
         if (!m_denoiser || mode == NRDReflectionDenoiser::Off)
             return false;
-        nri::DenoiserCommonSettings common{};
-        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
-        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
-        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
-        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
-        common.motionVectorScale[0] = mvScale.x;
-        common.motionVectorScale[1] = mvScale.y;
-        common.frameIndex = frameIdx;
-        common.resetHistory = resetHistory;
-        if (!m_denoiser.beginFrame(common))
+        if (!beginNRDFrame(mvScale, frameIdx, resetHistory))
             return false;
         const uint32_t id = (mode == NRDReflectionDenoiser::RELAX) ? NRI_DENOISER_RELAX_SPECULAR : NRI_DENOISER_REBLUR_SPECULAR;
         if (mode == NRDReflectionDenoiser::RELAX)
@@ -7268,16 +7269,7 @@ namespace Nox
     {
         if (!m_denoiser || mode == NRDDiffuseDenoiser::Off)
             return false;
-        nri::DenoiserCommonSettings common{};
-        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
-        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
-        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
-        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
-        common.motionVectorScale[0] = mvScale.x;
-        common.motionVectorScale[1] = mvScale.y;
-        common.frameIndex = frameIdx;
-        common.resetHistory = resetHistory;
-        if (!m_denoiser.beginFrame(common))
+        if (!beginNRDFrame(mvScale, frameIdx, resetHistory))
             return false;
         const uint32_t id = (mode == NRDDiffuseDenoiser::RELAX) ? NRI_DENOISER_RELAX_DIFFUSE : NRI_DENOISER_REBLUR_DIFFUSE;
         if (mode == NRDDiffuseDenoiser::RELAX)
@@ -7300,16 +7292,7 @@ namespace Nox
     {
         if (!m_denoiser || mode == NRDDiffuseDenoiser::Off)
             return false;
-        nri::DenoiserCommonSettings common{};
-        std::memcpy(common.view, glm::value_ptr(uniformData.view), sizeof(float) * 16);
-        std::memcpy(common.proj, glm::value_ptr(uniformData.nonJitteredProj), sizeof(float) * 16);
-        std::memcpy(common.prevView, glm::value_ptr(uniformData.prevView), sizeof(float) * 16);
-        std::memcpy(common.prevProj, glm::value_ptr(uniformData.prevProj), sizeof(float) * 16);
-        common.motionVectorScale[0] = mvScale.x;
-        common.motionVectorScale[1] = mvScale.y;
-        common.frameIndex = frameIdx;
-        common.resetHistory = resetHistory;
-        if (!m_denoiser.beginFrame(common))
+        if (!beginNRDFrame(mvScale, frameIdx, resetHistory))
             return false;
         const uint32_t id = (mode == NRDDiffuseDenoiser::RELAX) ? NRI_DENOISER_RELAX_DIFFUSE_SPECULAR : NRI_DENOISER_REBLUR_DIFFUSE_SPECULAR;
         if (mode == NRDDiffuseDenoiser::RELAX)

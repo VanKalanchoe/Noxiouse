@@ -1592,6 +1592,8 @@ namespace Nox
         // Indirect meshlet draws of a view's visible instances, per bucket with the GPU-written draw count. Each pass keeps
         // its own cursor: passes may record in parallel.
         bool isNRDInitialized() const { return static_cast<bool>(m_denoiser); }
+        // NRD's common settings for this frame (camera, motion vector scale, denoising range in the project's units); false without NRD.
+        bool beginNRDFrame(glm::vec2 mvScale, uint32_t frameIdx, bool resetHistory);
         bool evaluateNRDShadows(nri::CommandBuffer& cmd, NriTexture inPenumbra, NriTexture inMV, NriTexture inNormalRough,
                                 NriTexture inViewZ, NriTexture outShadow, const float lightDir[3], glm::vec2 mvScale,
                                 uint32_t frameIdx, bool resetHistory);

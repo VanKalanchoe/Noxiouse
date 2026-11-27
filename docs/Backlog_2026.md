@@ -205,8 +205,13 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   256, so every screen-probe pass lost its push data on D3D12 (the clamp never ran there). Fixed: the min / max EV share one uint as
   two half floats (248 bytes; every PushConstant struct measured, all <= 252; a static_assert guards this one). Specks still seen --
   retest on Vulkan, where the clamp did run.
-  Open: NRD SIGMA shadow trails while the camera moves (Vulkan and D3D12; gone with SIGMA off) -- its inputs checked: velocity in UV
-  (prev - curr, scale 1), unjittered current and previous projections, the light direction in world space.
+  NRD SIGMA shadow trails while the camera moves (Vulkan and D3D12, any DLSS setting, raw RT Shadow Mask clean; gone with SIGMA
+  off). Cause: since the move to NoxRHI, Noxiouse never set NRD's denoising range, so NoxRHI's fallback 5000 applied -- 50 m in a
+  centimetre project. SIGMA's blur and temporal stabilization return without writing any pixel beyond it, and the Denoised Shadow
+  Mask is a transient render graph texture: every surface farther than 50 m kept an earlier frame's value (shadows stuck to the
+  screen). The old engine code set NRDDenoisingRangeMeters (100 km) in world units. Fixed: Renderer::beginNRDFrame fills NRD's
+  common settings once for all four evaluate functions, with that range (REBLUR / RELAX for reflections, GI and the path tracer had
+  the same 50 m limit). Inputs also re-checked: velocity, matrices, view Z sign, normal encoding, penumbra packing, frame index.
 
 - 2026-11-26 (waiting for the user's test): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
   `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette

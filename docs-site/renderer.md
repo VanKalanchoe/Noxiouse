@@ -47,7 +47,7 @@ Both the deferred/forward rasterizer and the hardware Path Tracer evaluate a uni
 
 ### F. Decoupled Hardware Ray Tracing, GI & ReSTIR Suite
 Noxiouse supports multiple combinable real-time ray-tracing and global illumination pipelines:
-1. **Decoupled RT Shadows ([`ShadowMask.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/ShadowMask.slang))**: Traces soft cone shadow rays for the directional sun light, denoised by **NRD SIGMA**.
+1. **Decoupled RT Shadows ([`ShadowMask.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/ShadowMask.slang))**: Traces soft cone shadow rays for the directional sun light, denoised by **NRD SIGMA**. NRD's denoising range is `NRDDenoisingRangeMeters` (100 km) in the project's units (`Renderer::beginNRDFrame`, for every NRD denoiser): NRD leaves pixels beyond it unwritten.
 2. **Decoupled RT Reflections ([`Reflection.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/Reflection.slang))**: Traces GGX VNDF reflection rays (with optional half/quarter-res tracing + full-res smooth mirror fill), shaded via [`RayHitShading.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/RayHitShading.slang) and denoised by **NRD REBLUR** or **RELAX**.
 3. **Ambient Occlusion ([`RTAO.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/RTAO.slang) & [`SSAO.slang`](file:///E:/dev/noxiouse/NoxEditor/assets/shaders/SSAO.slang))**: Cosine-hemisphere ray-traced AO or screen-space AO with bilateral depth-aware blur.
 4. **Cascaded Toroidal DDGI (`DDGI*.slang`)**: Up to 4 camera-following cascades of irradiance (6x6 octahedral) and Chebyshev visibility distance (14x14 octahedral) probes with automatic probe relocation (`DDGIRelocation.slang`) and inactive probe classification.
