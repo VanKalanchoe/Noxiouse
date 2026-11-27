@@ -200,7 +200,11 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   White specks on edges with the screen-probe GI (Lumen-style): gone with room.vox's emission at 0, so the probes' emissive light
   samples -- a tiny, bright lamp's estimate is mostly zeros and rare huge samples, and an edge pixel takes one probe's. Each sample is
   now held to ScreenProbeEmissiveMaxMiddleGreys (8) x middle grey at the frame's exposure, as SSGI holds its hits
-  (PushConstantScreenProbe's padding became the exposure fields: 252 bytes, D3D12's whole root constants, offsets checked in the DXIL).
+  (PushConstantScreenProbe's padding became the exposure fields). User test: D3D12 validation spam "SetComputeRoot32BitConstants ...
+  Num32BitValuesToSet of 64" -- the fields were 252 bytes but the struct's sizeof rounds up to its 8-byte alignment (mat4, uint64):
+  256, so every screen-probe pass lost its push data on D3D12 (the clamp never ran there). Fixed: the min / max EV share one uint as
+  two half floats (248 bytes; every PushConstant struct measured, all <= 252; a static_assert guards this one). Specks still seen --
+  retest on Vulkan, where the clamp did run.
   Open: NRD SIGMA shadow trails while the camera moves (Vulkan and D3D12; gone with SIGMA off) -- its inputs checked: velocity in UV
   (prev - curr, scale 1), unjittered current and previous projections, the light direction in world space.
 

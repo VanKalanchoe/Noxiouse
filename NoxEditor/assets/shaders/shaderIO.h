@@ -2435,12 +2435,17 @@ struct PushConstantScreenProbe
     uint32_t outputStorageIndex0;
     uint32_t outputStorageIndex1;
     // Trace: the exposure the post process applies (scene_exposure), which holds each emissive light sample to
-    // ScreenProbeEmissiveMaxMiddleGreys x middle grey. (63 DWORDs: the whole of D3D12's root constants.)
+    // ScreenProbeEmissiveMaxMiddleGreys x middle grey. The EV range as two half floats: the struct is 248 bytes -- its size rounds up to
+    // its 8-byte alignment (the mat4s, the uint64), and 256 would be more than D3D12's 63 DWORDs of root constants.
     uint32_t autoExposureTextureIndex; // last frame's adapted luminance (0xFFFFFFFF: none)
     float exposureCompensation;
-    float autoExposureMinEV;
-    float autoExposureMaxEV;
+    uint32_t autoExposureEVRange;      // packHalf2x16(min EV, max EV)
 };
+#ifndef __SLANG__
+// D3D12's root constants hold 63 DWORDs: a push struct's sizeof (rounded up to its alignment -- 8 with a mat4 or a uint64) must stay
+// within 252 bytes, or cmd.pushData sends more than the root parameter holds and D3D12 drops the call.
+static_assert(sizeof(PushConstantScreenProbe) <= 252, "PushConstantScreenProbe is over D3D12's 63 root DWORDs");
+#endif
 // A screen probe's emissive light sample (ScreenProbeTrace.slang) is held to this many middle greys at the frame's exposure (its
 // luminance; the colour kept), as SSGI holds its hits (SSGIMaxMiddleGreys): a probe that drew a tiny, bright lamp's rare sample (a
 // voxel model's emissive faces) made a white speck wherever a pixel had no other probe to average it with -- on edges.

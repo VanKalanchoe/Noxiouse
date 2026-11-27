@@ -640,8 +640,7 @@ namespace Nox
                                               ? resources.AutoExposureAdapted : RGTexture{};
         common.autoExposureTextureIndex = 0xFFFFFFFF;
         common.exposureCompensation = m_exposureCompensation;
-        common.autoExposureMinEV = m_autoExposureMinEV;
-        common.autoExposureMaxEV = m_autoExposureMaxEV;
+        common.autoExposureEVRange = glm::packHalf2x16(glm::vec2(m_autoExposureMinEV, m_autoExposureMaxEV)); // (x: the low half)
 
         // Every pass is a compute dispatch over its target, 8 x 8 texels a group (ScreenProbeCommon.slang), writing every texel.
         auto dispatch = [](nri::CommandBuffer& cmd, nri::Pipeline& pipeline, nri::Extent2D extent, const shaderio::PushConstantScreenProbe& push)

@@ -232,7 +232,7 @@ ScreenProbeTraceOutput screen_probe_trace(uint2 texel, PushConstantScreenProbe p
     const uint seed = screen_probe_hash((probe.x * 7793u + probe.y * 3571u) ^ ((local.y * ScreenProbeRayRes + local.x) * 48611u) ^
                                        (pushConstant.frameIndex * 104729u) ^ 0x5bd1e995u);
     const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
-                                          pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
+                                          f16tof32(pushConstant.autoExposureEVRange & 0xFFFFu), f16tof32(pushConstant.autoExposureEVRange >> 16));
     output.emissive = screen_probe_emissive_sample(ubo, origin, probeNormal, seed, exposure);
     return output;
 }
