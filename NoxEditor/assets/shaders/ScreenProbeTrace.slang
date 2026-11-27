@@ -149,7 +149,7 @@ float4 screen_probe_trace_ray(uint2 texel, PushConstantScreenProbe pushConstant)
 // neither where the probe is nor that most of a facade's emissive texture is dark windows, and its raw samples boiled.
 static const uint ScreenProbeEmissiveCandidates = 4;
 
-float4 screen_probe_emissive_sample(UniformBufferObject ubo, float3 origin, float3 probeNormal, uint seed)
+float4 screen_probe_emissive_sample(UniformBufferObject ubo, float3 origin, float3 probeNormal, uint seed, float exposure)
 {
     if (ubo.emissiveLightCount == 0 || ubo.tlasDeviceAddress == 0)
         return float4(0.0);
@@ -201,6 +201,12 @@ float4 screen_probe_emissive_sample(UniformBufferObject ubo, float3 origin, floa
     float3 share = chosen.radiance * transmittance * contributionWeight / (ScreenProbePi * float(ScreenProbeEmissiveSamples));
     if (any(isnan(share)) || any(isinf(share)))
         return float4(0.0);
+    // Fireflies: the sample's light at most ScreenProbeEmissiveMaxMiddleGreys x middle grey at this frame's exposure (luminance; the
+    // colour kept). An unbiased estimate of a small bright lamp is mostly zeros and rare huge samples; a pixel at an edge takes one probe's.
+    const float maxLuminance = ScreenProbeEmissiveMaxMiddleGreys * 0.18 / exposure;
+    const float luminance = dot(share, float3(0.2126, 0.7152, 0.0722));
+    if (luminance > maxLuminance)
+        share *= maxLuminance / luminance;
     return float4(min(share, float3(4000.0)), screen_probe_pack_direction(chosen.direction)); // a half float; the irradiance pass sums in float
 }
 
@@ -225,7 +231,9 @@ ScreenProbeTraceOutput screen_probe_trace(uint2 texel, PushConstantScreenProbe p
     const float3 origin = probePosition.xyz + probeNormal * raster_surface_bias(ubo, probePosition.xyz, 0.01 * ubo.unitsPerMeter + 0.001 * viewDistance);
     const uint seed = screen_probe_hash((probe.x * 7793u + probe.y * 3571u) ^ ((local.y * ScreenProbeRayRes + local.x) * 48611u) ^
                                        (pushConstant.frameIndex * 104729u) ^ 0x5bd1e995u);
-    output.emissive = screen_probe_emissive_sample(ubo, origin, probeNormal, seed);
+    const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
+                                          pushConstant.autoExposureMinEV, pushConstant.autoExposureMaxEV);
+    output.emissive = screen_probe_emissive_sample(ubo, origin, probeNormal, seed, exposure);
     return output;
 }
 

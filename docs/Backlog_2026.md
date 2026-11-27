@@ -195,7 +195,14 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   DRED: DispatchRays of "Path Trace") -- cause not found yet (push data 228 bytes fits the 252 of root constants, one geometry per BLAS so
   the hit group index is the instance's 0 / 1, no TraceRay outside the ray generation, payload / attributes match the DXIL). The ray
   generation's two path loops now have a ray budget (4 x (maxBounces + 2)): a path its shaders never end can no longer hang the GPU, it
-  shows as a wrong image instead (the next test tells which). Open: that test; the white specks of the screen-probe GI on edges.
+  shows as a wrong image instead (the next test tells which). User test: still an immediate hang (so not an endless path; no page fault
+  recorded) -- next: a run with NOXRHI_D3D12_GBV=1 (GPU-based validation) in a scene with one cube.
+  White specks on edges with the screen-probe GI (Lumen-style): gone with room.vox's emission at 0, so the probes' emissive light
+  samples -- a tiny, bright lamp's estimate is mostly zeros and rare huge samples, and an edge pixel takes one probe's. Each sample is
+  now held to ScreenProbeEmissiveMaxMiddleGreys (8) x middle grey at the frame's exposure, as SSGI holds its hits
+  (PushConstantScreenProbe's padding became the exposure fields: 252 bytes, D3D12's whole root constants, offsets checked in the DXIL).
+  Open: NRD SIGMA shadow trails while the camera moves (Vulkan and D3D12; gone with SIGMA off) -- its inputs checked: velocity in UV
+  (prev - curr, scale 1), unjittered current and previous projections, the light direction in world space.
 
 - 2026-11-26 (waiting for the user's test): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
   `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette

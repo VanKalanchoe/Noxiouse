@@ -634,6 +634,14 @@ namespace Nox
         common.historyValid = historyValid ? 1u : 0u;
         common.maxHistory = std::clamp(m_screenProbeMaxHistory, 1u, 256u);
         common.emissiveTextureIndex = 0xFFFFFFFF;
+        // The exposure the post process applies (last frame's adapted luminance, as SSGI and the path tracer's firefly filter read it):
+        // the trace holds each emissive light sample to ScreenProbeEmissiveMaxMiddleGreys x middle grey at it.
+        const RGTexture exposureTexture = m_autoExposure && resources.AutoExposureAdapted.IsValid() && !resources.AutoExposureAdaptedReset
+                                              ? resources.AutoExposureAdapted : RGTexture{};
+        common.autoExposureTextureIndex = 0xFFFFFFFF;
+        common.exposureCompensation = m_exposureCompensation;
+        common.autoExposureMinEV = m_autoExposureMinEV;
+        common.autoExposureMaxEV = m_autoExposureMaxEV;
 
         // Every pass is a compute dispatch over its target, 8 x 8 texels a group (ScreenProbeCommon.slang), writing every texel.
         auto dispatch = [](nri::CommandBuffer& cmd, nri::Pipeline& pipeline, nri::Extent2D extent, const shaderio::PushConstantScreenProbe& push)
@@ -683,16 +691,19 @@ namespace Nox
                 {
                     ReadDDGI(builder, resources, ddgiIndex);
                 }
+                if (exposureTexture.IsValid())
+                    builder.Read(exposureTexture);
                 builder.Write(resources.ScreenProbeRays, RGTextureAccess::StorageWrite);
                 builder.Write(emissiveSamples, RGTextureAccess::StorageWrite);
             },
-            [this, res = &resources, common, dispatch, rayExtent, emissiveSamples](RGPassContext& context)
+            [this, res = &resources, common, dispatch, rayExtent, emissiveSamples, exposureTexture](RGPassContext& context)
             {
                 shaderio::PushConstantScreenProbe push = common;
                 push.probePositionTextureIndex = context.Slot(res->ScreenProbePosition);
                 push.probeNormalTextureIndex = context.Slot(res->ScreenProbeNormal);
                 push.outputStorageIndex0 = context.StorageSlot(res->ScreenProbeRays);
                 push.outputStorageIndex1 = context.StorageSlot(emissiveSamples);
+                push.autoExposureTextureIndex = exposureTexture.IsValid() ? context.Slot(exposureTexture) : 0xFFFFFFFF;
                 dispatch(context.Cmd(), m_screenProbeTracePipeline, rayExtent, push);
             });
 

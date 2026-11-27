@@ -2434,8 +2434,17 @@ struct PushConstantScreenProbe
     // The pass's targets (storage slots, RGPassContext::StorageSlot): the compute passes write them as storage images.
     uint32_t outputStorageIndex0;
     uint32_t outputStorageIndex1;
-    uint32_t screenProbePadding;
+    // Trace: the exposure the post process applies (scene_exposure), which holds each emissive light sample to
+    // ScreenProbeEmissiveMaxMiddleGreys x middle grey. (63 DWORDs: the whole of D3D12's root constants.)
+    uint32_t autoExposureTextureIndex; // last frame's adapted luminance (0xFFFFFFFF: none)
+    float exposureCompensation;
+    float autoExposureMinEV;
+    float autoExposureMaxEV;
 };
+// A screen probe's emissive light sample (ScreenProbeTrace.slang) is held to this many middle greys at the frame's exposure (its
+// luminance; the colour kept), as SSGI holds its hits (SSGIMaxMiddleGreys): a probe that drew a tiny, bright lamp's rare sample (a
+// voxel model's emissive faces) made a white speck wherever a pixel had no other probe to average it with -- on edges.
+STATIC_CONST float ScreenProbeEmissiveMaxMiddleGreys = 8.0;
 
 struct PushConstantDDGIDebug
 {
