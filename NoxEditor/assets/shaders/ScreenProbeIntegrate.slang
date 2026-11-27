@@ -95,9 +95,11 @@ ScreenProbeIntegrateOutput screen_probe_integrate(int2 pixel, PushConstantScreen
         weightSum += weight;
     }
 
+    bool searched = false;
     if (weightSum < 0.05)
     {
         // None of the four is on this surface: the 4 x 4 around, nearer ones first.
+        searched = true;
         sum = float3(0.0);
         weightSum = 0.0;
         for (int dy = -1; dy <= 2; ++dy)
@@ -121,9 +123,24 @@ ScreenProbeIntegrateOutput screen_probe_integrate(int2 pixel, PushConstantScreen
             }
         }
     }
-    float3 current = weightSum >= 0.01 ? sum / weightSum : screen_probe_fallback(ubo, position, normal, geometricNormal);
-    if (!all(isfinite(current)))
-        current = screen_probe_fallback(ubo, position, normal, geometricNormal);
+    float3 current;
+    if (searched)
+    {
+        // An edge pixel (no probe of the four on its surface) with only weak matches leans on the world-space GI (the DDGI cascades /
+        // the sky) as far as its matches are weak: normalising them gave one far probe of weight 0.01 the whole pixel -- a probe by a
+        // lamp lit the wall's edge pixels white, and with the jitter moving the edge each frame their history was thrown away (the
+        // white specks on room.vox's edges, worse with fewer frames and with DLSS).
+        const float3 fallback = screen_probe_fallback(ubo, position, normal, geometricNormal);
+        current = (sum + fallback * ScreenProbeSearchFallbackWeight) / (weightSum + ScreenProbeSearchFallbackWeight);
+        if (!all(isfinite(current)))
+            current = fallback;
+    }
+    else
+    {
+        current = sum / weightSum;
+        if (!all(isfinite(current)))
+            current = screen_probe_fallback(ubo, position, normal, geometricNormal);
+    }
 
     // Last frame's result for this surface: bilinear over the four pixels around where it was, each only if it was this surface.
     float4 history = float4(0.0);

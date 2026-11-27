@@ -219,6 +219,11 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   256, so every screen-probe pass lost its push data on D3D12 (the clamp never ran there). Fixed: the min / max EV share one uint as
   two half floats (248 bytes; every PushConstant struct measured, all <= 252; a static_assert guards this one). Specks still seen --
   retest on Vulkan, where the clamp did run.
+  User test: specks on both APIs. The per-sample clamp was not the mechanism: an edge pixel with none of its four probes on its
+  surface searched the 4 x 4 around and normalised what it found, so one far probe of weight 0.01 (a probe by the lamp) gave the
+  pixel its whole light; with the camera jitter moving the edge every frame its history was rejected and only the loose "3x the
+  DDGI fallback" cap applied (hence worse with fewer frames and with DLSS). Fixed: that search blends in the world-space GI by
+  confidence ((sum + fallback x 0.05) / (weight + 0.05), ScreenProbeSearchFallbackWeight); pixels with real matches unchanged.
   NRD SIGMA shadow trails while the camera moves (Vulkan and D3D12, any DLSS setting, raw RT Shadow Mask clean; gone with SIGMA
   off). Cause: since the move to NoxRHI, Noxiouse never set NRD's denoising range, so NoxRHI's fallback 5000 applied -- 50 m in a
   centimetre project. SIGMA's blur and temporal stabilization return without writing any pixel beyond it, and the Denoised Shadow

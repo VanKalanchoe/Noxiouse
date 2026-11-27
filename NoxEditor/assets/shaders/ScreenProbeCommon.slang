@@ -155,6 +155,10 @@ float3 screen_probe_irradiance(Texture2D atlas, SamplerState linearClamp, uint2 
     return atlas.SampleLevel(linearClamp, texel / atlasSize, 0).rgb;
 }
 
+// ScreenProbeIntegrate.slang's 4 x 4 search: the weight the world-space GI fallback has against the probes found (a surface weight
+// over 1 + distance^2 in tiles: a probe on the pixel's surface a tile away gives about 0.5).
+static const float ScreenProbeSearchFallbackWeight = 0.05;
+
 // How much a probe standing at probePosition (normal probeNormal) speaks for a surface point: on its plane (relative to the
 // distance from the camera, as Lumen weighs it) and facing the same way.
 float screen_probe_surface_weight(float3 probePosition, float3 probeNormal, float3 position, float3 normal, float viewDistance)
