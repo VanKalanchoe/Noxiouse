@@ -184,10 +184,13 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   for ray tracing entry points Slang puts those in the shader record (`ShaderRecordBufferKHR`, checked in the SPIR-V), which the shader
   binding table does not hold: every stage read zeros, the ray generation returned at once (viewport 0 x 0), the image stayed black (and
   DLSS-RR, fed guides nothing wrote, showed reused memory). Now a global again (`PathTracer/PathTracerPushConstants.slang`: Vulkan push
-  data, D3D12 root constants b0); the four stages compiled with Slang 2026.22.1 here: push constants, no shader record. **Still open
-  (NoxRHI):** D3D12 ray tracing pipelines are a stub (`PipelineD3D12::createRayTracingPipeline` builds a state object with no DXIL
-  libraries, hit groups or shader config; `CommandBufferD3D12::bindPipeline` binds them with SetPipelineState instead of
-  SetPipelineState1) -- the path tracer has never run on D3D12 (the in-tree NRI before NoxRHI had the same stub).
+  data, D3D12 root constants b0); the four stages compiled with Slang 2026.22.1 here: push constants, no shader record. User-tested
+  on Vulkan 2026-11-27: the path tracer renders again. **D3D12 (NoxRHI 86b2b47, waiting for the user's test):** ray tracing pipelines
+  were a stub there (a state object with no DXIL libraries, hit groups or shader config, bound with SetPipelineState -- the path tracer
+  had never run on D3D12, nor in the in-tree NRI before NoxRHI); now real state objects (DXIL libraries, hit groups, shader / pipeline
+  config, identifiers from ID3D12StateObjectProperties, SetPipelineState1), `maxPayloadSize` / `maxAttributeSize` (the path tracer:
+  128 / 8, checked in its DXIL), and NoxRHI's `RayTracingPipeline` example (run by its CI on D3D12 WARP; it fails when its image is not
+  written). The path tracer's four stages compile to DXIL libraries (lib_6_6, push data at cb0) with Slang + DXC here.
 
 - 2026-11-26 (waiting for the user's test): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
   `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette

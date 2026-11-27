@@ -653,6 +653,10 @@ namespace Nox
         case RayTracingPass::PathTracer:
             desc.type = NRI_PIPELINE_RAY_TRACING;
             desc.maxRecursionDepth = 1;
+            // D3D12's state object needs them (Vulkan reads them from the SPIR-V): PathPayload (PathTracer/PathPayload.slang: uint4
+            // packed[8], 128 bytes) and the triangle barycentrics. A larger payload fails the pipeline's creation with D3D12's message.
+            desc.maxPayloadSize = 128;
+            desc.maxAttributeSize = 8;
             desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_RAY_GEN, .entryPoint = "rayGenMain", .sourcePath = "assets/shaders/PathTracer/PathTracerRayGen.slang" });   // 0
             desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_MISS, .entryPoint = "missMain", .sourcePath = "assets/shaders/PathTracer/PathTracerMiss.slang" });         // 1
             desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_CLOSEST_HIT, .entryPoint = "closestHitMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerHit.slang") }); // 2
