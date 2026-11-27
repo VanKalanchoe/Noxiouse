@@ -649,12 +649,7 @@ namespace Nox
                 for (uint32_t mip = 0; mip < key.MipLevels; ++mip)
                 {
                     if (mip > 0)
-                    {
-                        const nri::TextureBarrierDesc barrier{ context.Texture(hiZ),
-                                                               { nri::AccessBits::ShaderWrite, nri::StageBits::Compute },
-                                                               { nri::AccessBits::ShaderRead, nri::StageBits::Compute } };
-                        cmd.resourceBarriers(std::span<const nri::TextureBarrierDesc>(&barrier, 1), {});
-                    }
+                        MipChainSourceBarrier(cmd, context.Texture(hiZ), mip - 1, true);
 
                     shaderio::PushConstantHiZBuild push{};
                     push.sourceTextureIndex = mip == 0 ? context.Slot(depth) : context.Slot(hiZ);
@@ -666,6 +661,8 @@ namespace Nox
 
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(hiZ), mip - 1, false);
                 }
             });
     }
@@ -1785,7 +1782,11 @@ namespace Nox
                     push.width = std::max(extent.width >> mip, 1u);
                     push.height = std::max(extent.height >> mip, 1u);
                     cmd.pushData(&push, sizeof(push));
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(res->RefractionSource), mip - 1, true);
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(res->RefractionSource), mip - 1, false);
                 });
         }
     }

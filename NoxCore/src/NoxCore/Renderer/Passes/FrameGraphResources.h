@@ -6,6 +6,20 @@
 // A handle is invalid when its feature does not run this frame.
 namespace Nox
 {
+    // A mip chain built in place: mip N computed from mip N - 1 of the same storage texture, which the graph keeps in its storage-write
+    // state for the pass. D3D12 holds one state per mip, so the source mip goes to shader read for the dispatch (toRead) and back to
+    // storage write after it (NriTextureBarrierDesc's mip range: a pass-local split); reading it while the texture stayed in
+    // UNORDERED_ACCESS, or writing mip N after a whole-texture read barrier, broke D3D12's states (GPU-based validation: "Incompatible
+    // texture barrier layout"). Vulkan keeps GENERAL: the barriers order mip N - 1's writes before its reads and the reads before what
+    // the chain writes next.
+    inline void MipChainSourceBarrier(nri::CommandBuffer& cmd, NriTexture texture, uint32_t sourceMip, bool toRead)
+    {
+        const nri::ResourceState write{ nri::AccessBits::ShaderWrite, nri::StageBits::Compute };
+        const nri::ResourceState read{ nri::AccessBits::ShaderRead, nri::StageBits::Compute };
+        const nri::TextureBarrierDesc barrier{ texture, toRead ? write : read, toRead ? read : write, sourceMip, 1 };
+        cmd.resourceBarriers(std::span<const nri::TextureBarrierDesc>(&barrier, 1), {});
+    }
+
     // What one view draws (§5.6): its visible instance slots, one indirect command per visible instance and the draw
     // count per bucket, written by that view's instance culling.
     struct ViewDrawResources

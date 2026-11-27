@@ -364,7 +364,9 @@ namespace Nox
                     cmd.pushData(&rPush, sizeof(shaderio::PushConstantReSTIRDIReduceLightPDFMip));
 
                     uint32_t mipGroups = ((rPush.dstSize > 0 ? rPush.dstSize : 1) + 7) / 8;
+                    MipChainSourceBarrier(cmd, context.Texture(res->LightPDF), mip - 1, true);
                     cmd.dispatch(mipGroups, mipGroups, 1);
+                    MipChainSourceBarrier(cmd, context.Texture(res->LightPDF), mip - 1, false);
                 });
         }
 

@@ -244,7 +244,11 @@ namespace Nox
                         push.outputIndex = context.StorageSlot(down, mip);
                         cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_bloomDownsamplePipeline);
                         cmd.pushData(&push, sizeof(push));
+                        if (mip > 0)
+                            MipChainSourceBarrier(cmd, context.Texture(down), mip - 1, true);
                         cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                        if (mip > 0)
+                            MipChainSourceBarrier(cmd, context.Texture(down), mip - 1, false);
                     });
             }
             for (int mip = static_cast<int>(BloomMips) - 1; mip >= 0; --mip)
@@ -265,7 +269,7 @@ namespace Nox
                         builder.Read(up);
                         builder.Write(up, RGTextureAccess::StorageWrite);
                     },
-                    [this, push, mip, down, up](RGPassContext& context) mutable
+                    [this, push, mip, last, down, up](RGPassContext& context) mutable
                     {
                         nri::CommandBuffer& cmd = context.Cmd();
                         cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
@@ -274,7 +278,12 @@ namespace Nox
                         push.outputIndex = context.StorageSlot(up, static_cast<uint32_t>(mip));
                         cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_bloomUpsamplePipeline);
                         cmd.pushData(&push, sizeof(push));
+                        // (the smallest mip starts the chain: no mip above it to read)
+                        if (!last)
+                            MipChainSourceBarrier(cmd, context.Texture(up), static_cast<uint32_t>(mip) + 1, true);
                         cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                        if (!last)
+                            MipChainSourceBarrier(cmd, context.Texture(up), static_cast<uint32_t>(mip) + 1, false);
                     });
             }
             outputs.Bloom = up;

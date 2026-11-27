@@ -50,7 +50,11 @@ namespace Nox
                     push.sourceMip = mip == 0 ? 0 : mip - 1;
                     push.dimension = 256u >> mip;
                     cmd.pushData(&push, sizeof(push));
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(res->AutoExposure), mip - 1, true);
                     cmd.dispatch((push.dimension + 7) / 8, (push.dimension + 7) / 8, 1);
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(res->AutoExposure), mip - 1, false);
                 });
         }
 

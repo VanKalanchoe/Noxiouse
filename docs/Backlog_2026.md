@@ -203,7 +203,14 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   indices = identifier order, 64-byte records), DispatchRays' regions, SetPipelineState1 + the global root signature and heaps
   (fillBuffer restores them), the push constants' DXIL offsets (0..228 = C++), one 128-byte payload in all four stages, no TraceRay
   outside the ray generation, every ray generation loop bounded, the TLAS instance fields (VK = D3D12 layout), one geometry per BLAS.
-  Still waiting for the GBV run.
+  Still waiting for the GBV run -- not feasible (start-up takes minutes with it); the user's runs did catch three D3D12 state bugs:
+  mip chains built in place (Hi-Z, SSR Hi-Z, SSR history, refraction source, auto exposure, light PDF, environment importance,
+  bloom down / up) read mip N - 1 while D3D12 held the whole texture in one state; and the SSR pass sampled the depth in
+  DEPTH_WRITE -- in parallel recording a chunk learnt each resource's state from its first barrier, and a read the render graph
+  needed no barrier for (already visible) left the chunk to learn the depth from Forward 3D's depth target, which the submission's
+  fixup then applied before SSR. Fixed in NoxRHI 59dfbfb (mip-range barriers, read states combining on D3D12 textures, the render
+  graph stating each chunk's first touches; informational debug messages logged once -- CheckFeatureSupport's came 773 times) and
+  here (MipChainSourceBarrier around every in-place mip chain).
   White specks on edges with the screen-probe GI (Lumen-style): gone with room.vox's emission at 0, so the probes' emissive light
   samples -- a tiny, bright lamp's estimate is mostly zeros and rare huge samples, and an edge pixel takes one probe's. Each sample is
   now held to ScreenProbeEmissiveMaxMiddleGreys (8) x middle grey at the frame's exposure, as SSGI holds its hits

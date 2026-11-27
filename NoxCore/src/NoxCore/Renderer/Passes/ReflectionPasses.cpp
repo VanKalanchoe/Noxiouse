@@ -173,12 +173,7 @@ namespace Nox
                 for (uint32_t mip = 0; mip < desc.MipLevels; ++mip)
                 {
                     if (mip > 0)
-                    {
-                        const nri::TextureBarrierDesc barrier{ context.Texture(pyramid),
-                                                               { nri::AccessBits::ShaderWrite, nri::StageBits::Compute },
-                                                               { nri::AccessBits::ShaderRead, nri::StageBits::Compute } };
-                        cmd.resourceBarriers(std::span<const nri::TextureBarrierDesc>(&barrier, 1), {});
-                    }
+                        MipChainSourceBarrier(cmd, context.Texture(pyramid), mip - 1, true);
                     shaderio::PushConstantHiZBuild push{};
                     push.sourceTextureIndex = mip == 0 ? context.Slot(depth) : context.Slot(pyramid);
                     push.outputStorageIndex = context.StorageSlot(pyramid, mip);
@@ -189,6 +184,8 @@ namespace Nox
                     push.keepClosest = 1;
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(pyramid), mip - 1, false);
                 }
             });
         return pyramid;
@@ -350,7 +347,11 @@ namespace Nox
                     push.width = std::max(extent.width >> mip, 1u);
                     push.height = std::max(extent.height >> mip, 1u);
                     cmd.pushData(&push, sizeof(push));
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(target), mip - 1, true);
                     cmd.dispatch((push.width + 7) / 8, (push.height + 7) / 8, 1);
+                    if (mip > 0)
+                        MipChainSourceBarrier(cmd, context.Texture(target), mip - 1, false);
                 });
         }
         m_ssrHistoryIndex = writeIndex;

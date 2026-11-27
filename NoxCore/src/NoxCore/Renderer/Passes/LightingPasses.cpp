@@ -127,7 +127,11 @@ namespace Nox
                         pc.sourceMip = mip == 0 ? 0 : mip - 1;
                         pc.dimension = 512 >> mip;
                         cmd.pushData(&pc, sizeof(pc));
+                        if (mip > 0)
+                            MipChainSourceBarrier(cmd, context.Texture(environmentImportance), mip - 1, true);
                         cmd.dispatch((pc.dimension + 7) / 8, (pc.dimension + 7) / 8, 1);
+                        if (mip > 0)
+                            MipChainSourceBarrier(cmd, context.Texture(environmentImportance), mip - 1, false);
                     });
             }
         }
