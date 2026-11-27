@@ -320,7 +320,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // sampling had for this point. Seen from the camera, in mirrors and through glass from the camera (pdf 0: a delta event)
         // only the BSDF finds it: full weight. Through glass after a rough vertex the pdf is that vertex's, as in the miss shader.
         float misWeight = 1.0;
-        if (vertexIdx > 1 && path.bsdfScatterPdf > 0.0)
+        if (vertexIdx > 1 && path.bsdfScatterPdf > 0.0 && pushConstant.neeFullSamples > 0) // (no light samples: the BSDF's alone)
         {
             const float lightPdf = EmissiveLights::branchProbability(ubo, pushConstant.skyboxTextureIndex != 0xFFFFFFFF) *
                                    (EmissiveLights::hasTriangleLights(ubo)
@@ -374,7 +374,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     // No light sampling on a surface with only delta lobes (smooth glass, mirrors): no direction of light could be weighed, RTXPT
     // skips it (PathTracerNEE.hlsli) -- the light beyond is found by the path going on.
     float3 directDiffuse = float3(0.0), directSpecular = float3(0.0);
-    float3 directLight = !hasNonDeltaLobes ? float3(0.0) : PathTracer::evaluateNEE(
+    float3 directLight = (!hasNonDeltaLobes || pushConstant.neeFullSamples == 0) ? float3(0.0) : PathTracer::evaluateNEE(
         surface.shadingData, surface.bsdf, as, ubo, rngState,
         candidateSamples, pushConstant.neeFullSamples,
         pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex,

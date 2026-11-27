@@ -1032,6 +1032,10 @@ namespace Nox
         void setReSTIRPTTemporalEnabled(bool enabled);
         uint32_t& getReSTIRPTNumInitialSamples() { return m_restirPTNumInitialSamples; }
         uint32_t& getReSTIRPTMaxBounceDepth() { return m_restirPTMaxBounceDepth; }
+        // The plain path tracer: vertices a path may have (1: direct light only) and light samples (NEE) per vertex (0: none -- light
+        // found by the paths alone, its MIS weights 1).
+        uint32_t& getPathTracerMaxBounces() { return m_pathTracerMaxBounces; }
+        uint32_t& getPathTracerLightSamples() { return m_pathTracerLightSamples; }
         uint32_t& getReSTIRPTMaxRcVertexLength() { return m_restirPTMaxRcVertexLength; }
         uint32_t& getReSTIRPTNumNeeSamples() { return m_restirPTNumNeeSamples; }
         float& getReSTIRPTRoughnessThreshold() { return m_restirPTRoughnessThreshold; }
@@ -2536,6 +2540,8 @@ namespace Nox
         // Numeric defaults match RTXPT's own GetDefaultReSTIRPT*Params() (see ReSTIRPT.cpp)
         uint32_t m_restirPTNumInitialSamples = 1;
         uint32_t m_restirPTMaxBounceDepth = 3;
+        uint32_t m_pathTracerMaxBounces = 18; // RTXPT's Balanced preset (18 total, 2 diffuse)
+        uint32_t m_pathTracerLightSamples = 1;
         uint32_t m_restirPTMaxRcVertexLength = 5;
         uint32_t m_restirPTNumNeeSamples = 1;
         float m_restirPTRoughnessThreshold = 0.1f;

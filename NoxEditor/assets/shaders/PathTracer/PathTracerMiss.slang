@@ -23,9 +23,11 @@ void missMain(inout PathPayload payload : SV_RayPayload)
     float3 envRadiance = Bridge::sampleSkybox(rayDir, ubo, pushConstant.skyboxTextureIndex, environmentLod);
     // The sun's (and moon's) disc, and rect lights' faces, where nothing else adds their light: seen directly, through glass from
     // the camera, and in mirrors. Not through glass after a rough vertex: that vertex's NEE already let them through the glass.
+    // Without light samples (Light Samples 0) every path that reaches them adds them.
     bool rectLight = false;
     const bool seenThroughGlassAfterScatter = path.hasFlag(PathFlags::transmission) && !path.hasFlag(PathFlags::deltaOnlyPath);
-    if (path.getVertexIndex() == 0 || path.hasFlag(PathFlags::deltaOnlyPath) || (path.hasFlag(PathFlags::delta) && !seenThroughGlassAfterScatter))
+    if (path.getVertexIndex() == 0 || path.hasFlag(PathFlags::deltaOnlyPath) || (path.hasFlag(PathFlags::delta) && !seenThroughGlassAfterScatter) ||
+        pushConstant.neeFullSamples == 0)
     {
         envRadiance += directional_light_discs(ubo, rayDir);
         float rectT = 1e30;
@@ -40,7 +42,8 @@ void missMain(inout PathPayload payload : SV_RayPayload)
     if (any(envRadiance > float3(0.0)))
     {
         float misWeight = 1.0;
-        if (!rectLight && path.getVertexIndex() > 0 && path.bsdfScatterPdf > 0.0 && pushConstant.skyboxTextureIndex != 0xFFFFFFFF)
+        if (!rectLight && path.getVertexIndex() > 0 && path.bsdfScatterPdf > 0.0 && pushConstant.skyboxTextureIndex != 0xFFFFFFFF &&
+            pushConstant.neeFullSamples > 0)
         {
             EnvMapSampler sampler = Bridge::environmentSampler(ubo, pushConstant.skyboxTextureIndex, pushConstant.environmentImportanceIndex);
             // The environment's share of the light samples: what the emissive meshes leave (PathTracerNEE.slang), over the lights.

@@ -382,6 +382,11 @@ namespace Nox
                 [r](int v) { r->setDiffuseGIMode(v == 1 ? 2u : 0u); r->setDDGIEnabled(false); });
             hybrid.Choice("PT Direct Lighting", { "Path Tracer NEE", "ReSTIR DI (primary direct)" },
                 [r]() { return static_cast<int>(r->getDirectLightingMode()); }, [r](int v) { r->setDirectLightingMode(static_cast<uint32_t>(v)); });
+            RefInt(on, "Max Bounces", &r->getPathTracerMaxBounces(), 1, 32,
+                   "Surfaces a path may reach (1: direct light only). 18 is RTXPT's Balanced preset.");
+            RefInt(on, "Light Samples", &r->getPathTracerLightSamples(), 0, 4,
+                   "Light samples (next-event estimation) at every surface a path reaches. 0: none -- only paths that hit a light find it "
+                   "(emissive surfaces, the sky, the sun's disc, rect lights; point and spot lights give no light then).");
             on.Check("Progressive Ground Truth", [r]() { return r->isPathTracingAccumulation(); }, [r](bool v) { r->setPathTracingAccumulation(v); },
                      "Accumulates while nothing moves (not used by ReSTIR PT).");
             on.Text([r]() { return r->isDLSSRayReconstructionEnabled() ? std::string("Denoiser: DLSS Ray Reconstruction (active)") : std::string(); }, kGood);

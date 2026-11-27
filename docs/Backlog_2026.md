@@ -211,6 +211,12 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   fixup then applied before SSR. Fixed in NoxRHI 59dfbfb (mip-range barriers, read states combining on D3D12 textures, the render
   graph stating each chunk's first touches; informational debug messages logged once -- CheckFeatureSupport's came 773 times) and
   here (MipChainSourceBarrier around every in-place mip chain).
+  Also checked for the hang, all clean: no implicit-derivative Sample in any path tracer stage; DXIL optimised (no debug flags);
+  pipelines built synchronously on D3D12 and the table baked again after every swap (installRayTracingPassPipelines); no raw
+  device address where D3D12 expects a descriptor-index BufferRef. Noted: none of the closest hit's 710 descriptor handles is marked
+  NonUniformResourceIndex (undefined on other vendors; NVIDIA copes). Added the plain path tracer's Max Bounces (1-32, default 18)
+  and Light Samples (0-4, default 1; 0: no NEE, the MIS weights 1, the sun's disc and rect lights added by every path) to the
+  Renderer Settings, so the user can bisect the DX12 hang (1 / 0 leaves the camera rays and their first surface) without GBV.
   White specks on edges with the screen-probe GI (Lumen-style): gone with room.vox's emission at 0, so the probes' emissive light
   samples -- a tiny, bright lamp's estimate is mostly zeros and rare huge samples, and an edge pixel takes one probe's. Each sample is
   now held to ScreenProbeEmissiveMaxMiddleGreys (8) x middle grey at the frame's exposure, as SSGI holds its hits

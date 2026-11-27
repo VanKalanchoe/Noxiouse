@@ -235,8 +235,8 @@ namespace Nox
                 ptPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 ptPush.viewportSize = glm::vec2(rw, rh);
                 ptPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
-                // RTXPT applies its Balanced preset on startup (18 total, 2 diffuse).
-                ptPush.maxBounces = 18;
+                // RTXPT applies its Balanced preset on startup (18 total, 2 diffuse); Max Bounces in the Renderer Settings.
+                ptPush.maxBounces = std::max(m_pathTracerMaxBounces, 1u);
                 ptPush.maxDiffuseBounces = 2;
                 // RTXPT realtime default: 0.10 * sqrt(pre-exposed middle gray) * 1000; the shaders multiply in the square root of
                 // the luminance this frame's exposure maps to middle grey (scene_exposure: last frame's adapted average).
@@ -275,8 +275,9 @@ namespace Nox
                 ptPush.rrSpecularHitDistanceStorageIndex = dlssRRActive ? context.StorageSlot(res->RRSpecularHitDistance) : 0xFFFFFFFF;
                 // RTXPT uses a small stochastic camera-ray offset with RR, no undisclosed offset with DLSS-SR.
                 ptPush.cameraRayJitterScale = dlssRRActive ? 0.1f : (dlssActive ? 0.0f : 1.0f);
-                ptPush.neeCandidateSamples = 5;
-                ptPush.neeFullSamples = 1;
+                // Light Samples: full NEE samples per vertex, each resampled from 5 candidates; 0 turns light sampling off.
+                ptPush.neeCandidateSamples = m_pathTracerLightSamples > 0 ? 5u : 0u;
+                ptPush.neeFullSamples = m_pathTracerLightSamples;
                 ptPush.environmentDiffuseMip = 2;
                 cmd.pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
