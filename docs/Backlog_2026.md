@@ -197,6 +197,13 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   generation's two path loops now have a ray budget (4 x (maxBounces + 2)): a path its shaders never end can no longer hang the GPU, it
   shows as a wrong image instead (the next test tells which). User test: still an immediate hang (so not an endless path; no page fault
   recorded) -- next: a run with NOXRHI_D3D12_GBV=1 (GPU-based validation) in a scene with one cube.
+  User test: a scene with one cube and no environment hangs too (DRED: DispatchRays; the other lists' "op46" is BEGIN_COMMAND_LIST,
+  queued behind it; NoxUI's "Buffer Map" failure is the removed device). Checked without a GPU, all as the working NoxRHI
+  RayTracingPipeline example: no unguarded 0xFFFFFFFF sky / importance index (miss, NEE, skybox), the SBT (upload heap, group
+  indices = identifier order, 64-byte records), DispatchRays' regions, SetPipelineState1 + the global root signature and heaps
+  (fillBuffer restores them), the push constants' DXIL offsets (0..228 = C++), one 128-byte payload in all four stages, no TraceRay
+  outside the ray generation, every ray generation loop bounded, the TLAS instance fields (VK = D3D12 layout), one geometry per BLAS.
+  Still waiting for the GBV run.
   White specks on edges with the screen-probe GI (Lumen-style): gone with room.vox's emission at 0, so the probes' emissive light
   samples -- a tiny, bright lamp's estimate is mostly zeros and rare huge samples, and an edge pixel takes one probe's. Each sample is
   now held to ScreenProbeEmissiveMaxMiddleGreys (8) x middle grey at the frame's exposure, as SSGI holds its hits
