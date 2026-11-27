@@ -191,6 +191,11 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   config, identifiers from ID3D12StateObjectProperties, SetPipelineState1), `maxPayloadSize` / `maxAttributeSize` (the path tracer:
   128 / 8, checked in its DXIL), and NoxRHI's `RayTracingPipeline` example (run by its CI on D3D12 WARP; it fails when its image is not
   written). The path tracer's four stages compile to DXIL libraries (lib_6_6, push data at cb0) with Slang + DXC here.
+  User test 2026-11-27: NoxRHI's RayTracingPipeline example works on D3D12; Noxiouse's path tracer hangs the GPU on D3D12 (DEVICE_HUNG,
+  DRED: DispatchRays of "Path Trace") -- cause not found yet (push data 228 bytes fits the 252 of root constants, one geometry per BLAS so
+  the hit group index is the instance's 0 / 1, no TraceRay outside the ray generation, payload / attributes match the DXIL). The ray
+  generation's two path loops now have a ray budget (4 x (maxBounces + 2)): a path its shaders never end can no longer hang the GPU, it
+  shows as a wrong image instead (the next test tells which). Open: that test; the white specks of the screen-probe GI on edges.
 
 - 2026-11-26 (waiting for the user's test): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
   `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette

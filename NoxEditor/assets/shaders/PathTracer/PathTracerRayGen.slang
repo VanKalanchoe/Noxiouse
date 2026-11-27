@@ -11,10 +11,15 @@
 void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, out uint dispersedChannel)
 {
     dispersedChannel = 0u;
+    // A budget of rays for the pixel: a path ends after maxBounces vertices (PathTracerHit.slang) and its glass branch resumes once, so
+    // a correct path never comes near it -- a path whose hit / miss shaders never end it (a broken payload, a wrong shader table record)
+    // stops here instead of looping until the GPU is reset (D3D12: DEVICE_HUNG at DispatchRays).
+    uint raysLeft = 4u * (pushConstant.maxBounces + 2u);
     for (;;)
     {
-        while (path.isActive())
+        while (path.isActive() && raysLeft > 0u)
         {
+            --raysLeft;
             RayDesc ray;
             ray.Origin = path.origin;
             ray.Direction = path.dir;
@@ -39,7 +44,7 @@ void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, ou
         // (the branch's own flags replace the path's when it resumes)
         if (dispersedChannel == 0u && path.hasFlag(PathFlags::cameraDispersion))
             dispersedChannel = path.dispersionChannel();
-        if (!path.hasBranch())
+        if (!path.hasBranch() || raysLeft == 0u)
             break;
         path.resumeBranch();
     }
