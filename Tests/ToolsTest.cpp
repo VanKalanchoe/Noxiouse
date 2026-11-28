@@ -1,5 +1,6 @@
-// NoxToolsTest: the engine console's registry (docs/MCP_Plan_2026-11.md §4), from MCP0 the MCP protocol layer, and the MagicaVoxel
-// reader / mesher (VoxTests.inl, docs/Voxel_Plan_2026-11.md) -- without a window, GPU or editor. Exit code 0 when every check passed.
+// NoxToolsTest: the engine console's registry (docs/MCP_Plan_2026-11.md §4), from MCP0 the MCP protocol layer, the MagicaVoxel
+// reader / mesher (VoxTests.inl) and the voxel world's chunks, generator and stamping (VoxelWorldTests.inl; docs/Voxel_Plan_2026-11.md)
+// -- without a window, GPU or editor. Exit code 0 when every check passed.
 #include "NoxCore/Console/Console.h"
 #include "NoxCore/Core/Log.h"
 #include "NoxCore/Renderer/CustomLitShaders.h"
@@ -32,6 +33,7 @@ namespace
 #include "McpTests.inl"
 #endif
 #include "VoxTests.inl"
+#include "VoxelWorldTests.inl"
 
 using namespace Nox;
 
@@ -744,6 +746,9 @@ int main()
     TestEntityGraphParameters();
     TestVoxReader();
     TestVoxMesher();
+    TestVoxelChunk();
+    TestVoxelGenerator();
+    TestVoxelWorld();
 #ifdef NOX_TOOLS_TEST_MCP
     TestMcp();
     TestMcpValidation();

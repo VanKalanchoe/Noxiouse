@@ -602,8 +602,17 @@ window.NOX_MANUAL_PAGES = [
             "- **Far away the model looks slightly simpler:** the engine's cluster LOD (as for every mesh) merges flat areas of one colour; colour borders and edges are protected. A voxel-specific LOD is a later step.",
             "",
             ":::{note}",
-            "**Not built yet:** a project-wide voxel size setting (the import's Voxel Size is per model for now), stamping a `.vox` into a voxel world, voxel terrain, digging. Those are the voxel plan's next steps (VX1 onward).",
-            ":::"
+            "**Not built yet:** a project-wide voxel size setting (the import's Voxel Size is per model for now); the voxel world in the editor -- its terrain, stamping a `.vox` into it (built in code, VX1: see below) and digging. Those are the voxel plan's next steps (VX2 onward).",
+            ":::",
+            "",
+            "## The voxel world (coming: VX1 built, nothing in the editor yet)",
+            "",
+            "Imported `.vox` models are meshes. The **voxel world** -- terrain and buildings you dig and build voxel by voxel, at 10 cm or as 1 m Minecraft-style blocks -- is a separate system. Its data side is built (VX1): chunks of voxels, the project's voxel materials, a terrain generator (hills, caves, ore) that gives every computer the same world, and stamping a `.vox` scene into the world voxel for voxel. Nothing shows it in the editor yet: the next step (VX2) draws it, then come collision (VX4) and digging / building (VX5).",
+            "",
+            "To check the voxel world's code on your machine:",
+            "",
+            "1. **Your IDE / CMake:** configure with `NOX_BUILD_TESTS=ON` and build the **NoxToolsTest** target (it builds FastNoise2, zstd and unordered_dense from `NoxCore/vendors`; run `git submodule update --init` after pulling so those folders are there).",
+            "2. **NoxToolsTest:** run it. The sections `voxel chunk`, `voxel material table + generator` and `voxel world + stamping` print 16 lines starting with `ok`; the last line counts the failed checks (0)."
         ]
     },
     // ==========================================

@@ -1,7 +1,9 @@
 # Voxels -- Plan (2026-11)
 
 Status: **VX0 built and user-tested (2026-11-27): `.vox` models import as meshes** (§4; room, cars and the knight look right); VX1
-onward planned. 2026-11-28: binary greedy meshing v2 chosen for world chunks (collision; the block preset's mesh candidate). Backlog item **VX** (`Backlog_2026.md`).
+onward planned. 2026-11-28: binary greedy meshing v2 chosen for world chunks (collision; the block preset's mesh candidate).
+**VX1 built (2026-11-28, offline only -- NoxToolsTest, 16 checks): the voxel world's CPU side** (§5 Built); chunk size decided: 64^3,
+binary greedy meshing on 32^3 parts. VX2 next. Backlog item **VX** (`Backlog_2026.md`).
 
 Goal: tiny voxels (10 cm by default) in Noxiouse, two ways at once:
 
@@ -77,6 +79,9 @@ operation (subtract, add with a palette index, paint, smooth) + edge noise (seed
 | **FastNoise2** | MIT | World generation on the CPU: SIMD node trees filled into whole 3D grids (`GenUniformGrid3D`), designed in its NoiseTool and stored as the encoded tree string in a generator asset. Built with `FASTNOISE2_STRICT_FP=ON` (§3a) |
 | **zstd** (LZ4 if load speed wins) | BSD | Chunks on disk, streamed cells, saved edit deltas (palette-indexed bricks compress well) |
 | ankerl **unordered_dense** | MIT | The CPU chunk / brick index and dirty sets (position packed into 64 bits -> slot), used from the start |
+
+Added as submodules for VX1 (2026-11-28; nothing downloaded at configure time): FastNoise2 (pinned to the commit §3a measured) with its
+**FastSIMD** (CPM's `CPM_FastSIMD_SOURCE` points at `NoxCore/vendors/FastSIMD`), zstd 1.5.7 (static, no programs), unordered_dense 5.3.3.
 
 Already in the engine: **OffsetAllocator** (the GPU brick pool), **Jolt** (collision), **meshoptimizer** (simplifying collision /
 prop meshes), **tinygltf** + editor **OpenVDB** (glTF -> voxels, VX9), **xxhash** (content hashes), **NoxTasks / taskflow**
@@ -237,6 +242,21 @@ The voxel data, rendering and physics do not change: a client brick is the publi
 - **Ambient occlusion per voxel** (optional, cheap and very "voxel"): corner AO from the neighbours, as Minecraft-style games do, on top
   of the renderer's AO.
 
+**Built (VX1, 2026-11-28; offline, NoxToolsTest):** `NoxCore/src/NoxCore/Voxel/` -- `VoxelTypes.h` (64^3 chunks of 8^3 bricks, 16-bit
+material ids, 64-bit chunk keys, `MeshPartSize` 32), `VoxelChunk` (empty / uniform / full bricks; palette with compaction and the 2-byte
+fallback; occupancy masks word z / bit y * 8 + x; XXH3 hashes over material ids per brick and chunk; encoded as brick kinds + palette +
+bit-packed indices + zstd: a 10 cm terrain chunk ~15 KB, an empty one 33 bytes; `Decode` checks everything), `VoxelMaterialTable` (YAML
+with fixed ids; colour, roughness, metallic, emission, hardness, footstep surface, block textures), `VoxelGenerator` (public: 2D height
+tree, 3D cave tree below the surface, surface / subsurface / bulk by depth; secret: ore pockets in the bulk; metres as noise input;
+settings with version + binary hash; `MakeDefaultTerrain`), `VoxelWorld` (unordered_dense chunk index, columns' heights shared,
+`LoadRegion` on worker threads: 576 chunks = 51 x 51 m of 10 cm terrain in ~0.4 s, ~37 MB; vertical limits), `VoxelStamp` (a `.vox`
+scene into the world, MagicaVoxel placement, materials added or nearest). Measured and fixed on the way: the default cave threshold
+0.45 carved 20% of the underground (the cave noise measured over +-5 km), now 0.65 (~10%); depths in metres now round to voxels (3 m /
+0.1 m is 29.99999 in floating point: a 29-voxel subsurface), heights still floor; FastSIMD builds SSE2 / SSE4.1 / AVX2 / AVX-512 on x86 --
+no scalar -- and the four give bit-identical chunks (tested; §3a). Real files stamped exactly (every voxel its own cell): room.vox
+82,536 voxels in 11 ms, monu1.vox 156,942 in 20 ms, cars, the knight. Generation runs on `std::thread` workers for now; VX6 moves it onto
+the job system with streaming.
+
 ## 6. Raster preset coverage (VX3)
 
 The voxel draw (box list + DDA, depth only) in every pass that draws geometry itself: sun shadow cascades (cascade caching invalidated
@@ -249,7 +269,7 @@ and post effects need nothing.
 | Phase | What | Done when |
 |---|---|---|
 | **VX0** | `.vox` reader + import as meshes (Combine / Do Not Combine), palette materials (§4) -- **built, user-tested 2026-11-27** | The user's models in the editor, both presets |
-| **VX1** | Brick map CPU side: chunks, bricks, palette (compaction, 2-byte fallback), voxel material table, encoding + zstd, FastNoise2 generator asset (public / secret layers, version + hash), a `.vox` model stamped into the world | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
+| **VX1** | Brick map CPU side: chunks, bricks, palette (compaction, 2-byte fallback), voxel material table, encoding + zstd, FastNoise2 generator asset (public / secret layers, version + hash), a `.vox` model stamped into the world -- **built 2026-11-28** (§5 Built) | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
 | **VX2** | GPU brick pool + voxel G-buffer output, **both primary-visibility candidates** (brick boxes with two-phase culling; compute primary rays), raster lighting; for the block preset also the third candidate, chunk meshes from binary greedy meshing (§1) | Terrain and the stamped model lit in the raster preset; both candidates measured at 1440p, one kept |
 | **VX3** | Raster preset coverage (§6), sky visibility and column summaries (underground darkness) | Voxel shadows (sun + local lights), probes, extra views, picking; a cave dark in the raster preset |
 | **VX4** | Collision: chunk meshes from binary greedy meshing v2 (coplanar merges only, watertight: no T-junctions, no simplification that opens gaps), Jolt `MeshShape`, async rebuild after edits; character controller on voxels; footsteps from the voxel material | Walking, jumping and physics objects on the terrain (needed before digging can be tried in Play) |
@@ -275,9 +295,9 @@ Not planned now: water and other fluids, falling sand / gravity voxels (later, i
 ## 9. Open questions
 
 - Mesh first, voxels second in the depth order, or the reverse (VX2 measures both).
-- Chunk size 64^3 vs 32^3 (finer streaming and edits vs fewer draws and tables), and its value at 50 cm - 1 m voxels. Binary greedy
-  meshing needs a chunk's columns plus a one-voxel border from each neighbour in one 64-bit word: 62^3 fits (its reference size),
-  64^3 does not (66 bits) -- 62^3 chunks, two words per column, or meshing units of 32^3 (34 bits) inside a 64^3 chunk (VX4 decides).
+- ~~Chunk size~~ -- decided 2026-11-28 (the user): **64^3 chunks** (8^3 bricks of 8^3, as planned), binary greedy meshing on **32^3
+  parts** (32 + 2 border = 34 bits in a 64-bit column word; 8 parts per chunk, rebuilt only where an edit lands). 62^3 was ruled out
+  (it does not divide into 8^3 bricks); 32^3 chunks would mean 8x the chunks, tables and draws.
 - The block preset (50 cm - 1 m): chunk meshes or the DDA pass (VX2 measures; §1 Block-style worlds).
 - `.vox` props (VX0): the same T-junction removal for their merged faces, so ray-traced effects see them watertight (no visible
   problem reported on room / cars / knight).

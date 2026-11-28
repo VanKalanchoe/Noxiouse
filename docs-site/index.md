@@ -113,6 +113,8 @@ file-reference
 
 ## What's New (November 2026)
 
+- **Voxel world, CPU side (Voxel plan VX1):** chunks of 64^3 voxels in 8^3 bricks with palettes (2-byte fallback past 256 materials) and zstd encoding, the project's voxel material table (block textures for 1 m blocks too), a FastNoise2 terrain generator (heights, caves, surface materials; ore pockets in a secret layer) that generates the same chunks on every CPU (strict floating point, tested on SSE2 / SSE4.1 / AVX2 / AVX-512), a chunk index generating regions on worker threads, and `.vox` scenes stamped into the world. Offline only so far (NoxToolsTest, 16 checks); VX2 draws it. Libraries added as submodules: FastNoise2 + FastSIMD, zstd, unordered_dense. See Assets & Streaming section 4.
+
 - **Emissive meshes in ReSTIR DI (steady lamp light in the hybrid renderer):** with **Direct Lighting: ReSTIR DI** every emissive triangle is an RTXDI light (`RTXDI/RTXDILights.slang`, one light module for all ReSTIR passes), so lamps and lit windows light their surroundings per pixel with a shadow ray instead of through the screen probes' samples. Also fixed: the light PDF texture was a half float that light powers in centimetre units overflowed (ReSTIR DI picked its local lights wrongly). User-tested on Vulkan: steadier light; about 3 ms more in the test room.
 
 - **Async compute blocks split at the first graphics consumer:** the render graph splits a run of async-compute passes where a graphics pass needs only its first part, so the RT reflections (and the passes after them) run beside the screen-probe GI on Vulkan instead of waiting for it. Compiled; waiting for the user's Vulkan profile.

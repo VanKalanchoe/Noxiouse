@@ -34,6 +34,24 @@ set(USE_AVX2 ON CACHE BOOL "" FORCE)
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 add_subdirectory(NoxCore/vendors/JoltPhysics/Build NoxCore/vendors/JoltPhysics/Build EXCLUDE_FROM_ALL)
 
+# Voxels (docs/Voxel_Plan_2026-11.md §3), all from submodules, nothing downloaded at configure time:
+# FastNoise2 generates the world -- strict floating point: every SIMD level (SSE2 .. AVX-512, NEON) gives bit-identical noise, so
+# every machine generates the same chunks (§3a) -- with its FastSIMD from NoxCore/vendors/FastSIMD (CPM's local-source override);
+# zstd compresses chunks; unordered_dense (header-only) is the chunk index.
+set(FASTNOISE2_STRICT_FP ON CACHE BOOL "" FORCE)
+set(FASTNOISE2_TOOLS OFF CACHE BOOL "" FORCE)
+set(FASTNOISE2_TESTS OFF CACHE BOOL "" FORCE)
+set(FASTNOISE2_UTILITY OFF CACHE BOOL "" FORCE)
+set(CPM_FastSIMD_SOURCE "${CMAKE_SOURCE_DIR}/NoxCore/vendors/FastSIMD" CACHE PATH "" FORCE)
+add_subdirectory(NoxCore/vendors/FastNoise2 NoxCore/vendors/FastNoise2 EXCLUDE_FROM_ALL)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
+add_subdirectory(NoxCore/vendors/zstd/build/cmake NoxCore/vendors/zstd EXCLUDE_FROM_ALL)
+add_subdirectory(NoxCore/vendors/unordered_dense NoxCore/vendors/unordered_dense EXCLUDE_FROM_ALL)
+
 # The shipping build of a game (docs/Runtime_And_Packaging_Plan_2026-10.md R7): build the Release configuration with it on.
 # NoxRuntime then has no console window, no stats overlay / profiler, and logs into the user's folder (SDL_GetPrefPath)
 # instead of the working directory; asserts are already off outside Debug. It builds NoxRuntime.

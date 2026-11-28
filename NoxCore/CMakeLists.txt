@@ -70,6 +70,10 @@ target_include_directories (${PROJECT_NAME} SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE
 # Sysmtem means supress warnings from the include directories, so we don't get warnings from external libraries.
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/NoxEditor/assets/shaders ${TINYGLTF_DIR} ${MESHOPTIMIZER_DIR} ${OFFSETALLOCATOR_DIR} ${BC7ENC_DIR} ${XATLAS_DIR} ${BCDEC_DIR} ${RTXDI_INCLUDE_DIR} ${RTXDI_SHADERS_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CLUSTERLOD_DIR})
+# Voxels (VX1): FastNoise2 and zstd only inside Voxel/*.cpp; the chunk index's map type is in Voxel/VoxelWorld.h.
+target_link_libraries(${PROJECT_NAME} PRIVATE FastNoise2 libzstd_static)
+target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendors/zstd/lib)
+target_link_libraries(${PROJECT_NAME} PUBLIC unordered_dense::unordered_dense)
 
 # -----------------------------------------------------------------------------
 # Profiling (docs/Engine_Architecture_Plan_2026.md 5.1)

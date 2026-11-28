@@ -55,3 +55,15 @@
 [submodule "NoxCore/vendors/NoxUI"]
 	path = NoxCore/vendors/NoxUI
 	url = https://github.com/VanKalanchoe/NoxUI.git
+[submodule "NoxCore/vendors/FastNoise2"]
+	path = NoxCore/vendors/FastNoise2
+	url = https://github.com/Auburn/FastNoise2.git
+[submodule "NoxCore/vendors/zstd"]
+	path = NoxCore/vendors/zstd
+	url = https://github.com/facebook/zstd.git
+[submodule "NoxCore/vendors/unordered_dense"]
+	path = NoxCore/vendors/unordered_dense
+	url = https://github.com/martinus/unordered_dense.git
+[submodule "NoxCore/vendors/FastSIMD"]
+	path = NoxCore/vendors/FastSIMD
+	url = https://github.com/Auburn/FastSIMD.git

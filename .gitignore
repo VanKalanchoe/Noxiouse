@@ -281,6 +281,10 @@ NoxCore/vendors/*
 !NoxCore/vendors/NoxAudio/
 !NoxCore/vendors/NoxUI/
 !NoxCore/vendors/NoxRHI/
+!NoxCore/vendors/FastNoise2/
+!NoxCore/vendors/FastSIMD/
+!NoxCore/vendors/zstd/
+!NoxCore/vendors/unordered_dense/
 *.ntex
 *.nmesh
 *.hash
