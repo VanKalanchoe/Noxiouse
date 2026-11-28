@@ -312,3 +312,5 @@ NoxEditor/assets/vfx/TornadoLoopingVDB
 Facerun/Assets/VFX/TornadoVDB
 *.noxprof
 *.mp4
+# Engine / validation logs (Nox.log, NoxDx12.log, ...)
+*.log
