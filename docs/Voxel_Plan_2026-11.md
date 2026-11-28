@@ -1,6 +1,7 @@
 # Voxels -- Plan (2026-11)
 
-Status: **VX0 built (2026-11-26, not yet user-tested): `.vox` models import as meshes** (§4); VX1 onward planned. Backlog item **VX** (`Backlog_2026.md`).
+Status: **VX0 built and user-tested (2026-11-27): `.vox` models import as meshes** (§4; room, cars and the knight look right); VX1
+onward planned. 2026-11-28: binary greedy meshing v2 chosen for world chunks (collision; the block preset's mesh candidate). Backlog item **VX** (`Backlog_2026.md`).
 
 Goal: tiny voxels (10 cm by default) in Noxiouse, two ways at once:
 
@@ -36,7 +37,8 @@ view passes, later AABBs in NoxRHI's BLAS and a brick-hit function in the ray-qu
 | **Underground darkness in the raster preset** | **Sky visibility per voxel brick** (Minecraft's sky light, coarse): flood-filled from the open sky through air, updated around edits on worker threads, sampled by the voxel pass and multiplied into the ambient / irradiance-volume light of voxel and mesh pixels in voxel worlds; block lights (torches) are ordinary point lights | The irradiance volume and probes were captured before the player dug: without it a fresh cave is lit like the outdoors. In the RT preset GI darkens caves itself; sky visibility then only guards probe-lit passes |
 | Rendering of the world | **Two candidates prototyped in VX2, the faster at 1440p kept:** (a) raster the boxes of the visible non-empty bricks (two-phase occlusion culling as the meshlets), DDA inside the brick in the pixel shader, conservative depth (`SV_DepthGreaterEqual` with reverse-Z); (b) one compute primary ray per pixel through chunk -> brick -> voxel, stopping at the first hit, depth-tested against the meshes. Both output `GBufferOutput` | Cost per pixel, not per voxel; edits only write bytes (no remesh); LOD from brick mips; the G-buffer keeps every later pass unchanged. (a) can overdraw at grazing angles (a pixel stepping through several mostly empty boxes, each discarded); (b) has no overdraw but no hardware depth rejection -- measure, do not guess |
 | Rendering of `.vox` props | Meshes: visible faces merged (greedy, per palette entry) into a `StaticMesh`; colours and materials from palette textures | Static art needs no voxel pass; the mesh path already has everything |
-| Collision of the world | Greedy-meshed, simplified (meshoptimizer) collision mesh per chunk, Jolt `MeshShape`, rebuilt off the main thread after edits | Where greedy meshing is the right tool; a custom Jolt voxel shape only if destruction at scale needs it (VX8) |
+| Collision of the world | **Binary greedy meshing (v2)** per chunk -- solid columns as 64-bit masks, face culling and merging with bit operations (cgerikj's algorithm, MIT, written here) -- made **watertight** (a vertex inserted wherever a neighbouring rectangle's corner lies on an edge: no T-junction gaps), Jolt `MeshShape`, rebuilt off the main thread after every edit | Rebuilt after each dig or build, so meshing speed is the budget: the bitwise mesher meshes a chunk in microseconds where a cell-by-cell greedy mesher takes milliseconds. T-junction gaps catch characters and leak rays. A custom Jolt voxel shape only if destruction at scale needs it (VX8) |
+| **Block-style worlds (50 cm - 1 m)** | The same brick map, generator, edits and collision; for drawing, a **third candidate measured in VX2 for the block preset: chunk meshes** from the same binary greedy mesher (merged only across faces of one block type and light level; block textures tiled over a merged face from a texture array), drawn as ordinary meshes | At block size a chunk's mesh is small (Minecraft, Hytale, Vintage Story mesh their chunks), and meshes get everything the renderer has -- visibility buffer, meshlets, shadow maps, and triangle BLASes for ray tracing without VX7's AABB work. At 10 cm with per-voxel colours meshing stays out (triangle counts explode); the tiny-voxel preset keeps the DDA pass |
 | Edits | **Brush operations** (shape, size, add / subtract / paint / smooth, noise on the edge), applied by the authority, sent over the network as operations; **evaluated in integer voxel coordinates** (shape tests in integers / fixed point, edge noise from strict-FP FastNoise2) so the client's prediction and the server give the same voxels; after an edit the touched bricks' hash is compared and the server sends those bricks on a mismatch; a chunk's edit log is **compacted** into its changed bricks once it grows larger than them | Fun and fast to dig (§2), small to send, the same result everywhere |
 | Generator versions | A world stores the generator asset's **version and hash**; an edited generator never changes existing worlds silently (they keep generating with the version they were made with, or an explicit Regenerate migrates them) | Edits are stored relative to the generated terrain: a changed generator would leave them floating or buried |
 | Chunk and brick index | **ankerl::unordered_dense** maps (chunk position packed into 64 bits -> chunk; dirty sets), from the first line of code | Millions of lookups per second in generation, edits, streaming and meshing; far faster than `std::unordered_map`; no rework later |
@@ -79,7 +81,8 @@ operation (subtract, add with a palette index, paint, smooth) + edge noise (seed
 Already in the engine: **OffsetAllocator** (the GPU brick pool), **Jolt** (collision), **meshoptimizer** (simplifying collision /
 prop meshes), **tinygltf** + editor **OpenVDB** (glTF -> voxels, VX9), **xxhash** (content hashes), **NoxTasks / taskflow**
 (generation, meshing, compression in parallel), **Tracy**. Written here (the user's decision): the **`.vox` reader** (not ogt_vox),
-the brick map, the DDA shaders, greedy meshing.
+the brick map, the DDA shaders, the meshers: plain greedy for `.vox` props at import (VX0, built) and **binary greedy meshing v2** for
+world chunks (VX4; cgerikj/binary-greedy-meshing's algorithm, MIT, reimplemented on the chunk format).
 
 ## 3a. Determinism and what multiplayer sends (measured 2026-11-26)
 
@@ -245,11 +248,11 @@ and post effects need nothing.
 
 | Phase | What | Done when |
 |---|---|---|
-| **VX0** | `.vox` reader + import as meshes (Combine / Do Not Combine), palette materials (§4) -- **built, not yet user-tested** | The user's models in the editor, both presets |
+| **VX0** | `.vox` reader + import as meshes (Combine / Do Not Combine), palette materials (§4) -- **built, user-tested 2026-11-27** | The user's models in the editor, both presets |
 | **VX1** | Brick map CPU side: chunks, bricks, palette (compaction, 2-byte fallback), voxel material table, encoding + zstd, FastNoise2 generator asset (public / secret layers, version + hash), a `.vox` model stamped into the world | A generated 10 cm terrain + a stamped `.vox` in memory; offline tests |
-| **VX2** | GPU brick pool + voxel G-buffer output, **both primary-visibility candidates** (brick boxes with two-phase culling; compute primary rays), raster lighting | Terrain and the stamped model lit in the raster preset; both candidates measured at 1440p, one kept |
+| **VX2** | GPU brick pool + voxel G-buffer output, **both primary-visibility candidates** (brick boxes with two-phase culling; compute primary rays), raster lighting; for the block preset also the third candidate, chunk meshes from binary greedy meshing (§1) | Terrain and the stamped model lit in the raster preset; both candidates measured at 1440p, one kept |
 | **VX3** | Raster preset coverage (§6), sky visibility and column summaries (underground darkness) | Voxel shadows (sun + local lights), probes, extra views, picking; a cave dark in the raster preset |
-| **VX4** | Collision: greedy-meshed chunk meshes (coplanar merges only, no simplification that opens gaps), Jolt `MeshShape`, async rebuild after edits; character controller on voxels; footsteps from the voxel material | Walking, jumping and physics objects on the terrain (needed before digging can be tried in Play) |
+| **VX4** | Collision: chunk meshes from binary greedy meshing v2 (coplanar merges only, watertight: no T-junctions, no simplification that opens gaps), Jolt `MeshShape`, async rebuild after edits; character controller on voxels; footsteps from the voxel material | Walking, jumping and physics objects on the terrain (needed before digging can be tried in Play) |
 | **VX5** | Brushes (§2): integer-space edits, dirty bricks, uploads, collision rebuilds, debris VFX, C# API (`VoxelWorld.Apply(brush)`, queries: raycast to a voxel, material at a point), edit logs with compaction saved per cell, generator version in the world, brush ops over the network validated by the server with brick-hash checks; the secret layer and its reveals (§3b) | Digging and building in Play, saved and loaded, in multiplayer; an X-ray client sees only revealed ores |
 | **VX6** | Streaming + LOD: chunks by distance through world partition, brick mips (2x2x2: the most common non-air index), LOD per distance, upload budget, an endless generated world | Flying across an endless world at the frame-rate target |
 | **VX7** | RT preset: NoxRHI AABB BLAS (Vulkan, D3D12), a BLAS per chunk (refit on edits), procedural-candidate handling in the shared ray-query code (one brick-hit function), the path tracer; secondary rays on coarser mips | RT shadows, AO, reflections, GI, DDGI, ReSTIR and the path tracer see voxels; RT preset frame time measured |
@@ -263,7 +266,8 @@ Not planned now: water and other fluids, falling sand / gravity voxels (later, i
 - Offline (NoxToolsTest): the `.vox` reader on hand-built files (every chunk type, broken sizes, the scene graph's rotations); chunk
   encode / decode round trips; brush application against a CPU reference (integer evaluation: the same voxels from two different orders of operations on the
   same brush list); palette compaction and the 2-byte fallback; sky visibility after carving a cave; a CPU DDA reference against the shader's rules (same voxels
-  hit for a grid of rays); greedy meshing (watertight, no T-junction gaps in collision); generator determinism (same seed, same
+  hit for a grid of rays); binary greedy meshing against the plain greedy mesher on random chunks (same visible faces and area) and
+  watertight (every directed edge matched by its reverse: no T-junction gaps); generator determinism (same seed, same
   chunk; the same chunk hash on Windows and Linux builds with strict FP).
 - GPU (the user): each phase's "done when", frame times in UIDemo-style summaries (voxel pass, shadows, uploads), validation clean on
   Vulkan and D3D12.
@@ -271,7 +275,12 @@ Not planned now: water and other fluids, falling sand / gravity voxels (later, i
 ## 9. Open questions
 
 - Mesh first, voxels second in the depth order, or the reverse (VX2 measures both).
-- Chunk size 64^3 vs 32^3 (finer streaming and edits vs fewer draws and tables), and its value at 50 cm - 1 m voxels.
+- Chunk size 64^3 vs 32^3 (finer streaming and edits vs fewer draws and tables), and its value at 50 cm - 1 m voxels. Binary greedy
+  meshing needs a chunk's columns plus a one-voxel border from each neighbour in one 64-bit word: 62^3 fits (its reference size),
+  64^3 does not (66 bits) -- 62^3 chunks, two words per column, or meshing units of 32^3 (34 bits) inside a 64^3 chunk (VX4 decides).
+- The block preset (50 cm - 1 m): chunk meshes or the DDA pass (VX2 measures; §1 Block-style worlds).
+- `.vox` props (VX0): the same T-junction removal for their merged faces, so ray-traced effects see them watertight (no visible
+  problem reported on room / cars / knight).
 - Primary visibility: brick boxes or compute primary rays (VX2 measures both).
 - Strict-FP FastNoise2: identical chunk hashes between a Windows (MSVC) and a Linux (GCC / Clang) build, and on ARM (§3a; measured
   identical across SSE2 / SSE4.1 / AVX2 / AVX-512 on one machine).
