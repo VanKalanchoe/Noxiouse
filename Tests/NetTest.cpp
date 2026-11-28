@@ -3,17 +3,17 @@
 // refusals (protocol, project, content checksum, server full), game messages both ways, network emulation (round trip, loss,
 // reliable order under 20 % loss), kick, handshake time-out, garbage, dead links (with and without traffic), server shutdown,
 // and the message reader against random bytes. Build with -DNOX_BUILD_TESTS=ON; run NoxNetTest (exit code 0: all passed).
-#include "NoxCore/Network/GnsTransport.h"
-#include "NoxCore/Network/LoopbackTransport.h"
-#include "NoxCore/Network/NetClient.h"
-#include "NoxCore/Network/NetServer.h"
-#include "NoxCore/Network/NetSnapshot.h"
-#include "NoxCore/Network/NetQuantize.h"
-#include "NoxCore/Network/NetPrediction.h"
-#include "NoxCore/Network/NetRelevancy.h"
-#include "NoxCore/Network/NetLagCompensation.h"
-#include "NoxCore/Network/NetPhysicsReplication.h"
-#include "NoxCore/Network/NetAnimation.h"
+#include <NoxNet/GnsTransport.h>
+#include <NoxNet/LoopbackTransport.h>
+#include <NoxNet/NetClient.h>
+#include <NoxNet/NetServer.h>
+#include <NoxNet/NetSnapshot.h>
+#include <NoxNet/NetQuantize.h>
+#include <NoxNet/NetPrediction.h>
+#include <NoxNet/NetRelevancy.h>
+#include <NoxNet/NetLagCompensation.h>
+#include <NoxNet/NetPhysicsReplication.h>
+#include <NoxNet/NetAnimation.h>
 #include "NoxCore/Core/Log.h"
 
 #include <cstdio>

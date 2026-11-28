@@ -1,11 +1,15 @@
-// The MCP protocol layer (NoxEditor/src/Mcp/McpProtocol): HTTP checks, JSON-RPC, version negotiation, tools, validation, access.
+// The MCP protocol layer (the NoxMCP library: NoxCore/vendors/NoxMCP, <NoxMcp/McpProtocol.h>): HTTP checks, JSON-RPC, version negotiation, tools, validation, access.
 // Included by ToolsTest.cpp when NOX_TOOLS_TEST_MCP is defined (the editor's MCP sources are part of the test then).
-#include "McpProtocol.h"
+#include <NoxMcp/McpProtocol.h>
 
 #include <thread>
 
+namespace Nox::Mcp {} // (the engine's MCP tools: their headers come below)
+
 namespace McpTest
 {
+    // The protocol layer is the NoxMCP library's (namespace NoxMcp); the engine's tools and helpers stay in Nox::Mcp.
+    using namespace NoxMcp;
     using namespace Nox::Mcp;
     constexpr const char* Token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -40,7 +44,7 @@ static void TestMcp()
     Settings settings;
     settings.Token = Token;
     settings.Port = 8765;
-    settings.Access = Nox::ConsoleAccess::Write;
+    settings.Access = NoxMcp::ToolAccess::Write;
     settings.Instructions = "Test server";
     Protocol protocol(settings);
 
@@ -67,7 +71,7 @@ static void TestMcp()
     Tool quit;
     quit.Name = "quit";
     quit.Description = "Needs execute access";
-    quit.Access = Nox::ConsoleAccess::Execute;
+    quit.Access = NoxMcp::ToolAccess::Execute;
     quit.Destructive = true;
     quit.Handler = [](const Json&, ToolDone done) { done(ToolResult::Text("quit")); };
     protocol.AddTool(quit);
@@ -145,7 +149,7 @@ static void TestMcp()
     body = BodyOf(protocol.Handle(Post(Rpc("tools/call", Json{ { "name", "quit" } }))));
     CHECK(body["result"]["isError"] == true && body["result"]["content"][0]["text"].get<std::string>().find("execute") != std::string::npos,
           "a tool above the granted access: refused");
-    protocol.SetAccess(Nox::ConsoleAccess::Execute);
+    protocol.SetAccess(NoxMcp::ToolAccess::Execute);
     body = BodyOf(protocol.Handle(Post(Rpc("tools/call", Json{ { "name", "quit" } }))));
     CHECK(body["result"]["isError"] == false, "granted execute: it runs");
     body = BodyOf(protocol.Handle(Post(Rpc("tools/call", Json{ { "name", "later" } }))));
@@ -179,7 +183,7 @@ static void TestMcp()
 
 #ifdef NOX_TOOLS_TEST_MCP_SERVER
 // The HTTP transport (McpServer) end to end: real sockets on 127.0.0.1, a thread standing in for the editor's main thread.
-#include "McpServer.h"
+#include <NoxMcp/McpServer.h>
 #include "httplib.h"
 
 static void TestMcpServer()
@@ -214,13 +218,13 @@ static void TestMcpServer()
     Settings settings;
     settings.Token = Token;
     settings.Port = port;
-    Nox::Mcp::McpServer server;
+    NoxMcp::McpServer server;
     std::string error;
     const bool started = server.Start(settings, { where, nextFrame, never }, error);
     CHECK(started, "listens on 127.0.0.1:{} {}", port, error);
     if (!started)
         return;
-    Nox::Mcp::McpServer second;
+    NoxMcp::McpServer second;
     std::string secondError;
     CHECK(!second.Start(settings, {}, secondError) && !secondError.empty(), "a second server on the same port is refused: '{}'", secondError);
 
@@ -297,7 +301,7 @@ static void TestMcpServer()
 }
 
 // MCP5: the client the editor forwards runtime_call with (CallServer), against a real server; and the project's token file.
-#include "McpClient.h"
+#include <NoxMcp/McpClient.h>
 #include "McpProjectFiles.h"
 
 static void TestMcpClient()
@@ -323,15 +327,15 @@ static void TestMcpClient()
     Tool hidden;
     hidden.Name = "hidden";
     hidden.Description = "Needs execute";
-    hidden.Access = Nox::ConsoleAccess::Execute;
+    hidden.Access = NoxMcp::ToolAccess::Execute;
     hidden.Handler = [](const Json&, ToolDone done) { done(ToolResult::Text("ran")); };
 
     Settings settings;
     settings.Token = Token;
     settings.Port = port;
-    settings.Access = Nox::ConsoleAccess::Write;
+    settings.Access = NoxMcp::ToolAccess::Write;
     settings.ServerName = "nox-runtime";
-    Nox::Mcp::McpServer server;
+    NoxMcp::McpServer server;
     std::string error;
     const bool started = server.Start(settings, { echo, fails, hidden }, error);
     CHECK(started, "a game's server listens on 127.0.0.1:{} {}", port, error);
@@ -416,11 +420,12 @@ static void TestMcpClient()
 
 #ifdef NOX_TOOLS_TEST_MCP
 // Component edits' JSON side (McpValidation): patches, checks against a component's example, what the engine stored differently.
-#include "McpValidation.h"
+#include <NoxMcp/McpValidation.h>
 
 static void TestMcpValidation()
 {
     using namespace Nox::Mcp;
+    using namespace NoxMcp;
     std::printf("\n== MCP component edits (JSON)\n");
     const Json light = Json::parse(R"({ "Color": [1, 1, 1], "Intensity": 10.0, "CastShadows": true, "Samples": 4, "Mode": "Realtime",
                                         "Mesh": "16531713622870338582", "Texture": "0", "Curve": [{ "Time": 0.0, "Value": 1.0 }],
@@ -503,11 +508,12 @@ ScriptComponent:
 
 #ifdef NOX_TOOLS_TEST_MCP
 // inject_input's timing (McpInputPlayer): holds per frame, shared keys, motion spread over the time.
-#include "McpInputPlayer.h"
+#include <NoxMcp/McpInputPlayer.h>
 
 static void TestMcpInputPlayer()
 {
     using namespace Nox::Mcp;
+    using namespace NoxMcp;
     std::printf("\n== MCP inject_input timing\n");
     auto has = [](const std::vector<std::pair<int, bool>>& changes, int code, bool down)
     {
@@ -602,6 +608,7 @@ static void TestMcpAssets()
 {
     using namespace Nox;
     using namespace Nox::Mcp;
+    using namespace NoxMcp;
     std::printf("\n== MCP scripts and materials\n");
 
     // dotnet build output (quiet): errors in place and again in the summary, a warning, a project-wide error, noise.
@@ -775,6 +782,7 @@ static void TestMcpAssets()
 static void TestMcpComponentShapes()
 {
     using namespace Nox::Mcp;
+    using namespace NoxMcp;
     std::printf("\n== MCP components with fields written only when set\n");
 
     // MaterialComponent: defaults write nothing; the sample (asset fixed back to 0, as SampleFixes does) gives the fields.
@@ -834,6 +842,7 @@ static void TestMcpGraphs()
 {
     using namespace Nox;
     using namespace Nox::Mcp;
+    using namespace NoxMcp;
     std::printf("\n== MCP graphs as JSON\n");
     const std::string domain = "McpTestGraph";
     auto add = [&](NodeTypeDesc desc) { desc.Domain = domain; NodeTypeRegistry::Register(std::move(desc)); };

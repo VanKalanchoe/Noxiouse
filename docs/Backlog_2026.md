@@ -301,6 +301,10 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   threshold 0.45 carved 20% of the underground (now 0.65, ~10%); depths in metres rounded to voxels (flooring made a 3 m layer 29 voxels);
   x86 builds of FastSIMD have no scalar level -- SSE2 / SSE4.1 / AVX2 / AVX-512 bit-identical. Real `.vox` scenes stamp exactly. Also:
   `*.log` ignored, `NoxEditor/NoxDx12.log` out of the repository.
+  User build: NoxToolsTest did not compile (`McpTests.inl`: 'McpProtocol.h' file not found) -- the tests had not followed the MCP and
+  networking code into their libraries. Fixed: `McpTests.inl` includes `<NoxMcp/...>` and uses the library's namespace `NoxMcp` (protocol
+  types, `ToolAccess`, `McpServer`) next to the engine's `Nox::Mcp`; `NetTest.cpp` includes `<NoxNet/...>`. Both compile with the
+  engine's flags (checked here; not run).
 
 - 2026-11-26 (user-tested 2026-11-27): **VX0 MagicaVoxel `.vox` models** (`Voxel_Plan_2026-11.md` §4): the Content Browser imports
   `.vox` with the **Import Voxel Model** window (Voxel Size, Pivot, Merge Faces, Combine Models) into static meshes with exact palette
