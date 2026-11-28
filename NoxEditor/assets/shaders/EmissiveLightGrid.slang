@@ -87,10 +87,11 @@ void trianglesMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissive
         const float power = dot(max(emission, float3(0.0)), float3(0.2126, 0.7152, 0.0722)) * record.area;
         record.power = isfinite(power) ? power : 0.0;
     }
-    RWBufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference).Store(triangle, record);
+    RWBufferRef<EmissiveTriangle>(pc.outputReference).Store(triangle, record);
 }
 
 groupshared float gScan[EmissiveScanGroupSize];
+groupshared uint gEmitterScan[EmissiveScanGroupSize];
 
 [shader("compute")]
 [numthreads(EmissiveScanGroupSize, 1, 1)]
@@ -98,29 +99,43 @@ void scanMain(uint3 tid : SV_GroupThreadID, uniform PushConstantEmissiveGrid pc)
 {
     UniformBufferObject ubo = loadUbo(pc.matrixReference);
     BufferRef<EmissiveTriangle> triangles = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference);
-    RWBufferRef<float> cdf = RWBufferRef<float>(ubo.emissiveTriangleCdfReference);
+    RWBufferRef<float> cdf = RWBufferRef<float>(pc.outputReference);
     const uint count = ubo.emissiveTriangleCount;
     const uint thread = tid.x;
+    // The triangles that emit, in triangle order (UniformBufferObject::emissiveEmitterListReference): the same scan over "emits" flags.
+    const bool listEmitters = pc.emitterListReference != 0;
+    RWBufferRef<uint> emitters = RWBufferRef<uint>(pc.emitterListReference);
 
     float running = 0.0;
+    uint emitterCount = 0;
     for (uint base = 0; base < count; base += EmissiveScanGroupSize)
     {
         const uint i = base + thread;
-        gScan[thread] = i < count ? triangles[i].power : 0.0;
+        const float power = i < count ? triangles[i].power : 0.0;
+        const uint emits = power > 0.0 ? 1u : 0u;
+        gScan[thread] = power;
+        gEmitterScan[thread] = emits;
         GroupMemoryBarrierWithGroupSync();
         // Inclusive Hillis-Steele scan of the block.
         for (uint offset = 1; offset < EmissiveScanGroupSize; offset <<= 1)
         {
             const float add = thread >= offset ? gScan[thread - offset] : 0.0;
+            const uint addEmitters = thread >= offset ? gEmitterScan[thread - offset] : 0u;
             GroupMemoryBarrierWithGroupSync();
             gScan[thread] += add;
+            gEmitterScan[thread] += addEmitters;
             GroupMemoryBarrierWithGroupSync();
         }
         if (i < count)
             cdf.Store(i, running + gScan[thread]);
+        if (listEmitters && emits != 0u)
+            emitters.Store(1u + emitterCount + gEmitterScan[thread] - 1u, i);
         running += gScan[EmissiveScanGroupSize - 1];
+        emitterCount += gEmitterScan[EmissiveScanGroupSize - 1];
         GroupMemoryBarrierWithGroupSync();
     }
+    if (listEmitters && thread == 0)
+        emitters.Store(0, emitterCount);
 }
 
 [shader("compute")]
@@ -133,7 +148,7 @@ void buildMain(uint3 tid : SV_DispatchThreadID, uniform PushConstantEmissiveGrid
         return;
 
     UniformBufferObject ubo = loadUbo(pc.matrixReference);
-    RWBufferRef<uint> entries = RWBufferRef<uint>(ubo.emissiveGridReference);
+    RWBufferRef<uint> entries = RWBufferRef<uint>(pc.outputReference);
     const uint first = cell * EmissiveGridEntries;
     const uint count = ubo.emissiveTriangleCount;
     BufferRef<EmissiveTriangle> triangles = BufferRef<EmissiveTriangle>(ubo.emissiveTrianglesReference);

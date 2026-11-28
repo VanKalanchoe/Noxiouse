@@ -151,7 +151,9 @@ static const uint ScreenProbeEmissiveCandidates = 4;
 
 float4 screen_probe_emissive_sample(UniformBufferObject ubo, float3 origin, float3 probeNormal, uint seed, float exposure)
 {
-    if (ubo.emissiveLightCount == 0 || ubo.tlasDeviceAddress == 0)
+    // ReSTIR DI gives the emissive meshes' direct light per pixel (UniformBufferObject::rtxdiEmissiveLights): the probes then carry
+    // only what bounces (their rays already leave out these meshes' emission, screen_probe_shade_hit), or it would count twice.
+    if (ubo.emissiveLightCount == 0 || ubo.tlasDeviceAddress == 0 || ubo.rtxdiEmissiveLights != 0)
         return float4(0.0);
     EmissiveLights::Sample chosen = (EmissiveLights::Sample)0;
     float chosenTarget = 0.0;

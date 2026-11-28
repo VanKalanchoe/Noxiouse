@@ -166,12 +166,67 @@ bool ddgi_probe_entered(UniformBufferObject ubo, uint storageIndex)
     return false;
 }
 
-// Updated this frame: the first cascade's probes every ddgiUpdateStride frames in turn, each further cascade half as often (its
-// probes are farther away, where lighting changes show less), and always the ones that just came in.
+// How often a cascade's probes update: every ddgiUpdateStride frames for the first, each further cascade half as often (its probes are
+// farther away, where lighting changes show less), at most every 16th frame. Renderer::addDDGIPasses has the same rule.
+uint ddgi_update_stride(UniformBufferObject ubo, uint cascade)
+{
+    return min(max(ubo.ddgiUpdateStride, 1u) << cascade, 16u);
+}
+
+// Updated this frame: a cascade's probes in turn, one in every ddgi_update_stride, and always the ones that just came in.
 bool ddgi_probe_updates(UniformBufferObject ubo, uint storageIndex, uint frameIndex)
 {
-    const uint stride = min(max(ubo.ddgiUpdateStride, 1u) << ddgi_cascade_of(ubo, storageIndex), 16u);
+    const uint stride = ddgi_update_stride(ubo, ddgi_cascade_of(ubo, storageIndex));
     return stride == 1 || ((storageIndex + frameIndex) % stride) == 0 || ddgi_probe_entered(ubo, storageIndex);
+}
+
+// ---- Compact ray rows (compactRays in the DDGI push constants). On a frame no probe comes in (no cascade moved), the probes
+// ddgi_probe_updates picks are exactly one in every stride of each cascade: their rays get the rows of the ray data, cascade after
+// cascade, and the radiance pass traces and the blends run only those -- not a row per probe of which most return at once (at
+// ddgiUpdateStride 4 over 3 cascades about 15 % of the probes trace; the rest cost a fragment per ray and a blend workgroup each).
+// Renderer::addDDGIPasses counts the rows with the same rule.
+
+// The first probe of a cascade updated this frame (its index in the cascade).
+uint ddgi_first_updated(UniformBufferObject ubo, uint cascade, uint frameIndex)
+{
+    const uint stride = ddgi_update_stride(ubo, cascade);
+    return (stride - (cascade * ddgi_probes_per_cascade(ubo) + frameIndex) % stride) % stride;
+}
+
+// How many of a cascade's probes update this frame.
+uint ddgi_cascade_rows(UniformBufferObject ubo, uint cascade, uint frameIndex)
+{
+    const uint perCascade = ddgi_probes_per_cascade(ubo);
+    const uint first = ddgi_first_updated(ubo, cascade, frameIndex);
+    const uint stride = ddgi_update_stride(ubo, cascade);
+    return perCascade > first ? (perCascade - first + stride - 1) / stride : 0u;
+}
+
+// The probe a compact ray row is for (0xFFFFFFFF past the last).
+uint ddgi_probe_of_row(UniformBufferObject ubo, uint row, uint frameIndex)
+{
+    const uint cascades = max(ubo.ddgiCascadeCount, 1u);
+    for (uint cascade = 0; cascade < cascades; ++cascade)
+    {
+        const uint rows = ddgi_cascade_rows(ubo, cascade, frameIndex);
+        if (row < rows)
+            return cascade * ddgi_probes_per_cascade(ubo) + ddgi_first_updated(ubo, cascade, frameIndex) + row * ddgi_update_stride(ubo, cascade);
+        row -= rows;
+    }
+    return 0xFFFFFFFFu;
+}
+
+// The ray data row of a probe this frame updates: its compact row, or (compactRays 0) its storage index.
+uint ddgi_ray_row(UniformBufferObject ubo, uint storageIndex, uint frameIndex, uint compactRays)
+{
+    if (compactRays == 0)
+        return storageIndex;
+    const uint cascade = ddgi_cascade_of(ubo, storageIndex);
+    uint row = 0;
+    for (uint before = 0; before < cascade; ++before)
+        row += ddgi_cascade_rows(ubo, before, frameIndex);
+    const uint local = storageIndex - cascade * ddgi_probes_per_cascade(ubo);
+    return row + (local - ddgi_first_updated(ubo, cascade, frameIndex)) / ddgi_update_stride(ubo, cascade);
 }
 
 // How far a probe's distance moments look: rays are clamped to this (about one and a half of its cascade's cells).

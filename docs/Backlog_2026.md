@@ -217,6 +217,63 @@ Built items many of which the user has not tested yet (marked "untested"); the p
   NonUniformResourceIndex (undefined on other vendors; NVIDIA copes). Added the plain path tracer's Max Bounces (1-32, default 18)
   and Light Samples (0-4, default 1; 0: no NEE, the MIS weights 1, the sun's disc and rect lights added by every path) to the
   Renderer Settings, so the user can bisect the DX12 hang (1 / 0 leaves the camera rays and their first surface) without GBV.
+  User test 2026-11-27: the hang comes at once whatever Max Bounces / Light Samples are. Checked again from the DXIL (Slang + DXC
+  with the engine's options): payload 128 / attributes 8, push data 228 bytes at b0 (63 root constants), only the ray generation
+  traces, every heap handle of the right kind, the D3D12 state object / shader table / DispatchRays as in NoxRHI's working
+  RayTracingPipeline example -- cause not found. Built (waiting for the user's test): **Path Tracer Dispatch** (Renderer Settings),
+  the same path tracer as one compute shader with inline ray queries (PathTracer/PathTracerCompute.slang, RayTracingPass::
+  PathTracerCompute; the stages' work moved into shared functions pathTracePixel / pathTracerClosestHit / pathTracerMiss /
+  pathTracerAlphaAccepts, the stages thin wrappers -- their DXIL unchanged in size; the compute shader 3.2 MB of DXIL text after
+  tracePixelPath got one call site: two had inlined the closest hit twice), the default on D3D12. If compute runs on D3D12 the bug
+  is in the ray tracing pipeline path (NoxRHI or the driver); if it hangs too, in the path tracer's shaders.
+  Screen probes (Lumen-style) white over room.vox on both APIs, never right (user 2026-11-27, docs/hybrid.png vs docs/pathtracer.png):
+  DDGIRadiance gave every hit the emissive factor x strength without the emissive texture -- room.vox is one mesh, one palette
+  material, 3 of 256 entries emissive -- so DDGI saw the whole room glowing, and the screen probes read DDGI for their second bounce
+  and their edge fallback. ReSTIRGIInitial and ReSTIRPTInitial / Temporal had the same omission. Fixed with RayHitEmission
+  (ShaderHelpers.slang: factor x strength x the texture at its own UV channel, lod 0 as their albedo); compiled for both APIs,
+  waiting for the user's test.
+  Hybrid performance (user profiles 2026-11-27, docs/hybrid.noxprof 23.2 ms -> docs/hybrid-optimized.noxprof 13.6 ms after DLSS
+  Performance and Ray Reconstruction off): DDGI under the screen probes was then the largest cost (3.8 ms). Probe Updates already
+  traced a quarter / an eighth / a sixteenth of the cascades' probes, but every probe still cost a fragment per ray (1.84 M, ~70
+  uniform loads each before returning) and a blend workgroup (copying its own texels). Now compact ray rows on frames no probe comes
+  in (compactRays, ddgi_probe_of_row / ddgi_ray_row, the atlases copied whole first: "DDGI Keep Irradiance / Distance"); the same
+  probes and light. Compiled for both APIs; the saving not measured yet (the async compute timings overlap the graphics queue's).
+  User profile docs/hybrid-ddgi.noxprof: DDGI 3.8 -> 1.8 ms (radiance 2.16 -> 0.62); Screen Probe Trace 1.7 -> 5.4 ms (not this
+  change: it runs alone on the GPU in both captures; G-Buffer +22 % and Emissive Power Sum x3 say another view / resolution -- the
+  user moved the camera a little). Both captures: the graphics queue idle while the screen probes trace (3.8 / 7.6 ms) -- RT
+  Reflections read this frame's screen-probe GI. Now they read last frame's (screenGIPrevious*, ScreenProbeGIDistance a history);
+  compiled for both APIs, waiting for the user's profile from the same camera spot.
+  User profile docs/hybrid-async.noxprof (Vulkan): 13.1 ms, but RT Reflections still started when the async queue's block ended --
+  the DDGI blends and the screen-probe passes are one run of async passes, one block, one join. NoxRHI's PlanQueues now splits a
+  run where a graphics pass needs only its first part (firstConflict); on D3D12 the TLAS rule keeps the screen probes joined before
+  RTAO, so nothing changes there. Waiting for the user's Vulkan profile.
+  The moving light in the room (user video 2026-11-28, still camera): 3-12 % slow waves where the red panel's light reaches the
+  slats / floor only through the screen probes' emissive samples (64 per probe, RIS of 4), tile-sized and jittered, accumulated over
+  24 frames. Advised: real lights (a Rect Light on the panel, lower Emission Scale) and Temporal Frames 48-64; per-pixel emissive
+  direct light declined for now (its cost).
+  User (2026-11-28, docs/20261128-0135-23.8770123.mp4: the green slits' light moving on thin pipes): build the emissive fix with
+  RTXDI, check the existing ReSTIR DI against the SDK (the user gave up on it before). Built (waiting for the user's test):
+  RTXDI/RTXDILights.slang -- one light module for every ReSTIR pass (index space: analytic locals, emissive triangles, infinite;
+  triangles through EmissiveLights::sampleTrianglePoint; RAB_TranslateLightIndex -1 when the index space changes); emissive
+  triangles as local lights with Direct Lighting: ReSTIR DI (UniformBufferObject::rtxdi*); screen probes / ReSTIR GI hits drop their
+  emissive part then, reflection hits on the screen-probe GI sample an emissive triangle themselves. Audit findings: the light PDF
+  texture was R16_SFLOAT -- light powers in centimetre units overflow 65504 to infinity and RTXDI's mip descent then picks lights
+  wrongly (now R32_SFLOAT, sized to the light count); the temporal / spatial / final shading passes each had their own copy of the
+  light bridge (now the shared module); the DI denoiser defaults to Off (raw 1 spp). Open: forward decals / transparent surfaces lose
+  the emissive direct light while ReSTIR DI owns it; the screen-probe edge fallback (DDGI) still holds emissive light (a little double
+  at edges).
+  User test 2026-11-28 (Vulkan, docs/hybridrestirdi.noxprof): "looks more stable with ReSTIR DI". 11.7 -> 14.6 ms: ReSTIR DI 4.0 ms on
+  the graphics queue (NRD DI 2.5 of it, spatial 0.45, final shading 0.5, temporal 0.34, presampling 0.4 with Light PDF Write 0.25).
+  room.vox's one emissive material makes every triangle of the room an emissive triangle (most of zero power: never sampled, but
+  in the PDF texture and its passes). Done (waiting for the user's profile): only the emitting triangles are RTXDI lights (the scan
+  pass writes them with their count, emissiveEmitterListReference); NRD Reflections on the graphics queue while ReSTIR DI runs (the
+  compute queue is the long path then; NRD DI there would have made it longer -- not done). Fixed with it: the emissive passes
+  (trianglesMain / scanMain / buildMain) wrote through the uniforms' read references, invalid on D3D12 (SRV slots): now write
+  references in PushConstantEmissiveGrid. docs/hybrid-ddgi-differentsettings.noxprof (other settings): 19.4 ms (screen-probe trace 10 ms, ReSTIR DI 7.7).
+  User test 2026-11-27: compute renders on D3D12 (the same shading functions): the path tracer's own code is fine there; the hang is
+  in the D3D12 ray tracing pipeline path -- the stages as DXIL libraries (Slang + DXC lib_6_6), NoxRHI's state object / shader
+  table / DispatchRays, or the driver's ray tracing compiler. Not proven which. Open: reproduce in NoxRHI's RayTracingPipeline
+  example (add an inline RayQuery and a large closest hit) or capture with Nsight Aftermath / PIX; until then compute on D3D12.
   White specks on edges with the screen-probe GI (Lumen-style): gone with room.vox's emission at 0, so the probes' emissive light
   samples -- a tiny, bright lamp's estimate is mostly zeros and rare huge samples, and an edge pixel takes one probe's. Each sample is
   now held to ScreenProbeEmissiveMaxMiddleGreys (8) x middle grey at the frame's exposure, as SSGI holds its hits

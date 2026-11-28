@@ -319,7 +319,12 @@ bool isVirtualMaterialTexture(uint textureIndex)
 // The image: a virtual texture's tail.
 Texture2D MaterialTexture(UniformBufferObject ubo, uint textureIndex)
 {
-    return Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + (textureIndex & ~MaterialTextureVirtual), 0));
+    const uint slot = textureIndex == 0xFFFFFFFFu ? 0u : (ubo.imageHeapIndexOffset + (textureIndex & ~MaterialTextureVirtual));
+#ifdef NOX_VULKAN
+    return Texture2D.Handle(uint2(slot, 0));
+#else
+    return Texture2D.Handle(uint2(NonUniformResourceIndex(slot), 0));
+#endif
 }
 GpuVirtualTexture virtualTextureOf(UniformBufferObject ubo, uint textureIndex)
 {
@@ -366,7 +371,11 @@ float4 sampleVirtualMip(UniformBufferObject ubo, uint textureIndex, GpuVirtualTe
             const float2 inTile = texel - floor(texel / float(VirtualTileSize)) * float(VirtualTileSize);
             const float2 origin = float2(uint2(slot % vt.poolTilesPerRow, slot / vt.poolTilesPerRow) * VirtualTileStride + VirtualTileBorder);
             const float2 physical = (origin + inTile) * vt.poolInvSize;
+#ifdef NOX_VULKAN
             Texture2D pool = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + vt.poolTextureIndex, 0));
+#else
+            Texture2D pool = Texture2D.Handle(uint2(NonUniformResourceIndex(ubo.imageHeapIndexOffset + vt.poolTextureIndex), 0));
+#endif
             if (!gradients)
                 return pool.SampleLevel(samplerState, physical, 0.0);
             float2 dx = ddxUV * size;
@@ -519,6 +528,22 @@ float4 RayTracingVertexColor(GpuRayTracingInstance instance, uint3 corners, floa
     BufferRef<uint32_t> colors = BufferRef<uint32_t>(instance.colorBufferAddress);
     return unpackVertexColor(colors[corners.x]) * (1.0 - barycentrics.x - barycentrics.y) + unpackVertexColor(colors[corners.y]) * barycentrics.x +
            unpackVertexColor(colors[corners.z]) * barycentrics.y;
+}
+// The light a ray hit's surface emits: the material's emissive factor x strength through its emissive texture, read through the
+// texture's own UV channel (KHR_texture_transform) at `lod`. Without the texture a mesh whose emissive map is mostly dark glowed
+// everywhere -- a MagicaVoxel model is one mesh with one palette material (3 of room.vox's 256 entries emit), and DDGI saw its whole
+// room glowing, which lit the screen probes' second bounce and edge fallback white.
+float3 RayHitEmission(UniformBufferObject ubo, GpuRayTracingInstance instance, Vertex v0, Vertex v1, Vertex v2, float2 barycentrics,
+                      SamplerState textureSampler, float lod)
+{
+    float3 emission = instance.emissiveFactor.rgb * instance.emissiveFactor.a;
+    if (instance.emissiveTextureIndex == 0xFFFFFFFF || !any(emission > 0.0))
+        return emission;
+    const float w0 = 1.0 - barycentrics.x - barycentrics.y;
+    const GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[instance.materialIndex];
+    const float2 uv = material_texture_uv(material, material.emissiveTextureSet, w0 * v0.uv0 + barycentrics.x * v1.uv0 + barycentrics.y * v2.uv0,
+                                          w0 * v0.uv1 + barycentrics.x * v1.uv1 + barycentrics.y * v2.uv1);
+    return emission * SampleMaterialTextureLevel(ubo, instance.emissiveTextureIndex, textureSampler, uv, lod).rgb;
 }
 // Its alpha, for the alpha tests (the base color's alpha includes it).
 float RayTracingVertexAlpha(GpuRayTracingInstance instance, uint primitive, float2 barycentrics)

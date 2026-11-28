@@ -98,7 +98,8 @@ float4 fragMain(
 {
     UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
     uint rayIndex = uint(input.pos.x);
-    uint probeIndex = uint(input.pos.y);
+    // A row per probe, or (compactRays) a row per probe updated this frame (DDGICommon.slang ddgi_probe_of_row).
+    uint probeIndex = pushConstant.compactRays != 0 ? ddgi_probe_of_row(ubo, uint(input.pos.y), pushConstant.frameIndex) : uint(input.pos.y);
 
     if (rayIndex >= pushConstant.raysPerProbe || probeIndex >= pushConstant.probeCountTotal)
     {
@@ -106,7 +107,7 @@ float4 fragMain(
     }
 
     // Probes not updated this frame (ddgiUpdateStride) trace nothing; their blend keeps the atlas as it was.
-    if (!ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex))
+    if (pushConstant.compactRays == 0 && !ddgi_probe_updates(ubo, probeIndex, pushConstant.frameIndex))
         return float4(0.0, 0.0, 0.0, 1000.0);
 
     // From where last frame's relocation put it (a probe that just came into its cascade: its grid point; the slot's offset was the
@@ -266,7 +267,7 @@ float4 fragMain(
     const float3 directLight = albedo / 3.14159265 * directIrradiance;
 
     // Emissive component (e.g. glowing panels)
-    float3 emissiveLight = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
+    float3 emissiveLight = RayHitEmission(ubo, hitLut, vertex0, vertex1, vertex2, committedBary, textureSampler, 0.0); // (its texture too)
 #ifdef NOX_MATERIAL_GRAPH_SURFACE
     if ((graphOutputs & MaterialGraphOutputEmissive) != 0u)
         emissiveLight = graphSurface.emissive;

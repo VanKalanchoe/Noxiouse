@@ -1035,6 +1035,10 @@ namespace Nox
         // The plain path tracer: vertices a path may have (1: direct light only) and light samples (NEE) per vertex (0: none -- light
         // found by the paths alone, its MIS weights 1).
         uint32_t& getPathTracerMaxBounces() { return m_pathTracerMaxBounces; }
+        // How the plain path tracer traces: false its ray tracing pipeline (TraceRay, shader binding table), true the same shaders
+        // as one compute shader with inline ray queries (PathTracer/PathTracerCompute.slang). Default: compute on D3D12, whose ray
+        // tracing pipeline hung the GPU at the path tracer's DispatchRays; the pipeline on Vulkan.
+        bool& getPathTracerCompute() { return m_pathTracerCompute; }
         uint32_t& getPathTracerLightSamples() { return m_pathTracerLightSamples; }
         uint32_t& getReSTIRPTMaxRcVertexLength() { return m_restirPTMaxRcVertexLength; }
         uint32_t& getReSTIRPTNumNeeSamples() { return m_restirPTNumNeeSamples; }
@@ -1448,7 +1452,7 @@ namespace Nox
         enum class RayTracingPass : uint8_t
         {
             ShadowMask, DeferredLighting, RTAO, Reflection, ScreenProbeTrace, DDGIRadiance, ReSTIRDIFinalShading, ReSTIRGIInitial,
-            ReSTIRPTInitial, ReSTIRPTTemporal, PathTracer, Count
+            ReSTIRPTInitial, ReSTIRPTTemporal, PathTracer, PathTracerCompute, Count
         };
         using RayTracingPassPipelines = std::array<nri::Pipeline, static_cast<size_t>(RayTracingPass::Count)>;
         // Its pipeline's description, with the graph variant of its shaders when `graphMasks` (the create functions and the build share it).
@@ -1559,6 +1563,7 @@ namespace Nox
         glm::mat4 m_screenProbePrevProj{ 1.0f };
         glm::mat4 m_screenProbePrevView{ 1.0f };
         glm::vec2 m_screenProbePrevJitterUv{ 0.0f };
+        glm::vec4 m_screenProbePrevCameraPos{ 0.0f }; // last frame's camera (UniformBufferObject::screenGIPreviousCameraPos)
         bool m_screenProbePrevMatricesValid = false;
         // Whether the transparent buckets have draws this frame.
         bool hasTransparentDraws() const;
@@ -2222,6 +2227,7 @@ namespace Nox
         nri::Pipeline m_reflectionPipeline{};
         // Path Tracer
         nri::Pipeline m_pathTracerPipeline{};
+        nri::Pipeline m_pathTracerComputePipeline{}; // the same path tracer with inline ray queries (getPathTracerCompute)
         nri::Pipeline m_ptEnvironmentBuildPipeline;
         nri::Pipeline m_ptEnvironmentReducePipeline;
         nri::Buffer m_pathTracerSBTBuffer{};
@@ -2294,6 +2300,10 @@ namespace Nox
             bool ddgiAdded = false;
             bool screenProbeGIAdded = false;
             uint32_t screenProbeGIWriteIndex = 0; // the result this frame writes (resources.ScreenProbeGI)
+            // Last frame's result (resources.ScreenProbeGI / ScreenProbeGIDistance [screenProbeGIReadIndex]) is this view's: the RT
+            // reflections read it (UniformBufferObject::screenGIPrevious*).
+            bool screenProbeGIHistoryValid = false;
+            uint32_t screenProbeGIReadIndex = 0;
             bool restirGIAdded = false;
             bool nrdGIAdded = false;
             bool restirDIAdded = false;
@@ -2344,6 +2354,9 @@ namespace Nox
         uint64_t bufferWriteRef(NriBuffer buffer);
         void releaseBufferRefs(NriBuffer buffer);
         uint64_t tlasRef() const;
+        // RTXDI's local lights (the analytic ones and the emissive triangles) and where its infinite lights start (RTXDI/RTXDILights.slang).
+        uint32_t rtxdiLocalLightCount() const { return m_restirDINumLocalLights + m_rtxdiEmissiveTriangles; }
+        uint32_t rtxdiFirstInfiniteLight() const { return rtxdiLocalLightCount(); }
         mutable std::shared_mutex m_bufferRefMutex;
         std::unordered_map<NriBuffer, uint32_t> m_bufferReadSlots;
         std::unordered_map<NriBuffer, uint32_t> m_bufferWriteSlots;
@@ -2449,6 +2462,10 @@ namespace Nox
         uint32_t m_shadowMaskLightIndex = ~0u;
         glm::vec3 m_shadowMaskLightDirection{ 0.0f, 1.0f, 0.0f };
         uint32_t m_restirDINumInfiniteLights = 0;
+        // RTXDI's light index space (RTXDI/RTXDILights.slang, UniformBufferObject::rtxdi*): the analytic local lights, then
+        // m_rtxdiEmissiveTriangles emissive triangles (Direct Lighting: ReSTIR DI in the hybrid renderer), then the infinite lights.
+        uint32_t m_rtxdiEmissiveTriangles = 0;
+        uint64_t m_rtxdiLightSignature = 0; // what the index space was last frame (a change drops RTXDI's temporal history)
 
         // Defaults match RTXPT's own RtxdiApplicationSettings.cpp (getReSTIRDIInitialSamplingParams/
         // getReSTIRDITemporalResamplingParams/getReSTIRDISpatialResamplingParams) exactly, except
@@ -2541,6 +2558,7 @@ namespace Nox
         uint32_t m_restirPTNumInitialSamples = 1;
         uint32_t m_restirPTMaxBounceDepth = 3;
         uint32_t m_pathTracerMaxBounces = 18; // RTXPT's Balanced preset (18 total, 2 diffuse)
+        bool m_pathTracerCompute = false;     // set by the constructor: true on D3D12
         uint32_t m_pathTracerLightSamples = 1;
         uint32_t m_restirPTMaxRcVertexLength = 5;
         uint32_t m_restirPTNumNeeSamples = 1;
@@ -3026,6 +3044,7 @@ namespace Nox
         // The path tracer's emissive triangle lights (EmissiveLightGrid.slang): their records and the running sum of their power.
         nri::Buffer m_emissiveTriangleBuffer;
         nri::Buffer m_emissiveTriangleCdfBuffer;
+        nri::Buffer m_emissiveEmitterListBuffer{}; // the emitting triangles (EmissiveLightGrid.slang scanMain; RTXDI's triangle lights)
         uint32_t m_emissiveTriangleCapacity = 0;
         nri::Pipeline m_emissiveTrianglesPipeline;
         nri::Pipeline m_emissiveScanPipeline;

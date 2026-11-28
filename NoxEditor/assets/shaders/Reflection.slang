@@ -299,7 +299,12 @@ float4 fragMain(
     // MIS-weighted against this ray, drew a string light's reflection as a ring with a dark middle where the path tracer shows a soft
     // glow: removed.)
     float hitT = rq.CommittedRayT();
-    float3 finalRadiance = shadeRayHit(ubo, rq.CommittedInstanceID(), rq.CommittedPrimitiveIndex(), rq.CommittedTriangleBarycentrics(),
+    // The hit's diffuse light from LAST frame's screen-probe GI where the hit is on screen (SceneGI.slang, screenGIPrevious): this
+    // frame's comes from the screen probes on the async compute queue, and reading it made this pass -- and the graphics queue behind
+    // it -- wait for them. A frame later in what a reflection shows, the camera's last position (Renderer::addScreenProbeGIPasses).
+    UniformBufferObject hitUbo = ubo;
+    hitUbo.screenGIPrevious = 1u;
+    float3 finalRadiance = shadeRayHit(hitUbo, rq.CommittedInstanceID(), rq.CommittedPrimitiveIndex(), rq.CommittedTriangleBarycentrics(),
                                        rayOrigin, R, hitT);
 
     // Incoming radiance (de-modulated: the lighting multiplies the specular factor back) with the ray's hit distance,

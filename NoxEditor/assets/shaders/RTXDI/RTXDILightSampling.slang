@@ -1,27 +1,19 @@
-// Shared RTXDI application bridge for sampling the engine's analytic lights at an arbitrary surface.
+// Shared RTXDI application bridge for sampling the lights (RTXDILights.slang: analytic lights and emissive triangles) at an arbitrary
+// surface: ReSTIR DI's initial samples and ReSTIR GI's path vertices.
 #ifndef RTXDI_LIGHT_SAMPLING_SLANG
 #define RTXDI_LIGHT_SAMPLING_SLANG
 
 #include "shaderIO.h"
 #include "Rtxdi/DI/ReSTIRDIParameters.h"
 
-static BufferRef<LightData> g_LightData;
+// The lights: RTXDILights.slang (the same index space, sampling and weights in every pass that resamples them).
+#include "RTXDI/RTXDILights.slang"
+
 static BufferRef<uint2> g_RISBuffer;
 #define RTXDI_RIS_BUFFER g_RISBuffer
 
 #undef RTXDI_REGIR_MODE
 #define RTXDI_REGIR_MODE 1 // RTXDI_REGIR_GRID
-
-typealias RAB_LightInfo = LightData;
-
-struct RAB_LightSample
-{
-    float3 position;
-    float3 normal;       // surface-to-light direction for directional lights
-    float3 radiance;     // includes range and cone attenuation
-    float solidAnglePdf;
-    uint lightType;
-};
 
 struct RAB_Material { uint materialID; };
 
@@ -50,29 +42,6 @@ RAB_Surface RAB_EmptySurface()
     return surface;
 }
 
-RAB_LightInfo RAB_EmptyLightInfo()
-{
-    LightData light;
-    light.position = float4(0.0);
-    light.direction = float4(0.0);
-    light.color = float4(0.0);
-    light.spotParams = float4(0.0);
-    return light;
-}
-
-RAB_LightSample RAB_EmptyLightSample()
-{
-    RAB_LightSample sample;
-    sample.position = float3(0.0);
-    sample.normal = float3(0.0, 1.0, 0.0);
-    sample.radiance = float3(0.0);
-    sample.solidAnglePdf = 0.0;
-    sample.lightType = 0;
-    return sample;
-}
-
-RAB_LightInfo RAB_LoadLightInfo(uint index, bool previousFrame) { return g_LightData[index]; }
-
 void RAB_BuildBasis(float3 normal, out float3 tangent, out float3 bitangent)
 {
     float sign = normal.z >= 0.0 ? 1.0 : -1.0;
@@ -91,42 +60,17 @@ float2 RAB_SampleDisk(float2 random)
 
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, RAB_Surface surface, float2 random)
 {
-    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
-    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
-    const LightPointSample lightPoint = sample_light_point(light, surface.worldPos, random);
-    RAB_LightSample s;
-    s.lightType = (uint)light.position.w;
-    s.position = lightPoint.position;
-    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
-    s.radiance = lightPoint.radiance;
-    s.solidAnglePdf = 1.0;
-    return s;
+    return rtxdi_sample_light(light, surface.worldPos, random);
 }
 
 void RAB_GetLightDirDistance(RAB_Surface surface, RAB_LightSample sample, out float3 direction, out float distance)
 {
-    if (sample.lightType == 0)
-    {
-        direction = sample.normal;
-        distance = 1e4;
-    }
-    else
-    {
-        float3 lightVector = sample.position - surface.worldPos;
-        distance = length(lightVector);
-        direction = distance > 1e-4 ? lightVector / distance : float3(0.0, 1.0, 0.0);
-    }
+    rtxdi_light_direction_distance(surface.worldPos, sample, direction, distance);
 }
 
 float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample sample, RAB_Surface surface)
 {
-    float luminance = max(dot(sample.radiance, float3(0.2126, 0.7152, 0.0722)), 0.0);
-    if (luminance <= 1e-7)
-        return 0.0;
-    float3 direction;
-    float distance;
-    RAB_GetLightDirDistance(surface, sample, direction, distance);
-    return luminance * (max(dot(surface.normal, direction), 1e-3) / 3.14159265359);
+    return rtxdi_light_target_pdf(sample, surface.worldPos, surface.normal);
 }
 
 float RAB_LightSampleSolidAnglePdf(RAB_LightSample sample) { return sample.solidAnglePdf; }
@@ -169,13 +113,14 @@ ReGIR_Parameters BuildReGIRParams(RTXDILightSamplingParams sampling)
 }
 
 RTXDI_DIReservoir RTXDI_SampleLightsAt(
+    UniformBufferObject ubo,
     RAB_Surface surface,
     inout RTXDI_RandomSamplerState rng,
     inout RTXDI_RandomSamplerState coherentRng,
     RTXDILightSamplingParams sampling,
     out RAB_LightSample selectedSample)
 {
-    g_LightData = BufferRef<LightData>(sampling.lightDataReference);
+    rtxdi_bind_lights(ubo, sampling.lightDataReference);
     g_RISBuffer = BufferRef<uint2>(sampling.risBufferReference);
 
     RTXDI_DIInitialSamplingParameters initial;

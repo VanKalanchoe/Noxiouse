@@ -4,6 +4,7 @@
 
 #include "SceneGI.slang"
 #include "LightSelection.slang"
+#include "PathTracer/EmissiveLights.slang"
 #include "PBRLighting.slang"
 #include "MaterialLobes.slang"
 
@@ -294,6 +295,32 @@ float3 shadeRayHit(UniformBufferObject ubo, uint instanceSlot, uint primitive, f
         directIrradiance += selectedLights.irradiance[i] *
                             ray_transmittance(ubo, hitPos + hitNormal * (0.02 * ubo.unitsPerMeter), selectedLights.direction[i],
                                               0.005 * ubo.unitsPerMeter, max(selectedLights.distance[i] - 0.02 * ubo.unitsPerMeter, 0.0));
+    }
+    // The emissive meshes' light where the hit's diffuse light is the screen-probe GI and ReSTIR DI gives the emissive light per
+    // pixel (rtxdiEmissiveLights): the probes then leave it out, as they leave out the analytic lights above, so the hit samples it
+    // itself -- one emissive triangle (the path tracer's sampling: EmissiveLights::sampleTriangles) behind a shadow ray. Off screen
+    // the DDGI cascades' light already holds it (their rays see the emission).
+    float3 screenIrradiance;
+    if (ubo.rtxdiEmissiveLights != 0 && ubo.emissiveTriangleCount > 0 && sample_screen_gi(ubo, hitPos, screenIrradiance))
+    {
+        uint emissiveRng = lightRng * 747796405u + 2891336453u;
+        float4 u;
+        for (uint k = 0; k < 4; ++k)
+        {
+            emissiveRng = emissiveRng * 747796405u + 2891336453u;
+            const uint word = ((emissiveRng >> ((emissiveRng >> 28u) + 4u)) ^ emissiveRng) * 277803737u;
+            u[k] = float((word >> 22u) ^ word) * (1.0 / 4294967296.0);
+        }
+        const EmissiveLights::Sample emissive = EmissiveLights::sampleTriangles(ubo, hitPos, u);
+        const float cosHit = dot(hitNormal, emissive.direction);
+        if (emissive.valid && cosHit > 0.0)
+        {
+            // A sample credits its triangle with at most a hemisphere (the screen probes' bound: no 1 / d^2 spike next to a lamp).
+            const float3 radiance = emissive.radiance * min(1.0, 2.0 * 3.14159265 / max(emissive.solidAngle, 1e-20));
+            directIrradiance += radiance * (cosHit / emissive.pdf) *
+                                ray_transmittance(ubo, hitPos + hitNormal * (0.02 * ubo.unitsPerMeter), emissive.direction,
+                                                  0.005 * ubo.unitsPerMeter, max(emissive.distance - 0.02 * ubo.unitsPerMeter, 0.0));
+        }
     }
     const float3 directLight = (albedo / 3.14159265) * directIrradiance;
 

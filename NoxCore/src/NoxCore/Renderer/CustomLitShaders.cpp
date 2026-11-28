@@ -326,6 +326,7 @@ float3 ambient(CustomLitSurface s, CustomLitAmbient a)
                 { "ScreenProbeTrace.slang", true }, { "DDGIRadiance.slang", true }, { "RTXDI/DI/ReSTIRDIFinalShading.slang", false },
                 { "RTXDI/GI/ReSTIRGIInitial.slang", true }, { "RTXDI/PT/ReSTIRPTInitial.slang", true }, { "RTXDI/PT/ReSTIRPTTemporal.slang", true },
                 { "PathTracer/PathTracerAnyHit.slang", false }, { "PathTracer/PathTracerHit.slang", true },
+                { "PathTracer/PathTracerCompute.slang", true },
             };
             std::vector<RayTracingMaskVariant> list;
             for (const auto& [source, surface] : sources)

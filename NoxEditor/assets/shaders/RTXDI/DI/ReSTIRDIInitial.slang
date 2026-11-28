@@ -194,7 +194,7 @@ PSOutput fragMain(
 
     RAB_LightSample selectedSample;
     RTXDI_DIReservoir reservoir = RTXDI_SampleLightsAt(
-        surface, rng, coherentRng, pushConstant.lightSampling, selectedSample);
+        g_UBO, surface, rng, coherentRng, pushConstant.lightSampling, selectedSample);
     RTXDI_StoreDIReservoir(reservoir, reservoirParams, pixelCoord, 0);
 
     return output;

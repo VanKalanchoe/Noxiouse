@@ -8,7 +8,6 @@
 // (numRegirBuildSamples draws combined via streaming RIS, not a single full-light-list pass) both
 // match the reference implementation exactly.
 
-static BufferRef<LightData> g_LightData;
 static RWBufferRef<uint2> g_RISBuffer;
 static PushConstantReSTIRDIPresampleReGIR g_PushConstant;
 #define RTXDI_RIS_BUFFER g_RISBuffer
@@ -17,22 +16,8 @@ static PushConstantReSTIRDIPresampleReGIR g_PushConstant;
 // open/unbounded worlds Onion mode targets. Must be defined before any RTXDI header that checks it.
 #define RTXDI_REGIR_MODE 1
 
-typealias RAB_LightInfo = LightData;
-
-RAB_LightInfo RAB_EmptyLightInfo()
-{
-    LightData l;
-    l.position = float4(0.0);
-    l.direction = float4(0.0);
-    l.color = float4(0.0);
-    l.spotParams = float4(0.0);
-    return l;
-}
-
-RAB_LightInfo RAB_LoadLightInfo(uint index, bool prevFrame)
-{
-    return g_LightData[index];
-}
+// The lights: RTXDILights.slang (the index space the resampling passes read these RIS entries with).
+#include "RTXDI/RTXDILights.slang"
 
 // We never use RTXDI's "compact light info" packed format -- our light counts are small enough that
 // plain index + RAB_LoadLightInfo is simpler and just as fast. Returning false tells the SDK "not
@@ -52,8 +37,9 @@ RAB_LightInfo RAB_LoadCompactLightInfo(uint linearIndex) { return RAB_EmptyLight
 // (see conversation history -- this was the actual bug behind "ReGIR makes it worse").
 float RAB_GetLightTargetPdfForVolume(RAB_LightInfo light, float3 volumeCenter, float volumeRadius)
 {
-    float lum = max(dot(light.color.rgb, float3(0.2126, 0.7152, 0.0722)) * light.color.a, 1e-6);
-    float distToCenter = length(light.position.xyz - volumeCenter);
+    // Its power share (the light PDF's, RTXDILights.slang) at its position -- a triangle's centroid.
+    float lum = max(rtxdi_light_importance(light), 1e-6);
+    float distToCenter = length(rtxdi_light_position(light) - volumeCenter);
 
     const float nonlinearFactor = 1.1547;
     float denom = distToCenter + volumeRadius * nonlinearFactor;
@@ -77,7 +63,7 @@ void compMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConstant
         return;
 
     g_PushConstant = pushConstant;
-    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    rtxdi_bind_lights(loadUbo(pushConstant.matrixReference), pushConstant.lightDataReference);
     g_RISBuffer = RWBufferRef<uint2>(pushConstant.risBufferReference);
 
     ReGIR_Parameters regirParams;

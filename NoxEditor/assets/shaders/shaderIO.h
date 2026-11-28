@@ -550,6 +550,16 @@ struct UniformBufferObject
     // camera's (jittered) pixels; 0xFFFFFFFF when it did not run.
     uint32_t screenGITextureIndex;
     uint32_t screenGIDistanceTextureIndex;
+    // Last frame's screen-probe GI for the RT reflections' hits: they read it instead of this frame's, so the reflection pass need not
+    // wait for the screen probes (async compute) and runs beside them. Its result and distance (0xFFFFFFFF: none -- the first frame,
+    // a reset), the jittered view-projection and camera position it was rendered with. screenGIPrevious 1 makes sample_screen_gi read
+    // these instead of this frame's (0 in the uploaded uniforms; Reflection.slang sets it on its own copy).
+    uint32_t screenGIPreviousTextureIndex;
+    uint32_t screenGIPreviousDistanceTextureIndex;
+    uint32_t screenGIPrevious;
+    uint32_t screenGIPreviousPadding;
+    mat4 screenGIPreviousViewProj;
+    vec4 screenGIPreviousCameraPos;
     // The light the RT shadow mask is for (the first directional light, the sun); 0xFFFFFFFF: none, every light traces its own.
     uint32_t shadowMaskLightIndex;
     // Ray tracing resolution (Settings > Ray Tracing Resolution, independent of DLSS): RT reflections, RT shadows and RTAO trace one
@@ -593,8 +603,22 @@ struct UniformBufferObject
     // (float[emissiveTriangleCount]). 0: none.
     uint64_t emissiveTrianglesReference;
     uint64_t emissiveTriangleCdfReference;
+    // The emissive triangles that emit (power > 0), in triangle order (EmissiveLightGrid.slang scanMain): uint[0] their count,
+    // uint[1 + k] the k-th one's EmissiveTriangle index. RTXDI's triangle lights (RTXDI/RTXDILights.slang) are these: an emissive
+    // material's dark parts (a MagicaVoxel model is one material whose palette mostly does not emit) are no lights. 0: none.
+    uint64_t emissiveEmitterListReference;
     uint32_t emissiveTriangleCount;
     uint32_t emissiveTrianglePadding;
+    // RTXDI's light index space (RTXDI/RTXDILights.slang): rtxdiAnalyticLocalLights analytic local lights (LightData), then
+    // rtxdiEmissiveTriangleLights emissive triangles (the EmissiveTriangle records), then the infinite lights. rtxdiEmissiveLights 1:
+    // ReSTIR DI gives the emissive meshes' direct light this frame (the hybrid renderer, Direct Lighting: ReSTIR DI) -- the screen
+    // probes then leave out their emissive samples and ReSTIR GI's hits the emission of those meshes, so it is counted once.
+    // rtxdiLightsChanged 1: the index space is not last frame's (a light or an emissive mesh came or went): RTXDI's temporal reuse drops
+    // its history this frame (RAB_TranslateLightIndex).
+    uint32_t rtxdiAnalyticLocalLights;
+    uint32_t rtxdiEmissiveTriangleLights;
+    uint32_t rtxdiEmissiveLights;
+    uint32_t rtxdiLightsChanged;
     // Texture LOD biases (negative: sharper). An upscaled image is rendered at fewer pixels than it is shown: its textures are
     // sampled as for the shown resolution (log2(render / display), NVIDIA's DLSS guidance) -- the raster passes'. The path
     // tracer's adds RTXPT's -1. The mips texture streaming is asked for follow the finest of the two that sample this frame.
@@ -746,6 +770,10 @@ STATIC_CONST float EmissiveGridCellMeters = 2.0;
 struct PushConstantEmissiveGrid
 {
     uint64_t matrixReference;
+    // The buffer the pass writes (trianglesMain: the triangle records, scanMain: their running sum, buildMain: the grid) and scanMain's
+    // emitter list -- write references (Renderer::bufferWriteRef: on D3D12 a UAV slot; the uniforms' references are read slots).
+    uint64_t outputReference;
+    uint64_t emitterListReference;
     uint32_t frameIndex;
     uint32_t emissiveGridPadding;
 };
@@ -845,6 +873,8 @@ enum LightType : uint32_t
     Rect = 3,
     Disc = 4
 };
+// An emissive triangle as an RTXDI light (RTXDI/RTXDILights.slang): its RAB_LightInfo's position.w, its samples' lightType.
+STATIC_CONST uint32_t RtxdiTriangleLightType = 15;
 
 // Filled by Renderer::SubmitLight. Point and spot lights: Intensity arrives multiplied by (world units per meter)^2, so the inverse
 // square law in world units is the one in meters whatever the project's unit; Range and the source radius are world units.
@@ -2375,6 +2405,7 @@ struct PushConstantDDGIRadiance
     uint32_t probeOffsetsTextureIndex; // where the probes trace from: last frame's relocation (0xFFFFFFFF: the grid points)
     uint32_t prevIrradianceTextureIndex; // multi-bounce: last frame's atlases (0xFFFFFFFF on their first frame: not written yet)
     uint32_t prevDistanceTextureIndex;
+    uint32_t compactRays; // 1: the ray rows are only this frame's updated probes (DDGICommon.slang ddgi_probe_of_row); 0: one per probe
 };
 
 struct PushConstantDDGIBlend
@@ -2389,6 +2420,7 @@ struct PushConstantDDGIBlend
     uint32_t firstFrame;
     uint32_t frameIndex;
     uint32_t outputStorageIndex; // the blends: the atlas they write (storage image)
+    uint32_t compactRays;        // as PushConstantDDGIRadiance's: the blends then run one workgroup per updated probe
 };
 
 // Ray traced results at a lower ray tracing resolution back to the render resolution (RTUpsample.slang).
@@ -2598,6 +2630,7 @@ struct PushConstantReSTIRGISpatial
 // hierarchical descent. Texels beyond numLocalLights are written 0 (unused).
 struct PushConstantReSTIRDIWriteLightPDF
 {
+    uint64_t matrixReference; // UniformBufferObject: the light index space and the emissive triangles (RTXDI/RTXDILights.slang)
     uint64_t lightDataReference;
     uint32_t firstLocalLightIndex;
     uint32_t numLocalLights;
@@ -2619,6 +2652,7 @@ struct PushConstantReSTIRDIReduceLightPDFMip
 
 struct PushConstantReSTIRDIPresample
 {
+    uint64_t matrixReference; // UniformBufferObject: the light index space and the emissive triangles (RTXDI/RTXDILights.slang)
     uint64_t lightDataReference;
     uint64_t risBufferReference;
     uint32_t firstLocalLightIndex;
@@ -2637,6 +2671,7 @@ struct PushConstantReSTIRDIPresample
 // mode meant for open/unbounded worlds).
 struct PushConstantReSTIRDIPresampleReGIR
 {
+    uint64_t matrixReference; // UniformBufferObject: the light index space and the emissive triangles (RTXDI/RTXDILights.slang)
     uint64_t lightDataReference;
     uint64_t risBufferReference;
     vec4 gridCenterAndCellSize; // xyz: center, w: cell size (meters)

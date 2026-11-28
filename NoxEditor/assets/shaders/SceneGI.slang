@@ -10,22 +10,26 @@
 #include "DDGICommon.slang"
 #include "IrradianceVolumeCommon.slang"
 
-// The screen-probe GI of the surface at worldPos, if the camera sees that surface at the pixel worldPos lands on.
+// The screen-probe GI of the surface at worldPos, if the camera sees that surface at the pixel worldPos lands on. With
+// ubo.screenGIPrevious: last frame's result, the camera as it was then (the RT reflections: Reflection.slang).
 bool sample_screen_gi(UniformBufferObject ubo, float3 worldPos, out float3 irradiance)
 {
     irradiance = float3(0.0);
-    if (ubo.screenGITextureIndex == 0xFFFFFFFF || ubo.screenGIDistanceTextureIndex == 0xFFFFFFFF)
+    const bool previous = ubo.screenGIPrevious != 0;
+    const uint giIndex = previous ? ubo.screenGIPreviousTextureIndex : ubo.screenGITextureIndex;
+    const uint distanceIndex = previous ? ubo.screenGIPreviousDistanceTextureIndex : ubo.screenGIDistanceTextureIndex;
+    if (giIndex == 0xFFFFFFFF || distanceIndex == 0xFFFFFFFF)
         return false;
 
-    // The G-buffer's pixels are the jittered projection's.
-    const float4 clip = mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
+    // The G-buffer's pixels are the jittered projection's (last frame's jitter for last frame's result).
+    const float4 clip = previous ? mul(ubo.screenGIPreviousViewProj, float4(worldPos, 1.0)) : mul(ubo.proj, mul(ubo.view, float4(worldPos, 1.0)));
     if (clip.w <= 0.0)
         return false;
     const float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
     if (any(uv <= 0.0) || any(uv >= 1.0))
         return false;
 
-    Texture2D<float> distanceTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + ubo.screenGIDistanceTextureIndex, 0));
+    Texture2D<float> distanceTex = Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset + distanceIndex, 0));
     uint width, height;
     distanceTex.GetDimensions(width, height);
     const int2 pixel = min(int2(uv * float2(width, height)), int2(width, height) - 1);
@@ -33,11 +37,11 @@ bool sample_screen_gi(UniformBufferObject ubo, float3 worldPos, out float3 irrad
     if (surfaceDistance <= 0.0)
         return false;
     // The same point along the pixel's ray: a decal a little in front of its wall still is (1 %, at least 3 cm).
-    const float distance = length(worldPos - ubo.cameraWorldPos.xyz);
+    const float distance = length(worldPos - (previous ? ubo.screenGIPreviousCameraPos.xyz : ubo.cameraWorldPos.xyz));
     if (abs(distance - surfaceDistance) > max(0.01 * distance, 0.03 * ubo.unitsPerMeter))
         return false;
 
-    Texture2D giTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.screenGITextureIndex, 0));
+    Texture2D giTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + giIndex, 0));
     irradiance = giTex.Load(int3(pixel, 0)).rgb;
     return true;
 }

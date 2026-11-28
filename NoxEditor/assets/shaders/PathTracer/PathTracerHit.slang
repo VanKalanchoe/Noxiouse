@@ -73,9 +73,9 @@ void writeRRDepthMotion(uint2 pixel, float3 position, UniformBufferObject ubo, P
     const float4 currClip = mul(ubo.nonJitteredProj, mul(ubo.view, float4(position, 1.0)));
     const float4 prevClip = mul(ubo.prevProj, mul(ubo.prevView, float4(position, 1.0)));
     const float2 motion = (prevClip.xy / prevClip.w - currClip.xy / currClip.w) * float2(0.5, -0.5);
-    RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0))[pixel] = depthClip.z / depthClip.w;
-    RWTexture2D<float2>.Handle(uint2(pushConstant.rrMotionStorageIndex, 0))[pixel] = motion;
-    RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixel] = motion;
+    RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrDepthStorageIndex), 0))[pixel] = depthClip.z / depthClip.w;
+    RWTexture2D<float2>.Handle(uint2(SafeHeapSlot(pushConstant.rrMotionStorageIndex), 0))[pixel] = motion;
+    RWTexture2D<float2>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularMotionStorageIndex), 0))[pixel] = motion;
 }
 
 // The guides at the glass where the camera's path splits (PathTracerHit's stable-plane split): `pane` the glass, `thp` the path's
@@ -127,25 +127,37 @@ void writeSplitRRGuides(uint2 pixel, Bridge::SurfaceData pane, float3 thp, Delta
     }
 
     const float normalLength = length(normal);
-    RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0))[pixel] = float4(diffuse, 1.0);
-    RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0))[pixel] = float4(specular, 1.0);
-    RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0))[pixel] =
+    RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrDiffuseAlbedoStorageIndex), 0))[pixel] = float4(diffuse, 1.0);
+    RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularAlbedoStorageIndex), 0))[pixel] = float4(specular, 1.0);
+    RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrNormalRoughnessStorageIndex), 0))[pixel] =
         float4(normalLength >= 1e-5 ? normal / normalLength : float3(0.0, 0.0, 1.0), roughness);
     if (pushConstant.rrDepthStorageIndex != 0xFFFFFFFF)
     {
         writeRRDepthMotion(pixel, dominantPosition, ubo, pushConstant);
-        RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixel] = specularMotion;
+        RWTexture2D<float2>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularMotionStorageIndex), 0))[pixel] = specularMotion;
     }
 }
 
-[shader("closesthit")]
-void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attrib)
+// What the closest hit reads from its built-ins (InstanceID(), PrimitiveIndex(), the barycentrics, RayTCurrent(), the ray,
+// ObjectToWorld3x4()), gathered so one shading function serves both ways of tracing: the ray tracing pipeline's closest hit
+// (closestHitMain below) and the compute path tracer's ray query (PathTracerCompute.slang).
+struct PathTracerHitInfo
 {
-    PathState path = PathPayload::unpack(payload);
+    uint instanceID;         // the TLAS instance's custom index: the GPU scene's instance slot
+    uint primitiveIndex;
+    float2 barycentrics;
+    float rayT;
+    float3 rayOrigin;        // world space
+    float3 rayDir;
+    float3x4 objectToWorld;
+};
 
-    float3 rayOrigin = WorldRayOrigin();
-    float3 rayDir = WorldRayDirection();
-    float rayT = RayTCurrent();
+// One path vertex on a surface: its emission, light sampling, the next direction (or the path's end) -- written into `path`.
+void pathTracerClosestHit(inout PathState path, PathTracerHitInfo hit)
+{
+    float3 rayOrigin = hit.rayOrigin;
+    float3 rayDir = hit.rayDir;
+    float rayT = hit.rayT;
 
     path.incrementVertexIndex();
     path.rayCone = path.rayCone.propagateDistance(rayT);
@@ -175,20 +187,19 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
                     path.specularRadiance += rectContrib;
             }
             path.terminate();
-            payload = PathPayload::pack(path);
             return;
         }
     }
 
     // 1. Load surface geometry and material
     Bridge::SurfaceData surface = Bridge::loadSurface(
-        InstanceID(),
-        PrimitiveIndex(),
-        attrib.barycentrics,
+        hit.instanceID,
+        hit.primitiveIndex,
+        hit.barycentrics,
         rayDir,
         path.rayCone.getWidth(),
         ubo,
-        ObjectToWorld3x4()
+        hit.objectToWorld
     );
 
     // Dispersion (KHR_materials_dispersion) in an RGB path tracer: at its first dispersive refraction the path takes one color channel
@@ -228,7 +239,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     if ((vertexIdx == 1 || path.hasFlag(PathFlags::deltaOnlyPath)) && ubo.mipFeedbackReference != 0 &&
         isMipFeedbackPixel(int2(path.id & 0xFFFFu, path.id >> 16), ubo.mipFeedbackFrame))
     {
-        GpuRayTracingInstance lut = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[InstanceID()];
+        GpuRayTracingInstance lut = BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[hit.instanceID];
         GpuMaterial material = BufferRef<GpuMaterial>(ubo.sceneMaterialsReference)[lut.materialIndex];
         const uint textures[5] = { lut.baseColorTextureIndex, lut.metallicRoughnessTextureIndex, lut.normalTextureIndex,
                                    lut.emissiveTextureIndex, lut.transmissionTextureIndex };
@@ -262,7 +273,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         path.setFlag(PathFlags::rrSpecHitPending, false);
         if (pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
         {
-            RWTexture2D<float> specHitT = RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0));
+            RWTexture2D<float> specHitT = RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularHitDistanceStorageIndex), 0));
             const uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
             specHitT[pixel] = max(0.0, path.sceneLength + specHitT[pixel]);
         }
@@ -284,9 +295,9 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
 
         if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
         {
-            RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0));
-            RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0));
-            RWTexture2D<float4> rrNormalRoughness = RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0));
+            RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrDiffuseAlbedoStorageIndex), 0));
+            RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularAlbedoStorageIndex), 0));
+            RWTexture2D<float4> rrNormalRoughness = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrNormalRoughnessStorageIndex), 0));
             uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
             rrDiffuse[pixel] = float4(surface.rrDiffuseAlbedo, 1.0);
             rrSpecular[pixel] = float4(surface.rrSpecularAlbedo, 1.0);
@@ -301,9 +312,9 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         // Seen through glass that did not split the path (a pane with nothing to reflect): this surface is the guide.
         if (rrVisibleSurface && pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
         {
-            RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0));
-            RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0));
-            RWTexture2D<float4> rrNormalRoughness = RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0));
+            RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrDiffuseAlbedoStorageIndex), 0));
+            RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularAlbedoStorageIndex), 0));
+            RWTexture2D<float4> rrNormalRoughness = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrNormalRoughnessStorageIndex), 0));
             uint2 pixel = uint2(path.id & 0xFFFFu, path.id >> 16);
             rrDiffuse[pixel] = float4(surface.rrDiffuseAlbedo, 1.0);
             rrSpecular[pixel] = float4(surface.rrSpecularAlbedo, 1.0);
@@ -324,8 +335,8 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         {
             const float lightPdf = EmissiveLights::branchProbability(ubo, pushConstant.skyboxTextureIndex != 0xFFFFFFFF) *
                                    (EmissiveLights::hasTriangleLights(ubo)
-                                       ? EmissiveLights::trianglePdf(ubo, rayOrigin, InstanceID(), PrimitiveIndex(), rayT, surface.cosFace)
-                                       : EmissiveLights::pdf(ubo, InstanceID(), surface.triangleArea, rayT, surface.cosFace));
+                                       ? EmissiveLights::trianglePdf(ubo, rayOrigin, hit.instanceID, hit.primitiveIndex, rayT, surface.cosFace)
+                                       : EmissiveLights::pdf(ubo, hit.instanceID, surface.triangleArea, rayT, surface.cosFace));
             const float bsdfPdf = path.bsdfScatterPdf;
             misWeight = bsdfPdf * bsdfPdf / max(bsdfPdf * bsdfPdf + lightPdf * lightPdf, 1e-30);
         }
@@ -357,7 +368,6 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     if (vertexIdx > pushConstant.maxBounces || path.getCounter(PackedCounters::DiffuseBounces) > pushConstant.maxDiffuseBounces)
     {
         path.terminate();
-        payload = PathPayload::pack(path);
         return;
     }
 
@@ -453,7 +463,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
             if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF && !path.hasFlag(PathFlags::rrGuidesDone))
             {
                 writeSplitRRGuides(uint2(path.id & 0xFFFFu, path.id >> 16), surface, path.thp, transmitted, reflected,
-                                   BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[InstanceID()].pathTracerFlags,
+                                   BufferRef<GpuRayTracingInstance>(ubo.sceneRayTracingInstancesReference)[hit.instanceID].pathTracerFlags,
                                    path.rayCone.getWidth(), ubo, pushConstant);
                 path.setFlag(PathFlags::rrGuidesDone, true);
             }
@@ -478,7 +488,6 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     if (!valid || all(sampleResult.weight <= float3(0.0)) || any(!isfinite(sampleResult.weight)))
     {
         path.terminate();
-        payload = PathPayload::pack(path);
         return;
     }
 
@@ -502,7 +511,7 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         {
             const bool specularScatter = (sampleResult.lobe & (LobeType::DiffuseReflection | LobeType::DiffuseTransmission)) == 0 &&
                                          surface.rrGuideRoughness <= 0.35;
-            RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
+            RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularHitDistanceStorageIndex), 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
                 specularScatter ? -path.sceneLength : 0.0;
             path.setFlag(PathFlags::rrSpecHitPending, specularScatter);
         }
@@ -543,7 +552,6 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
         if (Bridge::rand(rrState) < prob)
         {
             path.terminate();
-            payload = PathPayload::pack(path);
             return;
         }
 
@@ -560,5 +568,20 @@ void closestHitMain(inout PathPayload payload : SV_RayPayload, in BuiltInTriangl
     path.origin = ComputeRayOrigin(surface.shadingData.posW, offsetNormal);
     path.dir = sampleResult.wo;
 
+}
+
+[shader("closesthit")]
+void closestHitMain(inout PathPayload payload, in BuiltInTriangleIntersectionAttributes attrib)
+{
+    PathState path = PathPayload::unpack(payload);
+    PathTracerHitInfo hit;
+    hit.instanceID = InstanceID();
+    hit.primitiveIndex = PrimitiveIndex();
+    hit.barycentrics = attrib.barycentrics;
+    hit.rayT = RayTCurrent();
+    hit.rayOrigin = WorldRayOrigin();
+    hit.rayDir = WorldRayDirection();
+    hit.objectToWorld = ObjectToWorld3x4();
+    pathTracerClosestHit(path, hit);
     payload = PathPayload::pack(path);
 }

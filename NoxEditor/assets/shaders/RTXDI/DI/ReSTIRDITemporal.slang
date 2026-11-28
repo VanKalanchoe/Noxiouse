@@ -20,18 +20,8 @@
 static BufferRef<RTXDI_PackedDIReservoir> g_HistoryBuffer; // buffer C: history, read only via the macro above
 static PushConstantReSTIRDITemporal g_PushConstant;
 static UniformBufferObject g_UBO;
-static BufferRef<LightData> g_LightData;
-
-typealias RAB_LightInfo = LightData;
-
-struct RAB_LightSample
-{
-    float3 position;
-    float3 normal;
-    float3 radiance;
-    float solidAnglePdf;
-    uint lightType;
-};
+// The lights: RTXDILights.slang (the same index space, sampling and weights as the initial and spatial / temporal passes).
+#include "RTXDI/RTXDILights.slang"
 
 struct RAB_Material
 {
@@ -79,39 +69,9 @@ int2 RAB_ClampSamplePositionIntoView(int2 pixelPos, bool isPreviousFrame)
     return clamp(pixelPos, int2(0, 0), int2(g_PushConstant.viewportSize) - 1);
 }
 
-RAB_LightInfo RAB_EmptyLightInfo()
-{
-    LightData l;
-    l.position = float4(0.0);
-    l.direction = float4(0.0);
-    l.color = float4(0.0);
-    l.spotParams = float4(0.0);
-    return l;
-}
 
-RAB_LightSample RAB_EmptyLightSample()
-{
-    RAB_LightSample s;
-    s.position = float3(0.0);
-    s.normal = float3(0.0, 1.0, 0.0);
-    s.radiance = float3(0.0);
-    s.solidAnglePdf = 0.0;
-    s.lightType = 0;
-    return s;
-}
 
-RAB_LightInfo RAB_LoadLightInfo(uint index, bool prevFrame)
-{
-    return g_LightData[index];
-}
 
-// Light count/order is stable frame-to-frame in this engine (no runtime add/remove mid-session yet),
-// so the previous-frame light index is always still valid this frame -- identity mapping is the
-// correct minimal implementation here, not a placeholder.
-int RAB_TranslateLightIndex(uint lightIndex, bool currentToPrevious)
-{
-    return int(lightIndex);
-}
 
 void RAB_BuildBasis(float3 n, out float3 t, out float3 b)
 {
@@ -131,40 +91,17 @@ float2 RAB_SampleDisk(float2 uv)
 
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, RAB_Surface surface, float2 uv)
 {
-    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
-    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
-    const LightPointSample lightPoint = sample_light_point(light, surface.worldPos, uv);
-    RAB_LightSample s;
-    s.lightType = (uint)light.position.w;
-    s.position = lightPoint.position;
-    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
-    s.radiance = lightPoint.radiance;
-    s.solidAnglePdf = 1.0;
-    return s;
+    return rtxdi_sample_light(light, surface.worldPos, uv);
 }
 
 void RAB_GetLightDirDistance(RAB_Surface surface, RAB_LightSample lightSample, out float3 dir, out float dist)
 {
-    if (lightSample.lightType == 0)
-    {
-        dir = lightSample.normal;
-        dist = 1e4;
-        return;
-    }
-
-    float3 toLight = lightSample.position - surface.worldPos;
-    dist = length(toLight);
-    dir = dist > 0.0001 ? (toLight / dist) : float3(0.0, 1.0, 0.0);
+    rtxdi_light_direction_distance(surface.worldPos, lightSample, dir, dist);
 }
 
 float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Surface surface)
 {
-    float3 dir;
-    float dist;
-    RAB_GetLightDirDistance(surface, lightSample, dir, dist);
-    float NdotL = max(dot(surface.normal, dir), 1e-3);
-    float lum = max(dot(lightSample.radiance, float3(0.2126, 0.7152, 0.0722)), 0.0);
-    return lum * (NdotL / 3.14159265359);
+    return rtxdi_light_target_pdf(lightSample, surface.worldPos, surface.normal);
 }
 
 float RAB_LightSampleSolidAnglePdf(RAB_LightSample lightSample) { return lightSample.solidAnglePdf; }
@@ -350,7 +287,7 @@ PSOutput fragMain(
 
     g_PushConstant = pushConstant;
     g_UBO = loadUbo(pushConstant.matrixReference);
-    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    rtxdi_bind_lights(g_UBO, pushConstant.lightDataReference);
     g_HistoryBuffer = BufferRef<RTXDI_PackedDIReservoir>(pushConstant.previousReservoirReference);
     RWBufferRef<RTXDI_PackedDIReservoir> currentReservoirBuffer = RWBufferRef<RTXDI_PackedDIReservoir>(pushConstant.currentReservoirReference);
 

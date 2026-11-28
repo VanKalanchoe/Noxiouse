@@ -220,7 +220,7 @@ float3 sample_direct_light(
     RTXDI_RandomSamplerState rng = RTXDI_InitRandomSampler(pixelCoord, frameIndex, sampleIndex * 2u);
     RTXDI_RandomSamplerState coherentRng = RTXDI_InitRandomSampler(pixelCoord / 8u, frameIndex, sampleIndex * 2u + 1u);
     RAB_LightSample lightSample;
-    RTXDI_DIReservoir reservoir = RTXDI_SampleLightsAt(surface, rng, coherentRng, lightSampling, lightSample);
+    RTXDI_DIReservoir reservoir = RTXDI_SampleLightsAt(ubo, surface, rng, coherentRng, lightSampling, lightSample);
     if (!RTXDI_IsValidDIReservoir(reservoir) || dot(lightSample.radiance, lightSample.radiance) <= 1e-8)
     {
         return float3(0.0);
@@ -509,7 +509,7 @@ PSOutput fragMain(
         }
         albedo *= RayTracingVertexColor(hitLut, uint3(i0, i1, i2), committedBary).rgb; // glTF COLOR_0
 
-        float3 emissive = hitLut.emissiveFactor.rgb * hitLut.emissiveFactor.a;
+        float3 emissive = RayHitEmission(ubo, hitLut, vertex0, vertex1, vertex2, committedBary, textureSampler, 0.0); // (its texture too)
 #ifdef NOX_MATERIAL_GRAPH_SURFACE
         // The material's graph (material graph step 4c): its Base Color and Emissive where it connects them.
         MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, 0.0, 1.0, emissive);
@@ -517,6 +517,11 @@ PSOutput fragMain(
         albedo = graphSurface.baseColor;
         emissive = graphSurface.emissive;
 #endif
+        // ReSTIR DI gives the emissive meshes' direct light per pixel (rtxdiEmissiveLights): what this ray sees of them is that light
+        // again, so it is left out here (the light the hit receives from them comes in through its own light sample below -- they are
+        // RTXDI lights then, RTXDILights.slang).
+        if (ubo.rtxdiEmissiveLights != 0 && EmissiveLights::find(ubo, committedInstanceID) != 0xFFFFFFFFu)
+            emissive = float3(0.0);
 
         // Direct analytical lighting at the secondary hit, selected with the same RTXDI
         // importance distribution used by ReSTIR DI.

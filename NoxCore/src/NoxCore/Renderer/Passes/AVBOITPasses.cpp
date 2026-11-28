@@ -63,7 +63,7 @@ namespace Nox
         if (m_frame.screenProbeGIAdded)
         {
             builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
-            builder.Read(resources.ScreenProbeGIDistance);
+            builder.Read(resources.ScreenProbeGIDistance[m_frame.screenProbeGIWriteIndex]);
         }
         if (m_frame.ssgiAdded && resources.SSGI.IsValid() && resources.SSGIDepth.IsValid())
         {

@@ -1194,10 +1194,11 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
         roughness = clamp(roughness * mrSample.g, kMinRoughness, 1.0);
         metallic = clamp(metallic * mrSample.b, 0.0, 1.0);
     }
+    const float3 emission = RayHitEmission(g_UBO, lut, vertex0, vertex1, vertex2, rp.barycentrics, textureSampler, 0.0); // (its texture too)
 
 #ifdef NOX_MATERIAL_GRAPH_SURFACE
     // The material's graph (material graph step 4c): the pins it connects replace the values above, as the G-buffer resolve does.
-    MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, metallic, roughness, lut.emissiveFactor.rgb * lut.emissiveFactor.a);
+    MaterialGraphOutputs graphSurface = material_graph_ray_defaults(albedo, metallic, roughness, emission);
     const uint graphOutputs = material_graph_ray_surface(g_UBO, lut, rp.primitiveIndex, rp.barycentrics, graphSurface);
     albedo = graphSurface.baseColor;
     metallic = graphSurface.metallic;
@@ -1220,7 +1221,7 @@ RAB_Surface LoadSurfaceFromRayPayload(RAB_RayPayload rp, float3 rayOrigin, float
     surface.material.diffuseAlbedo = albedo * (1.0 - metallic);
     surface.material.specularF0 = lerp(float3(0.04), albedo, metallic);
     surface.material.roughness = roughness;
-    surface.material.emissiveColor = lut.emissiveFactor.rgb * lut.emissiveFactor.a;
+    surface.material.emissiveColor = emission;
 #ifdef NOX_MATERIAL_GRAPH_SURFACE
     surface.material.emissiveColor = graphSurface.emissive;
 #endif

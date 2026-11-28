@@ -362,6 +362,16 @@ namespace Nox
             NoxUI::UIPropertyRows pt = rows.Section("Path Tracing", false, &m_Expanded);
             pt.Check("Path Tracing", [r]() { return r->isPathTracingEnabled(); }, [r](bool v) { r->setPathTracingEnabled(v); },
                      "Unified light transport: the whole image path traced (the ground truth to compare against).");
+            RefInt(pt, "Max Bounces", &r->getPathTracerMaxBounces(), 1, 32,
+                   "Surfaces a path may reach (1: direct light only). 18 is RTXPT's Balanced preset.");
+            RefInt(pt, "Light Samples", &r->getPathTracerLightSamples(), 0, 4,
+                   "Light samples (next-event estimation) at every surface a path reaches. 0: none -- only paths that hit a light find it "
+                   "(emissive surfaces, the sky, the sun's disc, rect lights; point and spot lights give no light then).");
+            pt.Choice("Path Tracer Dispatch", { "Ray Tracing Pipeline", "Compute (Inline Ray Queries)" },
+                [r]() { return r->getPathTracerCompute() ? 1 : 0; }, [r](int v) { r->getPathTracerCompute() = v == 1; },
+                "How the path tracer traces its rays; both give the same image. Ray Tracing Pipeline: TraceRay with hit and miss shaders. "
+                "Compute: the same shaders in one compute shader with inline ray queries -- the default on D3D12, where the ray tracing "
+                "pipeline hangs the GPU.");
             NoxUI::UIPropertyRows on = pt.Group();
             pt.ShowWhen(on.GetBody(), [r]() { return r->isPathTracingEnabled(); });
             on.Check("ReSTIR PT", [r]() { return r->getReSTIRPTEnabled(); }, [r](bool v) { r->setReSTIRPTEnabled(v); },
@@ -382,11 +392,6 @@ namespace Nox
                 [r](int v) { r->setDiffuseGIMode(v == 1 ? 2u : 0u); r->setDDGIEnabled(false); });
             hybrid.Choice("PT Direct Lighting", { "Path Tracer NEE", "ReSTIR DI (primary direct)" },
                 [r]() { return static_cast<int>(r->getDirectLightingMode()); }, [r](int v) { r->setDirectLightingMode(static_cast<uint32_t>(v)); });
-            RefInt(on, "Max Bounces", &r->getPathTracerMaxBounces(), 1, 32,
-                   "Surfaces a path may reach (1: direct light only). 18 is RTXPT's Balanced preset.");
-            RefInt(on, "Light Samples", &r->getPathTracerLightSamples(), 0, 4,
-                   "Light samples (next-event estimation) at every surface a path reaches. 0: none -- only paths that hit a light find it "
-                   "(emissive surfaces, the sky, the sun's disc, rect lights; point and spot lights give no light then).");
             on.Check("Progressive Ground Truth", [r]() { return r->isPathTracingAccumulation(); }, [r](bool v) { r->setPathTracingAccumulation(v); },
                      "Accumulates while nothing moves (not used by ReSTIR PT).");
             on.Text([r]() { return r->isDLSSRayReconstructionEnabled() ? std::string("Denoiser: DLSS Ray Reconstruction (active)") : std::string(); }, kGood);
@@ -399,7 +404,7 @@ namespace Nox
         const auto notPathTracing = [r]() { return !r->isPathTracingEnabled(); };
         {
             NoxUI::UIPropertyRows ao = rows.Section("Ambient Occlusion", false, &m_Expanded);
-            rows.ShowWhen(ao.GetBody(), notPathTracing);
+            rows.ShowWhen(ao.GetCard(), notPathTracing);
             ao.Note("RTAO is under Hybrid Ray Tracing; both feed the same occlusion (one at a time).");
             ao.Check("SSAO", [r]() { return r->getSSAOEnabled(); }, [r](bool v) { r->setSSAOEnabled(v); }, "Screen-space ambient occlusion. Turning RTAO on turns it off.");
             Ref<NoxUI::UIElement> method = ao.Choice("Method", { "Classic SSAO", "GTAO" }, [r]() { return static_cast<int>(r->getSSAOMethod()); },
@@ -419,7 +424,7 @@ namespace Nox
         }
         {
             NoxUI::UIPropertyRows ssr = rows.Section("Screen-Space Reflections", false, &m_Expanded);
-            rows.ShowWhen(ssr.GetBody(), notPathTracing);
+            rows.ShowWhen(ssr.GetCard(), notPathTracing);
             ssr.Check("Screen-Space Reflections", [r]() { return r->getSSREnabled(); }, [r](bool v) { r->setSSREnabled(v); },
                       "The mirror reflection marched through the depth buffer; where it finds nothing the probes / environment show. Runs "
                       "wherever ray traced reflections do not; with them on, they take precedence.");
@@ -437,7 +442,7 @@ namespace Nox
         }
         {
             NoxUI::UIPropertyRows gi = rows.Section("Raster GI, Fog and Probes", false, &m_Expanded);
-            rows.ShowWhen(gi.GetBody(), notPathTracing);
+            rows.ShowWhen(gi.GetCard(), notPathTracing);
             gi.Check("Raster Probe Volume (Diffuse GI)", [r]() { return r->getDiffuseGIMode() == 4; },
                      [r](bool v) { r->setDiffuseGIMode(v ? 4u : 0u); r->setDDGIEnabled(false); },
                      "Diffuse light from around without ray tracing: probes capture what surrounds them once and are lit again every frame. "
@@ -492,7 +497,7 @@ namespace Nox
         // ---- Hybrid Ray Tracing ----
         {
             NoxUI::UIPropertyRows rt = rows.Section("Hybrid Ray Tracing", false, &m_Expanded);
-            rows.ShowWhen(rt.GetBody(), notPathTracing);
+            rows.ShowWhen(rt.GetCard(), notPathTracing);
             rt.Check("Hybrid Ray Tracing", [r]() { return r->getRayTracingEnabled(); }, [r](bool v) { r->setRayTracingEnabled(v); });
             NoxUI::UIPropertyRows on = rt.Group();
             rt.ShowWhen(on.GetBody(), [r]() { return r->getRayTracingEnabled(); });
@@ -616,7 +621,9 @@ namespace Nox
             on.Choice("Direct Lighting", { "Every light (brute force)", "ReSTIR DI (RTXDI)" },
                 [r]() { return static_cast<int>(r->getDirectLightingMode()); }, [r](int v) { r->setDirectLightingMode(static_cast<uint32_t>(v)); },
                 "Every light: each with its own shadow ray per pixel -- exact, noise-free, the cost grows with the lights reaching a pixel. "
-                "ReSTIR DI: one light per pixel resampled from all of them, then denoised (UE5's MegaLights idea).");
+                "ReSTIR DI: one light per pixel resampled from all of them, then denoised (UE5's MegaLights idea) -- the emissive meshes' "
+                "triangles among them (lamps, lit windows: their direct light per pixel, steadier than through the screen probes). Turn "
+                "Denoising > DI Denoiser on with it.");
             NoxUI::UIPropertyRows di = on.Group();
             on.ShowWhen(di.GetBody(), [r]() { return r->getDirectLightingMode() == 1; });
             RefInt(di, "Local Light Samples", &r->getReSTIRDINumLocalLightSamples(), 1, 16);

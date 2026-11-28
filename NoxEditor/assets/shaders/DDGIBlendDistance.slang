@@ -48,9 +48,12 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
                  uniform PushConstantDDGIBlend pushConstant)
 {
     UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
-    const uint probeIndex = group.x;
+    // A workgroup per probe, or (compactRays) per probe updated this frame -- the others were copied over whole before (the
+    // "DDGI Keep" passes: Renderer::addDDGIPasses).
+    const uint probeIndex = pushConstant.compactRays != 0 ? ddgi_probe_of_row(ubo, group.x, pushConstant.frameIndex) : group.x;
     if (probeIndex >= pushConstant.probeCountTotal)
         return;
+    const uint rayRow = ddgi_ray_row(ubo, probeIndex, pushConstant.frameIndex, pushConstant.compactRays);
 
     const uint totalSide = DDGI_DISTANCE_TOTAL;
     const uint threadCount = DDGI_DISTANCE_SIDE * DDGI_DISTANCE_SIDE;
@@ -79,7 +82,7 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint
     float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
     for (uint r = threadIndex; r < rayCount; r += threadCount)
     {
-        float4 raySample = rayDataTex.Load(int3(r, probeIndex, 0));
+        float4 raySample = rayDataTex.Load(int3(r, rayRow, 0));
         gRayDirections[r] = rotate_vector(spherical_fibonacci(r, pushConstant.raysPerProbe), rotAxis, rotAngle);
         // Clamped to about a cell and a half (in world units): misses and far hits only need to read as "open". A back face
         // (negative, DDGIRadiance.slang) counts as a fifth of its distance, so what lies behind it reads as occluded.

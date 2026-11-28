@@ -43,10 +43,11 @@ namespace Nox
                 ReadIfValid(builder, resources.SceneRayTracingInstances);
                 builder.Write(resources.EmissiveTriangles);
             },
-            [this, triangleCount](RGPassContext& context)
+            [this, res = &resources, triangleCount](RGPassContext& context)
             {
                 shaderio::PushConstantEmissiveGrid push{};
                 push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.outputReference = context.BufferWriteRef(res->EmissiveTriangles);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_emissiveTrianglesPipeline);
@@ -58,11 +59,15 @@ namespace Nox
             {
                 builder.Read(resources.EmissiveTriangles);
                 builder.Write(resources.EmissiveTriangleCdf);
+                if (resources.EmissiveEmitterList.IsValid())
+                    builder.Write(resources.EmissiveEmitterList);
             },
-            [this](RGPassContext& context)
+            [this, res = &resources](RGPassContext& context)
             {
                 shaderio::PushConstantEmissiveGrid push{};
                 push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.outputReference = context.BufferWriteRef(res->EmissiveTriangleCdf);
+                push.emitterListReference = res->EmissiveEmitterList.IsValid() ? context.BufferWriteRef(res->EmissiveEmitterList) : 0;
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_emissiveScanPipeline);
@@ -77,10 +82,11 @@ namespace Nox
                 builder.Read(resources.EmissiveTriangleCdf);
                 builder.Write(resources.EmissiveLightGrid);
             },
-            [this](RGPassContext& context)
+            [this, res = &resources](RGPassContext& context)
             {
                 shaderio::PushConstantEmissiveGrid push{};
                 push.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
+                push.outputReference = context.BufferWriteRef(res->EmissiveLightGrid);
                 push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_emissiveGridPipeline);
@@ -93,7 +99,9 @@ namespace Nox
     void Renderer::addPathTracerPasses()
     {
         FrameGraphState& frame = m_frame;
-        if (frame.restirPTActive || !frame.runPathTracer || !m_pathTracerPipeline)
+        // Its ray tracing pipeline, or the same shaders as one compute shader with inline ray queries (Path Tracer Dispatch).
+        const bool computePathTracer = m_pathTracerCompute;
+        if (frame.restirPTActive || !frame.runPathTracer || !(computePathTracer ? m_pathTracerComputePipeline : m_pathTracerPipeline))
             return;
 
         FrameGraphResources& resources = m_renderGraph.GetBlackboard().Get<FrameGraphResources>();
@@ -170,7 +178,7 @@ namespace Nox
 
         m_renderGraph.PushGroup("Path Tracer");
 
-        m_renderGraph.AddPass("Path Trace", RGPassFlags::RayTracing,
+        m_renderGraph.AddPass("Path Trace", computePathTracer ? RGPassFlags::None : RGPassFlags::RayTracing,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.PathTracerAccum[readIndex]);
@@ -222,13 +230,16 @@ namespace Nox
                     builder.Write(resources.RRSpecularHitDistance, RGTextureAccess::StorageWrite);
                 }
             },
-            [this, res = &resources, readIndex, writeIndex, nrdPTActive, dlssRRActive, dlssActive, environmentImportance](RGPassContext& context)
+            [this, res = &resources, readIndex, writeIndex, nrdPTActive, dlssRRActive, dlssActive, environmentImportance, computePathTracer](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 const float rw = static_cast<float>(m_frame.renderExtent.width);
                 const float rh = static_cast<float>(m_frame.renderExtent.height);
 
-                cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_RAY_TRACING, m_pathTracerPipeline);
+                if (computePathTracer)
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_pathTracerComputePipeline);
+                else
+                    cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_RAY_TRACING, m_pathTracerPipeline);
 
                     shaderio::PushConstantPathTracer ptPush{};
                 ptPush.invViewProj = uniformData.invViewProj;
@@ -281,6 +292,12 @@ namespace Nox
                 ptPush.environmentDiffuseMip = 2;
                 cmd.pushData(&ptPush, sizeof(shaderio::PushConstantPathTracer));
 
+                if (computePathTracer)
+                {
+                    // PathTracerCompute.slang: 8 x 8 pixels per group (its threads past the render extent return at once).
+                    cmd.dispatch((m_frame.renderExtent.width + 7) / 8, (m_frame.renderExtent.height + 7) / 8, 1);
+                    return;
+                }
                 nriCmdTraceRays(
                     cmd.handle(),
                     &m_pathTracerSBTState.rayGen,

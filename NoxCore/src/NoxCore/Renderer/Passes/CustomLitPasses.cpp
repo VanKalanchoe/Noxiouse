@@ -664,6 +664,11 @@ namespace Nox
             desc.hitGroups.push_back({ .closestHitShaderIndex = 2, .anyHitShaderIndex = ~0u, .intersectionShaderIndex = ~0u }); // hit group 0: opaque
             desc.hitGroups.push_back({ .closestHitShaderIndex = 2, .anyHitShaderIndex = 3, .intersectionShaderIndex = ~0u });   // hit group 1: alpha tested
             break;
+        case RayTracingPass::PathTracerCompute:
+            // The same path tracer as one compute shader: inline ray queries instead of TraceRay (8 x 8 pixels per group).
+            desc.type = NRI_PIPELINE_COMPUTE;
+            desc.shaders.push_back({ .stage = NRI_SHADER_STAGE_COMPUTE, .entryPoint = "computeMain", .sourcePath = shader("assets/shaders/PathTracer/PathTracerCompute.slang") });
+            break;
         case RayTracingPass::Count:
             break;
         }
@@ -684,6 +689,7 @@ namespace Nox
         case RayTracingPass::ReSTIRGIInitial: return m_restirGIInitialPipeline;
         case RayTracingPass::ReSTIRPTInitial: return m_restirPTInitialPipeline;
         case RayTracingPass::ReSTIRPTTemporal: return m_restirPTTemporalPipeline;
+        case RayTracingPass::PathTracerCompute: return m_pathTracerComputePipeline;
         case RayTracingPass::PathTracer:
         case RayTracingPass::Count: break;
         }

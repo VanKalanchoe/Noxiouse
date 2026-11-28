@@ -29,16 +29,21 @@ void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, ou
             ray.TMax = 1e9;
 
             PathPayload payload = PathPayload::pack(path);
+#ifdef NOX_PATH_TRACER_COMPUTE
+            // The compute path tracer: a ray query finds the hit, the same closest hit / miss / alpha test run as functions.
+            pathTracerTraceInline(as, ray, payload);
+#else
             TraceRay(
                 as,
                 RAY_FLAG_NONE,
                 0xFF,
                 0, // rayContributionToHitGroupIndex
-                1, // multiplierForGeometryContributionToHitGroupIndex
+                0, // multiplierForGeometryContributionToHitGroupIndex
                 0, // missShaderIndex
                 ray,
                 payload
             );
+#endif
             path = PathPayload::unpack(payload);
         }
         // (the branch's own flags replace the path's when it resumes)
@@ -50,10 +55,10 @@ void tracePixelPath(RaytracingAccelerationStructure as, inout PathState path, ou
     }
 }
 
-[shader("raygeneration")]
-void rayGenMain()
+// One pixel's sample: its camera path (and glass branch), the fog, the outputs. One function for both ways of tracing: the ray
+// tracing pipeline's ray generation (rayGenMain below) and the compute path tracer's thread (PathTracerCompute.slang).
+void pathTracePixel(uint2 pixelPos)
 {
-    uint2 pixelPos = DispatchRaysIndex().xy;
     if (pixelPos.x >= uint(pushConstant.viewportSize.x) || pixelPos.y >= uint(pushConstant.viewportSize.y))
         return;
 
@@ -71,13 +76,13 @@ void rayGenMain()
     // Primary misses leave valid neutral RR guides instead of stale data from the previous frame.
     if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
     {
-        RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0));
-        RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0));
-        RWTexture2D<float4> rrNormalRoughness = RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0));
-        RWTexture2D<float> rrDepth = RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0));
-        RWTexture2D<float2> rrMotion = RWTexture2D<float2>.Handle(uint2(pushConstant.rrMotionStorageIndex, 0));
-        RWTexture2D<float2> rrSpecularMotion = RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0));
-        RWTexture2D<float> rrSpecularHitDistance = RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0));
+        RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrDiffuseAlbedoStorageIndex), 0));
+        RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularAlbedoStorageIndex), 0));
+        RWTexture2D<float4> rrNormalRoughness = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrNormalRoughnessStorageIndex), 0));
+        RWTexture2D<float> rrDepth = RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrDepthStorageIndex), 0));
+        RWTexture2D<float2> rrMotion = RWTexture2D<float2>.Handle(uint2(SafeHeapSlot(pushConstant.rrMotionStorageIndex), 0));
+        RWTexture2D<float2> rrSpecularMotion = RWTexture2D<float2>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularMotionStorageIndex), 0));
+        RWTexture2D<float> rrSpecularHitDistance = RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularHitDistanceStorageIndex), 0));
         rrDiffuse[pixelPos] = float4(0.0);
         rrSpecular[pixelPos] = float4(0.0);
         rrNormalRoughness[pixelPos] = float4(0.0, 0.0, 1.0, 0.0);
@@ -92,29 +97,38 @@ void rayGenMain()
         rrSpecularHitDistance[pixelPos] = 0.0; // none (RTXPT's default)
     }
 
-    const PathState cameraPath = path;
-    uint dispersedChannel = 0u;
-    tracePixelPath(as, path, dispersedChannel);
-
     // The camera's delta path refracted dispersively (seen through dispersive glass): it took one color channel. The pixel is traced
     // again for the other two (the same random numbers: the same path up to the glass) and the three averaged -- each an estimate of
-    // the whole pixel with its channel times 3 -- so the frame's pixel is full color (PathTracerHit.slang).
+    // the whole pixel with its channel times 3 -- so the frame's pixel is full color (PathTracerHit.slang). One call of tracePixelPath
+    // in a loop, not one per pass: the compute path tracer inlines the closest hit into every call (two calls: twice the shader).
+    const PathState cameraPath = path;
+    uint dispersedChannel = 0u;
+    float4 sumL = float4(0.0);
+    float3 sumStable = float3(0.0), sumDiffuse = float3(0.0), sumSpecular = float3(0.0);
+    for (uint pass = 0u; pass < 3u; ++pass)
+    {
+        PathState passPath = cameraPath;
+        if (pass > 0u)
+        {
+            passPath.setDispersionChannel((dispersedChannel - 1u + pass) % 3u + 1u);
+            passPath.setFlag(PathFlags::dispersionPending, true);
+        }
+        uint passChannel;
+        tracePixelPath(as, passPath, passChannel);
+        if (pass == 0u)
+        {
+            path = passPath;
+            dispersedChannel = passChannel;
+        }
+        sumL += passPath.L;
+        sumStable += passPath.stableL;
+        sumDiffuse += passPath.diffuseRadiance;
+        sumSpecular += passPath.specularRadiance;
+        if (dispersedChannel == 0u)
+            break;
+    }
     if (dispersedChannel != 0u)
     {
-        float4 sumL = path.L;
-        float3 sumStable = path.stableL, sumDiffuse = path.diffuseRadiance, sumSpecular = path.specularRadiance;
-        for (uint pass = 1u; pass < 3u; ++pass)
-        {
-            PathState channelPath = cameraPath;
-            channelPath.setDispersionChannel((dispersedChannel - 1u + pass) % 3u + 1u);
-            channelPath.setFlag(PathFlags::dispersionPending, true);
-            uint unused;
-            tracePixelPath(as, channelPath, unused);
-            sumL += channelPath.L;
-            sumStable += channelPath.stableL;
-            sumDiffuse += channelPath.diffuseRadiance;
-            sumSpecular += channelPath.specularRadiance;
-        }
         path.L = sumL / 3.0;
         path.stableL = sumStable / 3.0;
         path.diffuseRadiance = sumDiffuse / 3.0;
@@ -129,8 +143,8 @@ void rayGenMain()
     // albedo guides near 0.
     if (pushConstant.rrDiffuseAlbedoStorageIndex != 0xFFFFFFFF)
     {
-        RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(pushConstant.rrDiffuseAlbedoStorageIndex, 0));
-        RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(pushConstant.rrSpecularAlbedoStorageIndex, 0));
+        RWTexture2D<float4> rrDiffuse = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrDiffuseAlbedoStorageIndex), 0));
+        RWTexture2D<float4> rrSpecular = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularAlbedoStorageIndex), 0));
         float3 diffuseAlbedo = rrDiffuse[pixelPos].rgb;
         const float3 specularAlbedo = rrSpecular[pixelPos].rgb;
         const float exposure = scene_exposure(ubo, pushConstant.autoExposureTextureIndex, pushConstant.exposureCompensation,
@@ -152,9 +166,9 @@ void rayGenMain()
         // glass split wrote its own (the pane as the mirror, PathTracerHit.slang writeSplitRRGuides).
         if (!path.hasFlag(PathFlags::rrGuidesDone))
         {
-            const float specularHitDistance = RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[pixelPos];
-            const float4 normalRoughness = RWTexture2D<float4>.Handle(uint2(pushConstant.rrNormalRoughnessStorageIndex, 0))[pixelPos];
-            const float depth = RWTexture2D<float>.Handle(uint2(pushConstant.rrDepthStorageIndex, 0))[pixelPos];
+            const float specularHitDistance = RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularHitDistanceStorageIndex), 0))[pixelPos];
+            const float4 normalRoughness = RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(pushConstant.rrNormalRoughnessStorageIndex), 0))[pixelPos];
+            const float depth = RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrDepthStorageIndex), 0))[pixelPos];
             if (specularHitDistance > 1e-3 && normalRoughness.w < 0.25 && depth > 0.0)
             {
                 // The guide surface's point on this pixel's ray (its depth was written with the jittered projection).
@@ -163,7 +177,7 @@ void rayGenMain()
                 const float3 hitPosition = world.xyz / world.w;
                 const float3 rayDirection = normalize(hitPosition - ubo.cameraWorldPos.xyz);
                 const float3 reflection = reflect(rayDirection, normalize(normalRoughness.xyz)) * specularHitDistance;
-                RWTexture2D<float2>.Handle(uint2(pushConstant.rrSpecularMotionStorageIndex, 0))[pixelPos] =
+                RWTexture2D<float2>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularMotionStorageIndex), 0))[pixelPos] =
                     Bridge::rrSpecularMotionVector(ubo, hitPosition, rayDirection, reflection);
             }
         }
@@ -244,3 +258,11 @@ void rayGenMain()
     outSpecTex[pixelPos] = outSpecular;
 
 }
+
+#ifndef NOX_PATH_TRACER_COMPUTE
+[shader("raygeneration")]
+void rayGenMain()
+{
+    pathTracePixel(DispatchRaysIndex().xy);
+}
+#endif

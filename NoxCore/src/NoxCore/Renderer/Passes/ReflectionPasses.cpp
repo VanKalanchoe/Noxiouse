@@ -753,6 +753,8 @@ namespace Nox
                 uniforms.enableDDGI = 0;
             uniforms.screenGITextureIndex = 0xFFFFFFFF;
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
+            uniforms.screenGIPreviousTextureIndex = 0xFFFFFFFF;
+            uniforms.screenGIPreviousDistanceTextureIndex = 0xFFFFFFFF;
             uniforms.ssgiTextureIndex = 0xFFFFFFFF;
             uniforms.ssgiDepthTextureIndex = 0xFFFFFFFF;
             uniforms.aerialPerspectiveTextureIndex = 0xFFFFFFFF;

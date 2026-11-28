@@ -44,7 +44,7 @@ struct BufferRef<T>
 #ifdef NOX_VULKAN
         return ((T*)handle)[index];
 #else
-        return ByteAddressBuffer.Handle(uint2(uint(handle), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + index * sizeof(T)).value;
+        return ByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + index * sizeof(T)).value;
 #endif
     }
 
@@ -65,7 +65,7 @@ struct RWBufferRef<T>
 #ifdef NOX_VULKAN
         return ((T*)handle)[index];
 #else
-        return RWByteAddressBuffer.Handle(uint2(uint(handle), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + index * sizeof(T)).value;
+        return RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + index * sizeof(T)).value;
 #endif
     }
 
@@ -76,7 +76,7 @@ struct RWBufferRef<T>
 #else
         _NoxBox<T> box;
         box.value = value;
-        RWByteAddressBuffer.Handle(uint2(uint(handle), 0)).Store<_NoxBox<T>>(uint(handle >> 32) + index * sizeof(T), box);
+        RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).Store<_NoxBox<T>>(uint(handle >> 32) + index * sizeof(T), box);
 #endif
     }
 
@@ -93,7 +93,7 @@ T LoadRaw<T>(uint64_t handle, uint byteOffset)
 #ifdef NOX_VULKAN
     return *((T*)(handle + uint64_t(byteOffset)));
 #else
-    return ByteAddressBuffer.Handle(uint2(uint(handle), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + byteOffset).value;
+    return ByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + byteOffset).value;
 #endif
 }
 
@@ -102,7 +102,7 @@ T LoadRWRaw<T>(uint64_t handle, uint byteOffset)
 #ifdef NOX_VULKAN
     return *((T*)(handle + uint64_t(byteOffset)));
 #else
-    return RWByteAddressBuffer.Handle(uint2(uint(handle), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + byteOffset).value;
+    return RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).Load<_NoxBox<T>>(uint(handle >> 32) + byteOffset).value;
 #endif
 }
 
@@ -113,7 +113,7 @@ void StoreRWRaw<T>(uint64_t handle, uint byteOffset, T value)
 #else
     _NoxBox<T> box;
     box.value = value;
-    RWByteAddressBuffer.Handle(uint2(uint(handle), 0)).Store<_NoxBox<T>>(uint(handle >> 32) + byteOffset, box);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).Store<_NoxBox<T>>(uint(handle >> 32) + byteOffset, box);
 #endif
 }
 
@@ -124,7 +124,7 @@ uint AtomicAdd(RWBufferRef<uint> buffer, uint index, uint value)
 #ifdef NOX_VULKAN
     InterlockedAdd(((uint*)buffer.handle)[index], value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(buffer.handle), 0)).InterlockedAdd(uint(buffer.handle >> 32) + index * 4u, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(buffer.handle)), 0)).InterlockedAdd(uint(buffer.handle >> 32) + index * 4u, value, previous);
 #endif
     return previous;
 }
@@ -135,7 +135,7 @@ uint AtomicAddRaw(uint64_t handle, uint byteOffset, uint value)
 #ifdef NOX_VULKAN
     InterlockedAdd(*((uint*)(handle + uint64_t(byteOffset))), value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(handle), 0)).InterlockedAdd(uint(handle >> 32) + byteOffset, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(handle)), 0)).InterlockedAdd(uint(handle >> 32) + byteOffset, value, previous);
 #endif
     return previous;
 }
@@ -146,7 +146,7 @@ uint AtomicMin(RWBufferRef<uint> buffer, uint index, uint value)
 #ifdef NOX_VULKAN
     InterlockedMin(((uint*)buffer.handle)[index], value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(buffer.handle), 0)).InterlockedMin(uint(buffer.handle >> 32) + index * 4u, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(buffer.handle)), 0)).InterlockedMin(uint(buffer.handle >> 32) + index * 4u, value, previous);
 #endif
     return previous;
 }
@@ -157,7 +157,7 @@ uint AtomicMax(RWBufferRef<uint> buffer, uint index, uint value)
 #ifdef NOX_VULKAN
     InterlockedMax(((uint*)buffer.handle)[index], value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(buffer.handle), 0)).InterlockedMax(uint(buffer.handle >> 32) + index * 4u, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(buffer.handle)), 0)).InterlockedMax(uint(buffer.handle >> 32) + index * 4u, value, previous);
 #endif
     return previous;
 }
@@ -168,7 +168,7 @@ uint AtomicCompareExchange(RWBufferRef<uint> buffer, uint index, uint compare, u
 #ifdef NOX_VULKAN
     InterlockedCompareExchange(((uint*)buffer.handle)[index], compare, value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(buffer.handle), 0)).InterlockedCompareExchange(uint(buffer.handle >> 32) + index * 4u, compare, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(buffer.handle)), 0)).InterlockedCompareExchange(uint(buffer.handle >> 32) + index * 4u, compare, value, previous);
 #endif
     return previous;
 }
@@ -179,7 +179,7 @@ uint AtomicExchange(RWBufferRef<uint> buffer, uint index, uint value)
 #ifdef NOX_VULKAN
     InterlockedExchange(((uint*)buffer.handle)[index], value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(buffer.handle), 0)).InterlockedExchange(uint(buffer.handle >> 32) + index * 4u, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(buffer.handle)), 0)).InterlockedExchange(uint(buffer.handle >> 32) + index * 4u, value, previous);
 #endif
     return previous;
 }
@@ -190,7 +190,7 @@ uint AtomicOr(RWBufferRef<uint> buffer, uint index, uint value)
 #ifdef NOX_VULKAN
     InterlockedOr(((uint*)buffer.handle)[index], value, previous);
 #else
-    RWByteAddressBuffer.Handle(uint2(uint(buffer.handle), 0)).InterlockedOr(uint(buffer.handle >> 32) + index * 4u, value, previous);
+    RWByteAddressBuffer.Handle(uint2(NonUniformResourceIndex(uint(buffer.handle)), 0)).InterlockedOr(uint(buffer.handle >> 32) + index * 4u, value, previous);
 #endif
     return previous;
 }
@@ -237,10 +237,17 @@ float4 SampleNonUniform(uint slot, SamplerState samplerState, float2 uv)
 #endif
 }
 
+// Safe descriptor-heap slot index: prevents DXC from hoisting ResourceDescriptorHeap[0xFFFFFFFF]
+// out of `if (slot != 0xFFFFFFFF)` guards (which causes DEVICE_HUNG in DXR on D3D12).
+uint SafeHeapSlot(uint slot)
+{
+    return slot == 0xFFFFFFFFu ? 0u : slot;
+}
+
 // Bindless textures and samplers (identical on both APIs).
-Texture2D Tex2D(uint slot) { return Texture2D.Handle(uint2(slot, 0)); }
-RWTexture2D<float4> RWTex2D(uint slot) { return RWTexture2D<float4>.Handle(uint2(slot, 0)); }
-SamplerState Sampler(uint slot) { return SamplerState.Handle(uint2(slot, 0)); }
+Texture2D Tex2D(uint slot) { return Texture2D.Handle(uint2(SafeHeapSlot(slot), 0)); }
+RWTexture2D<float4> RWTex2D(uint slot) { return RWTexture2D<float4>.Handle(uint2(SafeHeapSlot(slot), 0)); }
+SamplerState Sampler(uint slot) { return SamplerState.Handle(uint2(SafeHeapSlot(slot), 0)); }
 
 // Fullscreen triangle clip-space position with top-left UV origin (0,0) on both Vulkan (Y-down NDC) and D3D12 (Y-up NDC).
 float4 noxFullscreenTriangle(uint vertexID, out float2 uv)

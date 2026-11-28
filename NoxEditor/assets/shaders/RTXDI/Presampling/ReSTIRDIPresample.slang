@@ -8,26 +8,11 @@
 // around, scaling correctly to scenes with thousands of lights instead of the O(numLights) per-thread
 // weighted draw this file used to do.
 
-static BufferRef<LightData> g_LightData;
 static RWBufferRef<uint2> g_RISBuffer;
 #define RTXDI_RIS_BUFFER g_RISBuffer
 
-typealias RAB_LightInfo = LightData;
-
-RAB_LightInfo RAB_EmptyLightInfo()
-{
-    LightData l;
-    l.position = float4(0.0);
-    l.direction = float4(0.0);
-    l.color = float4(0.0);
-    l.spotParams = float4(0.0);
-    return l;
-}
-
-RAB_LightInfo RAB_LoadLightInfo(uint index, bool prevFrame)
-{
-    return g_LightData[index];
-}
+// The lights: RTXDILights.slang (the index space the resampling passes read these RIS entries with).
+#include "RTXDI/RTXDILights.slang"
 
 // We never use RTXDI's "compact light info" packed format -- our light counts are small enough that
 // plain index + RAB_LoadLightInfo is simpler and just as fast. Returning false tells the SDK "not
@@ -48,7 +33,7 @@ void compMain(uint3 dispatchThreadID : SV_DispatchThreadID, uniform PushConstant
     if (slot >= pushConstant.risTileSize * pushConstant.risTileCount)
         return;
 
-    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    rtxdi_bind_lights(loadUbo(pushConstant.matrixReference), pushConstant.lightDataReference);
     g_RISBuffer = RWBufferRef<uint2>(pushConstant.risBufferReference);
 
     if (pushConstant.numLocalLights == 0)

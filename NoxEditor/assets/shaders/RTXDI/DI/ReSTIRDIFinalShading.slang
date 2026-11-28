@@ -12,38 +12,14 @@
 static BufferRef<RTXDI_PackedDIReservoir> g_ReservoirBuffer; // buffer B, read only
 static PushConstantReSTIRDIFinalShading g_PushConstant;
 static UniformBufferObject g_UBO;
-static BufferRef<LightData> g_LightData;
+// The lights: RTXDILights.slang (the same index space, sampling and weights as the resampling passes).
+#include "RTXDI/RTXDILights.slang"
 
 void build_orthonormal_basis(float3 n, out float3 b1, out float3 b2);
 
-typealias RAB_LightInfo = LightData;
-
-struct RAB_LightSample
-{
-    float3 position;
-    float3 normal;
-    float3 radiance;
-    float solidAnglePdf;
-    uint lightType;
-};
-
-RAB_LightInfo RAB_LoadLightInfo(uint index, bool prevFrame)
-{
-    return g_LightData[index];
-}
-
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo light, float3 worldPos, float2 uv)
 {
-    // The engine's light sampling (shaderIO.h, shared with the rest of the renderer): a point on the light -- the sun's cone, a sphere
-    // light's disc, a rect light's area -- and the light from it with the falloff, cone and a rect's area / distance^2 folded in.
-    const LightPointSample lightPoint = sample_light_point(light, worldPos, uv);
-    RAB_LightSample s;
-    s.lightType = (uint)light.position.w;
-    s.position = lightPoint.position;
-    s.normal = lightPoint.direction; // directional: the direction itself; local: towards the sampled point
-    s.radiance = lightPoint.radiance;
-    s.solidAnglePdf = 1.0;
-    return s;
+    return rtxdi_sample_light(light, worldPos, uv);
 }
 
 #include "Rtxdi/Utils/Math.hlsli"
@@ -381,7 +357,7 @@ PSOutput fragMain(
 
     g_PushConstant = pushConstant;
     g_UBO = loadUbo(pushConstant.matrixReference);
-    g_LightData = BufferRef<LightData>(pushConstant.lightDataReference);
+    rtxdi_bind_lights(g_UBO, pushConstant.lightDataReference);
     g_ReservoirBuffer = BufferRef<RTXDI_PackedDIReservoir>(pushConstant.reservoirReference);
 
     Texture2D<float> depthTex = Texture2D<float>.Handle(uint2(g_UBO.imageHeapIndexOffset + pushConstant.depthTextureIndex, 0));
@@ -438,8 +414,8 @@ PSOutput fragMain(
     float signalHitDistance = 0.0;
     uint reservoirLightIndex = RTXDI_GetDIReservoirLightIndex(reservoir);
     bool hasLocalReservoir = RTXDI_IsValidDIReservoir(reservoir) &&
-        reservoirLightIndex < g_UBO.lightCount &&
-        (uint)g_LightData[reservoirLightIndex].position.w != 0u;
+        reservoirLightIndex < g_UBO.rtxdiAnalyticLocalLights + rtxdi_triangle_light_count() &&
+        rtxdi_is_local_light(RAB_LoadLightInfo(reservoirLightIndex, false));
 
     // Candidate zero is the single resampled LOCAL light. Directional lights are evaluated
     // deterministically afterwards: there are normally only one or two, and allowing the sun to
@@ -454,7 +430,7 @@ PSOutput fragMain(
             ? reservoirLightIndex
             : pushConstant.firstInfiniteLightIndex + candidate - 1u;
         RAB_LightInfo light = RAB_LoadLightInfo(lightIndex, false);
-        bool isDirectional = ((uint)light.position.w == 0u);
+        bool isDirectional = rtxdi_is_directional_light(light);
         if ((isReservoirCandidate && isDirectional) || (!isReservoirCandidate && !isDirectional))
             continue;
 

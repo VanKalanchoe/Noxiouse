@@ -545,6 +545,8 @@ namespace Nox
         if (Application::Get().GetSpecification().CommandLineArgs.WantsD3D12())
             api = NRI_GRAPHICS_API_D3D12;
 #endif
+        // The path tracer as a compute shader on D3D12 (its ray tracing pipeline hung the GPU there; docs/Backlog_2026.md).
+        m_pathTracerCompute = api == NRI_GRAPHICS_API_D3D12;
         // Start-up phases timed for the log (docs/Backlog_2026.md R11): the device (Streamline / NGX, Vulkan), then the pipelines.
         const auto startupBegin = std::chrono::steady_clock::now();
         auto millisecondsSince = [](std::chrono::steady_clock::time_point from)
@@ -1659,6 +1661,7 @@ namespace Nox
     {
         m_pathTracerPipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::PathTracer, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
         bakePathTracerShaderTable();
+        m_pathTracerComputePipeline = m_device.createPipeline(rayTracingPassDesc(RayTracingPass::PathTracerCompute, m_rayTracingGraphMasks, forceCompile), m_shaderCompiler.handle());
 
         nri::PipelineDesc environmentDesc{};
         environmentDesc.type = NRI_PIPELINE_COMPUTE;
@@ -1672,6 +1675,7 @@ namespace Nox
         watchShader("assets/shaders/PathTracer/PathTracerMiss.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
         watchShader("assets/shaders/PathTracer/PathTracerHit.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
         watchShader("assets/shaders/PathTracer/PathTracerAnyHit.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
+        watchShader("assets/shaders/PathTracer/PathTracerCompute.slang", "PathTracer", [this]() { createPathTracerPipeline(true); });
 
         nri::PipelineDesc decodeDesc{};
         decodeDesc.type = NRI_PIPELINE_COMPUTE;
@@ -3160,6 +3164,15 @@ namespace Nox
         // Bind global descriptor heaps
         cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
+        {
+            const nri::TextureBarrierDesc toUav{
+                .texture = m_environmentCubemap->GetHandle(),
+                .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE },
+                .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }
+            };
+            cmd.resourceBarriers(std::span(&toUav, 1), {});
+        }
+
         // Bind compute pipeline & push constant parameters
         cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, equirectPipeline);
         cmd.pushData(&pushData, sizeof(EquirectPushConstants));
@@ -3265,6 +3278,15 @@ namespace Nox
         nri::CommandBuffer irradCmd = beginSingleTimeCommands();
         irradCmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
+        {
+            const nri::TextureBarrierDesc toUav{
+                .texture = m_irradianceCubemap->GetHandle(),
+                .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE },
+                .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }
+            };
+            irradCmd.resourceBarriers(std::span(&toUav, 1), {});
+        }
+
         irradCmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_irradiancePipeline);
 
         std::vector<uint32_t> tempIrradMipSlots;
@@ -3286,6 +3308,15 @@ namespace Nox
             uint32_t irradGroupCountX = (mipSize + 15) / 16;
             uint32_t irradGroupCountY = (mipSize + 15) / 16;
             irradCmd.dispatch(irradGroupCountX, irradGroupCountY, 6);
+        }
+
+        {
+            const nri::TextureBarrierDesc toSrv{
+                .texture = m_irradianceCubemap->GetHandle(),
+                .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE },
+                .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING }
+            };
+            irradCmd.resourceBarriers(std::span(&toSrv, 1), {});
         }
 
         endSingleTimeCommands(std::move(irradCmd));
@@ -3332,6 +3363,15 @@ namespace Nox
         {
             nri::CommandBuffer prefCmd = beginSingleTimeCommands();
             prefCmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
+            if (mip == 0)
+            {
+                const nri::TextureBarrierDesc toUav{
+                    .texture = m_prefilteredEnvMap->GetHandle(),
+                    .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE },
+                    .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }
+                };
+                prefCmd.resourceBarriers(std::span(&toUav, 1), {});
+            }
             prefCmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_prefilterPipeline);
 
             uint32_t mipWidth = prefilteredSize >> mip;
@@ -3352,6 +3392,15 @@ namespace Nox
             uint32_t groupX = (mipWidth + 15) / 16;
             uint32_t groupY = (mipHeight + 15) / 16;
             prefCmd.dispatch(groupX, groupY, 6);
+            if (mip + 1 == prefilterCubeMipLevels)
+            {
+                const nri::TextureBarrierDesc toSrv{
+                    .texture = m_prefilteredEnvMap->GetHandle(),
+                    .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE },
+                    .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING }
+                };
+                prefCmd.resourceBarriers(std::span(&toSrv, 1), {});
+            }
             endSingleTimeCommands(std::move(prefCmd));
         }
 
@@ -3411,12 +3460,30 @@ namespace Nox
         nri::CommandBuffer brdfCmd = beginSingleTimeCommands();
         brdfCmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
 
+        {
+            const nri::TextureBarrierDesc toUav{
+                .texture = m_brdfLUT->GetHandle(),
+                .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE },
+                .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }
+            };
+            brdfCmd.resourceBarriers(std::span(&toUav, 1), {});
+        }
+
         brdfCmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, brdfPipeline);
         brdfCmd.pushData(&brdfData, sizeof(BRDFPushConstants));
 
         uint32_t brdfGroupX = (brdfLUTSize + 15) / 16;
         uint32_t brdfGroupY = (brdfLUTSize + 15) / 16;
         brdfCmd.dispatch(brdfGroupX, brdfGroupY, 1);
+
+        {
+            const nri::TextureBarrierDesc toSrv{
+                .texture = m_brdfLUT->GetHandle(),
+                .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE },
+                .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING }
+            };
+            brdfCmd.resourceBarriers(std::span(&toSrv, 1), {});
+        }
 
         endSingleTimeCommands(std::move(brdfCmd));
         m_resourceHeap.registerTexture(*m_brdfLUT, NRI_TEXTURE_USAGE_SHADER_RESOURCE);
@@ -3569,6 +3636,14 @@ namespace Nox
 
             nri::CommandBuffer cmd = beginSingleTimeCommands();
             cmd.bindDescriptorHeaps(&m_resourceHeap, &m_samplerHeap);
+            {
+                const nri::TextureBarrierDesc toUav[3] = {
+                    { .texture = m_skyCloudShape->GetHandle(),   .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE }, .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE } },
+                    { .texture = m_skyCloudDetail->GetHandle(),  .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE }, .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE } },
+                    { .texture = m_skyCloudWeather->GetHandle(), .before = { .access = NRI_ACCESS_NONE, .stages = NRI_STAGE_NONE }, .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE } }
+                };
+                cmd.resourceBarriers(toUav, {});
+            }
             shaderio::PushConstantSkyAtmosphere noisePush{};
             noisePush.outputStorageIndex = shapeStorage;
             cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_skyCloudShapeNoisePipeline);
@@ -3582,6 +3657,14 @@ namespace Nox
             cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_skyCloudWeatherPipeline);
             cmd.pushData(&noisePush, sizeof(noisePush));
             cmd.dispatch(CloudWeatherSize / 8, CloudWeatherSize / 8, 1);
+            {
+                const nri::TextureBarrierDesc toSrv[3] = {
+                    { .texture = m_skyCloudShape->GetHandle(),   .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }, .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING } },
+                    { .texture = m_skyCloudDetail->GetHandle(),  .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }, .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING } },
+                    { .texture = m_skyCloudWeather->GetHandle(), .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }, .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING } }
+                };
+                cmd.resourceBarriers(toSrv, {});
+            }
             endSingleTimeCommands(std::move(cmd));
 
             m_resourceHeap.unregisterTexture(shapeStorage);
@@ -3683,6 +3766,11 @@ namespace Nox
             nri::Pipeline* irradiance;
             nri::Pipeline* prefilter;
             nri::Pipeline* horizonBand;
+            NriTexture transmittanceTex;
+            NriTexture multiScatteringTex;
+            NriTexture horizonBandTex;
+            NriTexture irradianceTex;
+            NriTexture prefilteredTex;
             shaderio::PushConstantSkyAtmosphere push;
             std::vector<uint32_t> storageSlots;
             uint32_t environmentSlot;
@@ -3696,6 +3784,11 @@ namespace Nox
         data.downsample = &m_skyDownsamplePipeline;
         data.irradiance = &m_irradiancePipeline;
         data.prefilter = &m_prefilterPipeline;
+        data.transmittanceTex = m_skyTransmittanceLut ? m_skyTransmittanceLut->GetHandle() : nullptr;
+        data.multiScatteringTex = m_skyMultiScatteringLut ? m_skyMultiScatteringLut->GetHandle() : nullptr;
+        data.horizonBandTex = m_skyHorizonBand ? m_skyHorizonBand->GetHandle() : nullptr;
+        data.irradianceTex = m_irradianceCubemap ? m_irradianceCubemap->GetHandle() : nullptr;
+        data.prefilteredTex = m_prefilteredEnvMap ? m_prefilteredEnvMap->GetHandle() : nullptr;
         data.storageSlots = m_skyStorageSlots;
         data.environmentSlot = m_environmentCubemap->GetDescriptorIndexSlot();
         // Only for clouds: without them the sky near the horizon is smooth and the cubemap holds it (the band's raymarch is the
@@ -3727,23 +3820,41 @@ namespace Nox
                 // The previous frames still in flight read these textures: their reads finish before this rewrites them.
                 cmd.executionBarrier();
 
+                const auto transitionSkyTex = [&](NriTexture tex, bool toWrite)
+                {
+                    if (!tex)
+                        return;
+                    const nri::ResourceState srvState{ .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING };
+                    const nri::ResourceState uavState{ .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE };
+                    const nri::TextureBarrierDesc b{
+                        .texture = tex,
+                        .before = toWrite ? srvState : uavState,
+                        .after = toWrite ? uavState : srvState
+                    };
+                    cmd.resourceBarriers(std::span(&b, 1), {});
+                };
+
                 shaderio::PushConstantSkyAtmosphere push = data.push;
                 if (all && data.updateLuts)
                 {
+                    transitionSkyTex(data.transmittanceTex, true);
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.transmittance);
                     push.outputStorageIndex = data.storageSlots[0];
                     push.outputSize = SkyTransmittanceWidth;
                     push.outputHeight = SkyTransmittanceHeight;
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((SkyTransmittanceWidth + 7) / 8, (SkyTransmittanceHeight + 7) / 8, 1);
+                    transitionSkyTex(data.transmittanceTex, false);
                     cmd.executionBarrier();
 
+                    transitionSkyTex(data.multiScatteringTex, true);
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.multiScattering);
                     push.outputStorageIndex = data.storageSlots[1];
                     push.outputSize = SkyMultiScatteringSize;
                     push.outputHeight = SkyMultiScatteringSize;
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((SkyMultiScatteringSize + 7) / 8, (SkyMultiScatteringSize + 7) / 8, 1);
+                    transitionSkyTex(data.multiScatteringTex, false);
                     cmd.executionBarrier();
                 }
 
@@ -3764,6 +3875,7 @@ namespace Nox
                 // The horizon band (the skybox's far clouds): whole, or this stage's slice of its columns.
                 if (data.horizonBand && (all || data.stage < static_cast<int>(shaderio::SkyHorizonBandSlices)))
                 {
+                    transitionSkyTex(data.horizonBandTex, true);
                     const uint32_t columns = all ? shaderio::SkyHorizonBandWidth : shaderio::SkyHorizonBandWidth / shaderio::SkyHorizonBandSlices;
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.horizonBand);
                     push.outputStorageIndex = data.horizonBandSlot;
@@ -3773,6 +3885,7 @@ namespace Nox
                     cmd.pushData(&push, sizeof(push));
                     cmd.dispatch((columns + 15) / 16, (shaderio::SkyHorizonBandHeight + 15) / 16, 1);
                     push.firstFace = 0;
+                    transitionSkyTex(data.horizonBandTex, false);
                 }
 
                 // Every other mip averaged from the one above it, then the IBL filters, as for an HDR map (reading the mips).
@@ -3792,6 +3905,7 @@ namespace Nox
                         cmd.executionBarrier();
                     }
 
+                    transitionSkyTex(data.irradianceTex, true);
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.irradiance);
                     for (uint32_t mip = 0; mip < irradianceMips; ++mip)
                     {
@@ -3802,6 +3916,7 @@ namespace Nox
                         cmd.pushData(&filter, sizeof(filter));
                         cmd.dispatch((filter.cubemapSize + 15) / 16, (filter.cubemapSize + 15) / 16, 6);
                     }
+                    transitionSkyTex(data.irradianceTex, false);
                 }
                 if (all || data.stage == 7)
                 {
@@ -3812,6 +3927,7 @@ namespace Nox
                         uint32_t cubemapSize;
                         float roughness;
                     };
+                    transitionSkyTex(data.prefilteredTex, true);
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *data.prefilter);
                     for (uint32_t mip = 0; mip < prefilteredMips; ++mip)
                     {
@@ -3823,6 +3939,7 @@ namespace Nox
                         cmd.pushData(&filter, sizeof(filter));
                         cmd.dispatch((filter.cubemapSize + 15) / 16, (filter.cubemapSize + 15) / 16, 6);
                     }
+                    transitionSkyTex(data.prefilteredTex, false);
                 }
 
                 // Everything after this in the frame (skybox, lighting, reflections, DDGI, path tracer) sees the new sky.
@@ -3868,17 +3985,34 @@ namespace Nox
         push.cloudShadowCenterKm = centerKm;
 
         nri::Pipeline* pipeline = &m_skyCloudShadowPipeline;
+        NriTexture cloudShadowTex = map->GetHandle();
         m_renderGraph.AddPass("Cloud Shadows", RGPassFlags::NeverCull,
             [](RGBuilder&)
             {
-                // Read through the frame uniforms by the lighting passes, which the graph does not track: a full barrier after it.
+                // Read through the frame uniforms by the lighting passes, which the graph does not track: explicit barriers around it.
             },
-            [push, pipeline](RGPassContext& context)
+            [push, pipeline, cloudShadowTex](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
+                {
+                    const nri::TextureBarrierDesc toUav{
+                        .texture = cloudShadowTex,
+                        .before = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING },
+                        .after = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE }
+                    };
+                    cmd.resourceBarriers(std::span(&toUav, 1), {});
+                }
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, *pipeline);
                 cmd.pushData(&push, sizeof(push));
                 cmd.dispatch((SkyCloudShadowSize + 7) / 8, (SkyCloudShadowSize + 7) / 8, 1);
+                {
+                    const nri::TextureBarrierDesc toSrv{
+                        .texture = cloudShadowTex,
+                        .before = { .access = NRI_ACCESS_SHADER_WRITE, .stages = NRI_STAGE_COMPUTE },
+                        .after = { .access = NRI_ACCESS_SHADER_READ, .stages = NRI_STAGE_COMPUTE | NRI_STAGE_FRAGMENT | NRI_STAGE_RAY_TRACING }
+                    };
+                    cmd.resourceBarriers(std::span(&toSrv, 1), {});
+                }
                 cmd.executionBarrier();
             });
 
@@ -5631,7 +5765,10 @@ namespace Nox
             lightPDF.Size = RGSize::Absolute;
             lightPDF.Width = m_lightPDFTextureSize;
             lightPDF.Height = m_lightPDFTextureSize;
-            lightPDF.Format = NRI_FORMAT_R16_SFLOAT;
+            // 32-bit: the lights' powers are in the project's units (a point light's intensity times (units per meter)^2, a
+            // triangle's luminance times its area in square units) -- a half float's 65504 turned them into infinity, and RTXDI's
+            // mip descent then divided infinities (no local light was picked correctly).
+            lightPDF.Format = NRI_FORMAT_R32_SFLOAT;
             lightPDF.Usage = NRI_TEXTURE_USAGE_STORAGE;
             lightPDF.MipLevels = m_lightPDFMipLevels;
             resources.LightPDF = graph.CreateTexture("Light PDF", lightPDF);
@@ -5717,6 +5854,7 @@ namespace Nox
             resources.EmissiveLightGrid = graph.ImportBuffer("Emissive Light Grid", m_emissiveGridBuffer.handle());
             resources.EmissiveTriangles = graph.ImportBuffer("Emissive Triangles", m_emissiveTriangleBuffer.handle());
             resources.EmissiveTriangleCdf = graph.ImportBuffer("Emissive Triangle CDF", m_emissiveTriangleCdfBuffer.handle());
+            resources.EmissiveEmitterList = graph.ImportBuffer("Emissive Emitter List", m_emissiveEmitterListBuffer.handle());
         }
         if (frame.skinningWorkCount > 0 && frameIndex < m_skinnedVertexBuffers.size() &&
             frameIndex < m_skinningWorkItemBuffers.size() && frameIndex < m_boneBuffers.size())
@@ -5768,7 +5906,12 @@ namespace Nox
         // The screen-probe GI's per-pixel result for forward and ray-hit shading (SceneGI.slang).
         uniformData.screenGITextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGI[frame.screenProbeGIWriteIndex], NoTexture)
                                                                     : NoTexture;
-        uniformData.screenGIDistanceTextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGIDistance, NoTexture) : NoTexture;
+        uniformData.screenGIDistanceTextureIndex = frame.screenProbeGIAdded ? graph.GetSlotOr(resources.ScreenProbeGIDistance[frame.screenProbeGIWriteIndex], NoTexture) : NoTexture;
+        // Last frame's, for the RT reflections' hits (SceneGI.slang screenGIPrevious; the matrices: addScreenProbeGIPasses).
+        const bool previousScreenGI = frame.screenProbeGIAdded && frame.screenProbeGIHistoryValid;
+        uniformData.screenGIPreviousTextureIndex = previousScreenGI ? graph.GetSlotOr(resources.ScreenProbeGI[frame.screenProbeGIReadIndex], NoTexture) : NoTexture;
+        uniformData.screenGIPreviousDistanceTextureIndex = previousScreenGI ? graph.GetSlotOr(resources.ScreenProbeGIDistance[frame.screenProbeGIReadIndex], NoTexture) : NoTexture;
+        uniformData.screenGIPrevious = 0;
         // The SSGI for the forward passes (a decal takes its wall's).
         const bool ssgi = frame.ssgiAdded && resources.SSGI.IsValid() && resources.SSGIDepth.IsValid();
         uniformData.ssgiTextureIndex = ssgi ? graph.GetSlotOr(resources.SSGI, NoTexture) : NoTexture;
@@ -5828,6 +5971,9 @@ namespace Nox
             uniformData.restirDIDiffuseTextureIndex = NoTexture;
             uniformData.restirDISpecularTextureIndex = NoTexture;
         }
+        // ReSTIR DI gives the emissive meshes' direct light only on a frame it runs with them among its lights: only then do the
+        // screen probes, ReSTIR GI's hits and the reflections' hits leave it to it (UniformBufferObject::rtxdiEmissiveLights).
+        uniformData.rtxdiEmissiveLights = frame.restirDIAdded && m_rtxdiEmissiveTriangles > 0 ? 1u : 0u;
     }
 
     Renderer::MeshletDrawCursor Renderer::beginMeshletDraws(const RGPassContext& context, const ViewDrawResources& draws, bool late) const
@@ -6130,6 +6276,7 @@ namespace Nox
         uniformData.emissiveGridCellSize = 0.0f;
         uniformData.emissiveTrianglesReference = 0;
         uniformData.emissiveTriangleCdfReference = 0;
+        uniformData.emissiveEmitterListReference = 0;
         uniformData.emissiveTriangleCount = 0;
         // The hybrid passes' rays (screen-probe GI, reflections, traced glass) sample them as well.
         if (m_pathTracingEnabled || m_rayTracingEnabled)
@@ -6171,7 +6318,7 @@ namespace Nox
                     // The emissive triangle lights (EmissiveLightGrid.slang trianglesMain / scanMain), grown as needed.
                     if (triangleCount > m_emissiveTriangleCapacity)
                     {
-                        for (nri::Buffer* buffer : { &m_emissiveTriangleBuffer, &m_emissiveTriangleCdfBuffer })
+                        for (nri::Buffer* buffer : { &m_emissiveTriangleBuffer, &m_emissiveTriangleCdfBuffer, &m_emissiveEmitterListBuffer })
                         {
                             if (*buffer)
                             {
@@ -6184,9 +6331,13 @@ namespace Nox
                             .size = sizeof(shaderio::EmissiveTriangle) * m_emissiveTriangleCapacity, .usage = NRI_BUFFER_USAGE_STORAGE });
                         m_emissiveTriangleCdfBuffer = m_device.createBuffer(nri::BufferDesc{
                             .size = sizeof(float) * m_emissiveTriangleCapacity, .usage = NRI_BUFFER_USAGE_STORAGE });
+                        // The emitting triangles' count and indices (EmissiveLightGrid.slang scanMain).
+                        m_emissiveEmitterListBuffer = m_device.createBuffer(nri::BufferDesc{
+                            .size = sizeof(uint32_t) * (m_emissiveTriangleCapacity + 1), .usage = NRI_BUFFER_USAGE_STORAGE });
                     }
                     uniformData.emissiveTrianglesReference = bufferReadRef(m_emissiveTriangleBuffer);
                     uniformData.emissiveTriangleCdfReference = bufferReadRef(m_emissiveTriangleCdfBuffer);
+                    uniformData.emissiveEmitterListReference = bufferReadRef(m_emissiveEmitterListBuffer);
                     uniformData.emissiveTriangleCount = triangleCount;
 
                     if (!m_emissiveGridBuffer)
@@ -6202,6 +6353,42 @@ namespace Nox
                 }
             }
         }
+
+        // RTXDI's lights (RTXDI/RTXDILights.slang): the emissive triangles join the analytic local lights when ReSTIR DI lights the
+        // hybrid renderer (not the path tracer, whose own light sampling has them: PathTracerNEE / ReSTIR PT) -- one light per
+        // emissive triangle, as RTXDI's sample prepares mesh lights (Doc/Integration.md). Their records come from the emissive light
+        // grid's pass (EmissiveLightGrid.slang trianglesMain), which runs whenever there are emissive triangles in the hybrid renderer.
+        const bool rtxdiEmissive = m_directLightingMode == 1 && m_rayTracingEnabled && !m_pathTracingEnabled &&
+                                   uniformData.emissiveTriangleCount > 0 && uniformData.emissiveTrianglesReference != 0;
+        m_rtxdiEmissiveTriangles = rtxdiEmissive ? uniformData.emissiveTriangleCount : 0u;
+        uniformData.rtxdiAnalyticLocalLights = m_restirDINumLocalLights;
+        uniformData.rtxdiEmissiveTriangleLights = m_rtxdiEmissiveTriangles;
+        uniformData.rtxdiEmissiveLights = m_rtxdiEmissiveTriangles > 0 ? 1u : 0u;
+        // The index space changed (a light or an emissive mesh came, went or changed its triangles): RTXDI's temporal reuse would
+        // read last frame's reservoirs with other lights at their indices -- RAB_TranslateLightIndex drops them this frame.
+        uint64_t signature = 1469598103934665603ull;
+        auto mix = [&signature](uint64_t value) { signature = (signature ^ value) * 1099511628211ull; };
+        mix(m_restirDINumLocalLights);
+        mix(m_restirDINumInfiniteLights);
+        mix(m_rtxdiEmissiveTriangles);
+        if (m_rtxdiEmissiveTriangles > 0)
+        {
+            for (const shaderio::EmissiveLightInstance& light : m_emissiveLights)
+            {
+                mix(light.instanceSlot);
+                mix(light.triangleCount);
+            }
+        }
+        uniformData.rtxdiLightsChanged = signature != m_rtxdiLightSignature ? 1u : 0u;
+        m_rtxdiLightSignature = signature;
+
+        // The light PDF texture (ReSTIRDIWriteLightPDF.slang): a power-of-two square with a texel per local light, 128 x 128 at least
+        // (RTXDI: "at least one pixel per light"; the mips' box filter needs the power of two).
+        uint32_t pdfSize = 128;
+        while (pdfSize < 4096 && static_cast<uint64_t>(pdfSize) * pdfSize < rtxdiLocalLightCount())
+            pdfSize *= 2;
+        m_lightPDFTextureSize = pdfSize;
+        m_lightPDFMipLevels = static_cast<uint32_t>(std::log2(static_cast<double>(pdfSize)));
     }
 
     void Renderer::processDeferredReleases()
@@ -6972,7 +7159,7 @@ namespace Nox
         readback.Height = texture->GetHeight();
         readback.Staging = m_device.createBuffer(nri::BufferDesc{
             .size = static_cast<uint64_t>(readback.Width) * readback.Height * 4,
-            .usage = NRI_BUFFER_USAGE_STAGING
+            .usage = NRI_BUFFER_USAGE_READBACK
         });
         readback.Texture = std::move(texture);
         readback.Done = std::move(done);
@@ -7801,6 +7988,8 @@ namespace Nox
             // The screen-probe GI is the camera's pixels: another view's points would land on the wrong ones.
             uniforms.screenGITextureIndex = 0xFFFFFFFF;
             uniforms.screenGIDistanceTextureIndex = 0xFFFFFFFF;
+            uniforms.screenGIPreviousTextureIndex = 0xFFFFFFFF;
+            uniforms.screenGIPreviousDistanceTextureIndex = 0xFFFFFFFF;
             uniforms.ssgiTextureIndex = 0xFFFFFFFF;
             uniforms.ssgiDepthTextureIndex = 0xFFFFFFFF;
             uniforms.transparentSceneDepthTextureIndex = 0xFFFFFFFF;

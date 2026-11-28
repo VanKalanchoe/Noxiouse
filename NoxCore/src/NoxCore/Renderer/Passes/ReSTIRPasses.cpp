@@ -94,7 +94,7 @@ namespace Nox
                 // Infinite lights do not need a RIS buffer. Populate the directional-light region
                 // even when local-light presampling was skipped (sun-only scenes such as Bistro).
                 initPush.lightSampling.lightDataReference = uniformData.lightDataReference;
-                initPush.lightSampling.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+                initPush.lightSampling.firstInfiniteLightIndex = rtxdiFirstInfiniteLight(); // (RTXDI's index space: RTXDILights.slang)
                 initPush.lightSampling.numInfiniteLights = m_restirDINumInfiniteLights;
                 initPush.lightSampling.numInfiniteLightSamples = 1;
                 if (m_frame.lightPresamplingAdded)
@@ -296,7 +296,7 @@ namespace Nox
         // RTXDI's light presampling (light PDF mip chain, RIS tiles, ReGIR cells), once per frame for everything that samples
         // lights through it: ReSTIR DI's primary surfaces and ReSTIR GI's path vertices (RTXDILightSampling.slang).
         const bool rtxdiLighting = m_directLightingMode == 1 || isReSTIRGIRequested();
-        const bool runPresampling = rtxdiLighting && m_restirDINumLocalLights > 0 &&
+        const bool runPresampling = rtxdiLighting && rtxdiLocalLightCount() > 0 &&
                                     (!m_frame.runPathTracer || m_frame.pathTracerUsesRTXDI) &&
                                     (m_rayTracingEnabled || m_frame.pathTracerUsesRTXDI) &&
                                     m_restirDIPresamplePipeline && m_restirDIPresampleReGIRPipeline &&
@@ -311,7 +311,7 @@ namespace Nox
         const uint32_t risBufferOffset = m_restirDIRISTileSize * m_restirDIRISTileCount; // where ReGIR's segment starts
         // ReGIR only contains local lights. Building all grid cells when the scene has only a sun
         // performs hundreds of thousands of useless RIS iterations and can dominate the frame.
-        const bool regirActive = m_regirEnabled && regirCellCount > 0 && m_restirDINumLocalLights > 0;
+        const bool regirActive = m_regirEnabled && regirCellCount > 0 && rtxdiLocalLightCount() > 0;
 
         // uint2 per element: [0, risBufferOffset) = RIS tiles, [risBufferOffset, end) = ReGIR cells. Rebuilt every frame.
         const uint64_t risElements = static_cast<uint64_t>(risBufferOffset) + static_cast<uint64_t>(regirCellCount) * m_regirLightsPerCell;
@@ -323,6 +323,7 @@ namespace Nox
         m_renderGraph.AddPass("Light PDF Write", RGPassFlags::None,
             [&](RGBuilder& builder)
             {
+                ReadGpuScene(builder, resources); // the emissive triangle lights' power (RTXDILights.slang)
                 builder.Write(resources.LightPDF);
             },
             [this, res = &resources](RGPassContext& context)
@@ -331,9 +332,10 @@ namespace Nox
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_restirDIWriteLightPDFPipeline);
 
                 shaderio::PushConstantReSTIRDIWriteLightPDF wPush{};
+                wPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 wPush.lightDataReference = uniformData.lightDataReference;
                 wPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                wPush.numLocalLights = m_restirDINumLocalLights;
+                wPush.numLocalLights = rtxdiLocalLightCount();
                 wPush.pdfTextureStorageIndex = context.StorageSlot(res->LightPDF, 0);
                 wPush.pdfTextureSize = m_lightPDFTextureSize;
                 cmd.pushData(&wPush, sizeof(shaderio::PushConstantReSTIRDIWriteLightPDF));
@@ -376,6 +378,7 @@ namespace Nox
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.LightPDF);
+                ReadGpuScene(builder, resources);
                 builder.Write(resources.ReSTIRDIRIS);
             },
             [this, res = &resources](RGPassContext& context)
@@ -384,10 +387,11 @@ namespace Nox
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_restirDIPresamplePipeline);
 
                 shaderio::PushConstantReSTIRDIPresample risPush{};
+                risPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                 risPush.lightDataReference = uniformData.lightDataReference;
                 risPush.risBufferReference = context.BufferWriteRef(res->ReSTIRDIRIS);
                 risPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                risPush.numLocalLights = m_restirDINumLocalLights;
+                risPush.numLocalLights = rtxdiLocalLightCount();
                 risPush.risTileSize = m_restirDIRISTileSize;
                 risPush.risTileCount = m_restirDIRISTileCount;
                 risPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
@@ -406,6 +410,7 @@ namespace Nox
                 [&](RGBuilder& builder)
                 {
                     builder.Read(resources.ReSTIRDIRIS);
+                    ReadGpuScene(builder, resources); // the emissive triangle lights' power and centroid (RTXDILights.slang)
                     builder.Write(resources.ReSTIRDIRIS);
                 },
                 [this, res = &resources, regirCellCount, risBufferOffset](RGPassContext& context)
@@ -414,11 +419,12 @@ namespace Nox
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_restirDIPresampleReGIRPipeline);
 
                     shaderio::PushConstantReSTIRDIPresampleReGIR regirPush{};
+                    regirPush.matrixReference = bufferReadRef(m_uniformBuffers[frameIndex]);
                     regirPush.lightDataReference = uniformData.lightDataReference;
                     regirPush.risBufferReference = context.BufferWriteRef(res->ReSTIRDIRIS);
                     regirPush.gridCenterAndCellSize = glm::vec4(ToRenderSpace(glm::dvec3(m_regirGridCenter)), m_regirCellSize) /* (a world-space setting) */;
                     regirPush.firstLocalLightIndex = m_restirDIFirstLocalLight;
-                    regirPush.numLocalLights = m_restirDINumLocalLights;
+                    regirPush.numLocalLights = rtxdiLocalLightCount();
                     regirPush.risBufferOffset = risBufferOffset;
                     regirPush.lightsPerCell = m_regirLightsPerCell;
                     regirPush.cellsX = m_regirCellsX;
@@ -449,8 +455,8 @@ namespace Nox
         params.risBufferReference = context.BufferReadRef(risBuffer);
         params.gridCenterAndCellSize = glm::vec4(ToRenderSpace(glm::dvec3(m_regirGridCenter)), m_regirCellSize) /* (a world-space setting) */;
         params.firstLocalLightIndex = m_restirDIFirstLocalLight;
-        params.numLocalLights = m_restirDINumLocalLights;
-        params.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+        params.numLocalLights = rtxdiLocalLightCount();      // the analytic local lights and the emissive triangles (RTXDILights.slang)
+        params.firstInfiniteLightIndex = rtxdiFirstInfiniteLight();
         params.numInfiniteLights = m_restirDINumInfiniteLights;
         params.numLocalLightSamples = m_restirDINumLocalLightSamples;
         params.numInfiniteLightSamples = m_restirDINumInfiniteLightSamples;
@@ -501,7 +507,7 @@ namespace Nox
         const uint32_t bufferC = m_restirDILastFrameOutputReservoir;          // Temporal's history (read only)
         const uint32_t bufferB = (bufferA + 1) % 3;                            // Spatial's output, Final Shading's input
         m_restirDILastFrameOutputReservoir = bufferB;
-        const bool hasLocalLights = m_restirDINumLocalLights > 0;
+        const bool hasLocalLights = rtxdiLocalLightCount() > 0; // analytic local lights and emissive triangles (RTXDILights.slang)
 
         m_renderGraph.PushGroup("ReSTIR DI");
 
@@ -574,6 +580,7 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.ReSTIRDIReservoirs[bufferC]);
                 builder.Read(resources.ReSTIRDIReservoirs[bufferA]);
+                ReadGpuScene(builder, resources); // its lights sampled again (the emissive triangles: RTXDILights.slang)
                 builder.Write(resources.ReSTIRDIReservoirs[bufferA]);
                 builder.ColorTarget(resources.ReSTIRDIDiffuse, NRI_LOAD_OP_DONT_CARE, NRI_STORE_OP_DONT_CARE);
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -628,6 +635,7 @@ namespace Nox
                 builder.Read(resources.GBufferMaterial);
                 builder.Read(resources.ReSTIRDIReservoirs[bufferA]);
                 builder.Read(resources.NeighborOffsets);
+                ReadGpuScene(builder, resources); // its lights sampled again (the emissive triangles: RTXDILights.slang)
                 builder.Write(resources.ReSTIRDIReservoirs[bufferB]);
                 builder.ColorTarget(resources.ReSTIRDIDiffuse, NRI_LOAD_OP_DONT_CARE, NRI_STORE_OP_DONT_CARE);
                 builder.SetRenderArea(m_frame.renderExtent);
@@ -726,7 +734,7 @@ namespace Nox
                 diFPush.reservoirArrayPitch = arrayPitch;
                 // Packed for the denoiser that runs (the lighting unpacks with the same mode), plain without one.
                 diFPush.denoiserMode = denoiseDI ? static_cast<uint32_t>(m_nrdDIDenoiser) : 0u;
-                diFPush.firstInfiniteLightIndex = m_restirDIFirstInfiniteLight;
+                diFPush.firstInfiniteLightIndex = rtxdiFirstInfiniteLight();
                 diFPush.numInfiniteLights = m_restirDINumInfiniteLights;
                 cmd.pushData(&diFPush, sizeof(shaderio::PushConstantReSTIRDIFinalShading));
 

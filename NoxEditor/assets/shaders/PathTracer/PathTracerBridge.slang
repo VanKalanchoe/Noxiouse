@@ -21,10 +21,10 @@ namespace Bridge
         sampling.ImportanceBaseMip = 9;
         sampling.padding0 = 0;
         return EnvMapSampler::make(
-            SamplerState.Handle(uint2(SamplerIndex::SAMPLER_NEAREST_CLAMP,0)),
-            Texture2D<float>.Handle(uint2(ubo.imageHeapIndexOffset+importanceIndex,0)), sampling,
-            TextureCube<float4>.Handle(uint2(ubo.imageHeapIndexOffset+skyIndex,0)),
-            SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT,0)), scene);
+            SamplerIndex::SAMPLER_NEAREST_CLAMP,
+            importanceIndex == 0xFFFFFFFF ? 0u : (ubo.imageHeapIndexOffset + importanceIndex), sampling,
+            skyIndex == 0xFFFFFFFF ? 0u : (ubo.imageHeapIndexOffset + skyIndex),
+            SamplerIndex::SAMPLER_LINEAR_REPEAT, scene);
     }
     struct SurfaceData
     {
@@ -446,7 +446,7 @@ namespace Bridge
                 float sheenAlbedo = 0.0;
                 if (ubo.brdfLutIndex != 0xFFFFFFFF)
                 {
-                    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + ubo.brdfLutIndex, 0));
+                    Texture2D brdfTex = Texture2D.Handle(uint2(ubo.brdfLutIndex == 0xFFFFFFFFu ? 0u : (ubo.imageHeapIndexOffset + ubo.brdfLutIndex), 0));
                     sheenAlbedo = brdfTex.SampleLevel(SamplerState.Handle(uint2(SamplerIndex::SAMPLER_BRDFLUT, 0)), float2(NdotV, 1.0 - lobes.sheenRoughness), 0).b;
                 }
                 bsdfLobes.sheenScaling = saturate(1.0 - max(max(lobes.sheenColor.r, lobes.sheenColor.g), lobes.sheenColor.b) * sheenAlbedo);
@@ -594,7 +594,7 @@ namespace Bridge
         }
 
         SamplerState sampler = SamplerState.Handle(uint2(SamplerIndex::SAMPLER_LINEAR_REPEAT, 0));
-        TextureCube skybox = TextureCube.Handle(uint2(ubo.imageHeapIndexOffset + skyboxTextureIndex, 0));
+        TextureCube skybox = TextureCube.Handle(uint2(skyboxTextureIndex == 0xFFFFFFFF ? 0u : (ubo.imageHeapIndexOffset + skyboxTextureIndex), 0));
         return skybox.SampleLevel(sampler, dir, lod).rgb * ubo.scaleIBLAmbient;
     }
 

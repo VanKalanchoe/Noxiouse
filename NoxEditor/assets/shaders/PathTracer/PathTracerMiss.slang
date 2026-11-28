@@ -5,12 +5,11 @@
 #include "PathTracerPushConstants.slang"
 #include "EmissiveLights.slang"
 
-[shader("miss")]
-void missMain(inout PathPayload payload : SV_RayPayload)
+// A path's ray that hit nothing: the sky, the sun's and moon's discs, rect lights' faces -- written into `path`, which ends here. One
+// function for both ways of tracing: the ray tracing pipeline's miss (missMain below) and the compute path tracer's ray query
+// (PathTracerCompute.slang).
+void pathTracerMiss(inout PathState path, float3 rayOrigin, float3 rayDir)
 {
-    PathState path = PathPayload::unpack(payload);
-
-    float3 rayDir = WorldRayDirection();
 
     UniformBufferObject ubo = loadUbo(pushConstant.matrixReference);
 
@@ -31,7 +30,7 @@ void missMain(inout PathPayload payload : SV_RayPayload)
     {
         envRadiance += directional_light_discs(ubo, rayDir);
         float rectT = 1e30;
-        const float3 rectRadiance = ray_rect_lights(ubo, WorldRayOrigin(), rayDir, rectT);
+        const float3 rectRadiance = ray_rect_lights(ubo, rayOrigin, rayDir, rectT);
         if (rectT < 1e30)
         {
             envRadiance = rectRadiance; // in front of the sky
@@ -82,10 +81,17 @@ void missMain(inout PathPayload payload : SV_RayPayload)
     if (path.hasFlag(PathFlags::rrSpecHitPending) && pushConstant.rrSpecularHitDistanceStorageIndex != 0xFFFFFFFF)
     {
         path.setFlag(PathFlags::rrSpecHitPending, false);
-        RWTexture2D<float>.Handle(uint2(pushConstant.rrSpecularHitDistanceStorageIndex, 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
+        RWTexture2D<float>.Handle(uint2(SafeHeapSlot(pushConstant.rrSpecularHitDistanceStorageIndex), 0))[uint2(path.id & 0xFFFFu, path.id >> 16)] =
             Bridge::rrSkySpecularDistance(ubo);
     }
 
     path.terminate();
+}
+
+[shader("miss")]
+void missMain(inout PathPayload payload)
+{
+    PathState path = PathPayload::unpack(payload);
+    pathTracerMiss(path, WorldRayOrigin(), WorldRayDirection());
     payload = PathPayload::pack(path);
 }

@@ -109,21 +109,21 @@ struct DistantLightSample
 #if !defined(__cplusplus)
 
 
-// Core envmap access
+// Core envmap access (stores bindless descriptor slots rather than resource handles inside structs for DXIL SM 6.6 compatibility)
 struct EnvMap
 {
-    TextureCube<float4> Texture;            ///< Environment map texture.
-    SamplerState        TextureSampler;     ///< Environment map sampler (linear, wrap).
+    uint                TextureSlot;        ///< Bindless slot of the environment cubemap texture.
+    uint                SamplerSlot;        ///< Bindless slot of the environment map sampler (linear, wrap).
     EnvMapSceneParams   SceneParams;        ///< Environment map scene parameters.
     
-    static EnvMap make( TextureCube<float4>     texture         ///< Environment map texture.
-                        , SamplerState          textureSampler  ///< Environment map texture sampler.
+    static EnvMap make( uint                    textureSlot     ///< Environment map texture slot.
+                        , uint                  samplerSlot     ///< Environment map texture sampler slot.
                         , EnvMapSceneParams     sceneParams     ///< Environment map data.
                        )
     {
         EnvMap envMap;
-        envMap.Texture = texture;
-        envMap.TextureSampler = textureSampler;
+        envMap.TextureSlot = textureSlot;
+        envMap.SamplerSlot = samplerSlot;
         envMap.SceneParams = sceneParams;
         return envMap;
     }
@@ -142,7 +142,9 @@ struct EnvMap
 
     float3 EvalLocal(float3 localDir, float lod = 0.f)
     {
-        return Texture.SampleLevel(TextureSampler, localDir, lod).rgb * SceneParams.ColorMultiplier.rgb;
+        TextureCube<float4> tex = TextureCube<float4>.Handle(uint2(TextureSlot, 0));
+        SamplerState samp = SamplerState.Handle(uint2(SamplerSlot, 0));
+        return tex.SampleLevel(samp, localDir, lod).rgb * SceneParams.ColorMultiplier.rgb;
     }
 
     float3 Eval(float3 worldDir, float lod = 0.f)
@@ -157,41 +159,29 @@ struct EnvMapSampler
     EnvMap              EnvironmentMap;
 
     // MIP descent sampler
-    SamplerState        PointClampSampler;
-    Texture2D<float>    ImportanceMap;          ///< Hierarchical importance map (entire mip chain).
+    uint                PointClampSamplerSlot;
+    uint                ImportanceMapSlot;      ///< Hierarchical importance map (entire mip chain).
     
     EnvMapImportanceSamplingParams
                         ImportanceSamplingParams;
     
-// #ifndef EMIS_ENABLE_CORE_ONLY
-//     Buffer<uint2>       PresampledBuffer;       ///< ENVMAP_PRESAMPLED_COUNT number of (encoded) samples pre-sampled for each frame or PT pass
-// #endif 
-    
     static EnvMapSampler make(
-          SamplerState          pointClampSampler                   ///< Point sampling with clamp to edge.
-        , Texture2D<float>      importanceMap                       ///< Hierarchical importance map (entire mip chain).
+          uint                  pointClampSamplerSlot               ///< Point sampling with clamp to edge.
+        , uint                  importanceMapSlot                   ///< Hierarchical importance map (entire mip chain).
         , EnvMapImportanceSamplingParams importanceSamplingParams   ///< Data needed by importance sampling
 
-        , TextureCube<float4>   environmentMap                      ///< Environment map texture.
-        , SamplerState          environmentMapTextureSampler        ///< Environment map texture sampler.
+        , uint                  environmentMapSlot                  ///< Environment map texture.
+        , uint                  environmentMapTextureSamplerSlot    ///< Environment map texture sampler.
         , EnvMapSceneParams     envMapSceneParams                   ///< Environment map data.        
-    
-// #ifndef EMIS_ENABLE_CORE_ONLY
-//         , Buffer<uint2>         presampledBuffer
-// #endif
         ) 
     {
         EnvMapSampler envMapSampler;
 
-        envMapSampler.EnvironmentMap        = EnvMap::make( environmentMap, environmentMapTextureSampler, envMapSceneParams );
+        envMapSampler.EnvironmentMap        = EnvMap::make( environmentMapSlot, environmentMapTextureSamplerSlot, envMapSceneParams );
             
-        envMapSampler.PointClampSampler     = pointClampSampler;
-        envMapSampler.ImportanceMap         = importanceMap;    
+        envMapSampler.PointClampSamplerSlot = pointClampSamplerSlot;
+        envMapSampler.ImportanceMapSlot     = importanceMapSlot;    
         envMapSampler.ImportanceSamplingParams = importanceSamplingParams; 
-        
-// #ifndef EMIS_ENABLE_CORE_ONLY
-//         envMapSampler.PresampledBuffer      = presampledBuffer;
-// #endif
         
         return envMapSampler;
     }
@@ -230,6 +220,7 @@ struct EnvMapSampler
     // Importance sampling of the environment map using the MIP descent approach
     DistantLightSample MIPDescentSample(const float2 rnd)
     {
+        Texture2D<float> importanceMap = Texture2D<float>.Handle(uint2(ImportanceMapSlot, 0));
         DistantLightSample result;
         
         float2 p = rnd;     // Random sample in [0,1)^2.
@@ -243,10 +234,10 @@ struct EnvMapSampler
 
             // Load the four texels at the current position.
             float w[4];
-            w[0] = ImportanceMap.Load(int3(pos, mip));
-            w[1] = ImportanceMap.Load(int3(pos + uint2(1, 0), mip));
-            w[2] = ImportanceMap.Load(int3(pos + uint2(0, 1), mip));
-            w[3] = ImportanceMap.Load(int3(pos + uint2(1, 1), mip));
+            w[0] = importanceMap.Load(int3(pos, mip));
+            w[1] = importanceMap.Load(int3(pos + uint2(1, 0), mip));
+            w[2] = importanceMap.Load(int3(pos + uint2(0, 1), mip));
+            w[3] = importanceMap.Load(int3(pos + uint2(1, 1), mip));
 
             float q[2];
             q[0] = w[0] + w[2];
@@ -301,8 +292,8 @@ struct EnvMapSampler
 
         // Compute final pdf.
         // We sample exactly according to the intensity of where the final samples lies in the octahedral map, normalized to its average intensity.
-        float avg_w = ImportanceMap.Load(int3(0, 0, ImportanceSamplingParams.ImportanceBaseMip)); // 1x1 mip holds integral over importance map. TODO: Replace by constant or rescale in setup so that the integral is 1.0
-        float pdf = ImportanceMap[pos] / avg_w;
+        float avg_w = importanceMap.Load(int3(0, 0, ImportanceSamplingParams.ImportanceBaseMip)); // 1x1 mip holds integral over importance map. TODO: Replace by constant or rescale in setup so that the integral is 1.0
+        float pdf = importanceMap[pos] / avg_w;
 
         result.Le = EnvironmentMap.EvalLocal(dir);
         result.Dir = ToWorld(dir);
@@ -316,9 +307,11 @@ struct EnvMapSampler
     //    But, in some cases we need to evaluate the pdf for other directions (e.g. for MIS).
     float MIPDescentEvalPdf(const float3 worldDir)
     {
+        Texture2D<float> importanceMap = Texture2D<float>.Handle(uint2(ImportanceMapSlot, 0));
+        SamplerState pointClampSampler = SamplerState.Handle(uint2(PointClampSamplerSlot, 0));
         float2 uv = ndir_to_oct_equal_area_unorm(ToLocal(worldDir));
-        float avg_w = ImportanceMap.Load(int3(0, 0, ImportanceSamplingParams.ImportanceBaseMip)); // 1x1 mip holds integral over importance map. TODO: Replace by constant or rescale in setup so that the integral is 1.0
-        float pdf = ImportanceMap.SampleLevel(PointClampSampler, uv, 0) / avg_w;
+        float avg_w = importanceMap.Load(int3(0, 0, ImportanceSamplingParams.ImportanceBaseMip)); // 1x1 mip holds integral over importance map. TODO: Replace by constant or rescale in setup so that the integral is 1.0
+        float pdf = importanceMap.SampleLevel(pointClampSampler, uv, 0) / avg_w;
         return pdf / (4.0 * K_PI);
     }
 

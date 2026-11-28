@@ -106,7 +106,8 @@ namespace Nox
         RGTexture ScreenProbeRays;         // 8 x 8 rays per probe
         RGTexture ScreenProbeIrradiance[2]; // octahedral irradiance per probe, ping-pong of the spatial filter
         RGTexture ScreenProbeGI[2];        // the per-pixel result, ping-pong history (FrameGraphState::screenProbeGIWriteIndex)
-        RGTexture ScreenProbeGIDistance;   // per pixel: the distance from the camera of the surface the result is for (SceneGI.slang)
+        RGTexture ScreenProbeGIDistance[2]; // per pixel: the distance from the camera of the surface the result is for (SceneGI.slang);
+                                            // ping-pongs with ScreenProbeGI (the RT reflections read last frame's)
         RGTexture AerialPerspective;       // the camera volume of the air over a procedural sky (deferred and forward fog)
 
         // ReSTIR GI / DI
@@ -151,6 +152,7 @@ namespace Nox
         RGBuffer EmissiveLightGrid; // the emissive lights' local grid (EmissiveLightGrid.slang), when the lights are sampled
         RGBuffer EmissiveTriangles; // the path tracer's emissive triangle lights and the running sum of their power
         RGBuffer EmissiveTriangleCdf;
+        RGBuffer EmissiveEmitterList; // the emitting triangles (EmissiveLightGrid.slang scanMain)
 
         // Compute-skinned local-space positions/normals. The previous ring slot supplies true skeletal motion vectors.
         RGBuffer SkinningSourceVertices;
@@ -226,6 +228,7 @@ namespace Nox
         ReadIfValid(builder, resources.EmissiveLightGrid);
         ReadIfValid(builder, resources.EmissiveTriangles);
         ReadIfValid(builder, resources.EmissiveTriangleCdf);
+        ReadIfValid(builder, resources.EmissiveEmitterList);
     }
 
     // The HDR image this frame's lighting produced (DLSS or post-process input): ReSTIR PT, else the plain path tracer,

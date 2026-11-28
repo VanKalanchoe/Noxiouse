@@ -1647,7 +1647,7 @@ namespace Nox
             if (m_frame.screenProbeGIAdded)
             {
                 builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
-                builder.Read(resources.ScreenProbeGIDistance);
+                builder.Read(resources.ScreenProbeGIDistance[m_frame.screenProbeGIWriteIndex]);
             }
             // Transparent lit shading's specular occlusion approximation (Material_TransparentLit_Mesh.slang).
             if (m_frame.ssaoAdded)

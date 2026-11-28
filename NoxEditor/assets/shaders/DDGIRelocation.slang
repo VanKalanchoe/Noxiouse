@@ -79,6 +79,7 @@ float4 fragMain(MSOutput input, uniform PushConstantDDGIBlend pushConstant) : SV
     const float3 offset = previous * spacing;
 
     Texture2D rayDataTex = Texture2D.Handle(uint2(ubo.imageHeapIndexOffset + pushConstant.rayDataTextureIndex, 0));
+    const uint rayRow = ddgi_ray_row(ubo, probeIndex, pushConstant.frameIndex, pushConstant.compactRays);
     const float rotAngle = float((pushConstant.frameIndex + probeIndex * 17) % 128) * (2.0 * 3.14159265359 / 128.0);
     const float3 rotAxis = normalize(float3(0.57735, 0.57735, 0.57735));
 
@@ -91,7 +92,7 @@ float4 fragMain(MSOutput input, uniform PushConstantDDGIBlend pushConstant) : SV
     float3 farthestFrontfaceDirection = float3(0.0);
     for (uint r = 0; r < pushConstant.raysPerProbe; ++r)
     {
-        const float distance = rayDataTex.Load(int3(r, probeIndex, 0)).w; // a miss is far (DDGIRadiance.slang)
+        const float distance = rayDataTex.Load(int3(r, rayRow, 0)).w; // a miss is far (DDGIRadiance.slang)
         const float3 direction = rotate_vector(spherical_fibonacci(r, pushConstant.raysPerProbe), rotAxis, rotAngle);
         if (distance < 0.0)
         {

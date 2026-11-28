@@ -240,16 +240,17 @@ namespace Nox
                     builder.Read(resources.Visibility);
                     ReadIfValid(builder, resources.TLAS);
                     ReadGpuScene(builder, resources);
-                    // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs, and the screen-probe GI where the hit
-                    // is on screen (SceneGI.slang).
+                    // Hit shading samples the DDGI atlases (through the uniforms) when DDGI runs, and LAST frame's screen-probe GI where
+                    // the hit is on screen (SceneGI.slang screenGIPrevious, Reflection.slang): not this frame's, which the screen probes
+                    // write on the async compute queue -- reading it made this pass and the graphics queue behind it wait for them.
                     if (m_frame.ddgiAdded)
                     {
                         ReadDDGI(builder, resources, m_frame.ddgiWriteIndex);
                     }
-                    if (m_frame.screenProbeGIAdded)
+                    if (m_frame.screenProbeGIAdded && m_frame.screenProbeGIHistoryValid)
                     {
-                        builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIWriteIndex]);
-                        builder.Read(resources.ScreenProbeGIDistance);
+                        builder.Read(resources.ScreenProbeGI[m_frame.screenProbeGIReadIndex]);
+                        builder.Read(resources.ScreenProbeGIDistance[m_frame.screenProbeGIReadIndex]);
                     }
                     if (smoothFill > 0.0f)
                         builder.ColorTarget(target, NRI_LOAD_OP_LOAD, NRI_STORE_OP_STORE);
@@ -304,7 +305,11 @@ namespace Nox
         m_frame.nrdReflectionsAdded = true;
 
         // NRD REBLUR / RELAX specular: raw reflection -> denoised reflection.
-        m_renderGraph.AddPass("NRD Reflections", RGPassFlags::AsyncCompute | RGPassFlags::OwnCommandBuffer,
+        // On the compute queue, beside the graphics work -- except while ReSTIR DI runs: the compute queue then is the frame's long
+        // path (DDGI, the screen-probe GI, NRD Shadows, in queue order), this pass waited behind it although its input is ready early,
+        // and the graphics queue sat idle after ReSTIR DI (docs/hybridrestirdi.noxprof: 2.6 ms) -- there it runs right after the trace.
+        const RGPassFlags nrdReflectionsQueue = m_directLightingMode == 1 ? RGPassFlags::None : RGPassFlags::AsyncCompute;
+        m_renderGraph.AddPass("NRD Reflections", nrdReflectionsQueue | RGPassFlags::OwnCommandBuffer,
             [&](RGBuilder& builder)
             {
                 builder.Read(resources.RawReflection);
@@ -408,9 +413,38 @@ namespace Nox
 
         const uint32_t totalDDGIProbes = m_frame.totalDDGIProbes;
         const uint32_t probeRows = (totalDDGIProbes + DDGIProbesPerRow - 1) / DDGIProbesPerRow;
-        const nri::Extent2D radianceExtent = { m_ddgiRaysPerProbe, totalDDGIProbes };
         const uint32_t readIndex = m_frame.ddgiReadIndex;
         const uint32_t writeIndex = m_frame.ddgiWriteIndex;
+        const uint32_t frameNumber = static_cast<uint32_t>(m_sceneFrameCounter); // the passes' frameIndex: picks the updated probes
+
+        // Compact ray rows (DDGICommon.slang ddgi_probe_of_row): on a frame no probe comes in -- no cascade moved, not the atlases' first
+        // frame -- the probes this frame updates are exactly one in every stride of each cascade, so the ray data holds only their rows,
+        // the radiance pass draws only those and the blends run one workgroup each; the atlases are copied over whole first ("DDGI
+        // Keep"), which keeps every other probe as it was. The same probes as a row per probe (the frames probes come in): no change to
+        // the light, only no fragments and workgroups for the probes that skip the frame.
+        const uint32_t cascadeCount = std::max(uniformData.ddgiCascadeCount, 1u);
+        const uint32_t perCascade = totalDDGIProbes / cascadeCount;
+        const uint32_t updateStride = std::max(uniformData.ddgiUpdateStride, 1u);
+        bool probesEnter = m_frame.ddgiFirstFrame;
+        for (uint32_t cascade = 0; cascade < cascadeCount; ++cascade)
+        {
+            const shaderio::DDGICascade& c = uniformData.ddgiCascades[cascade];
+            probesEnter |= c.shiftX != 0 || c.shiftY != 0 || c.shiftZ != 0;
+        }
+        const bool compactRays = !probesEnter && updateStride > 1 && perCascade * cascadeCount == totalDDGIProbes;
+        uint32_t rayRows = totalDDGIProbes;
+        if (compactRays)
+        {
+            // As ddgi_update_stride / ddgi_first_updated / ddgi_cascade_rows (the same unsigned arithmetic as the shaders').
+            rayRows = 0;
+            for (uint32_t cascade = 0; cascade < cascadeCount; ++cascade)
+            {
+                const uint32_t stride = std::min(updateStride << cascade, 16u);
+                const uint32_t first = (stride - (cascade * perCascade + frameNumber) % stride) % stride;
+                rayRows += perCascade > first ? (perCascade - first + stride - 1) / stride : 0u;
+            }
+        }
+        const nri::Extent2D radianceExtent = { m_ddgiRaysPerProbe, std::max(rayRows, 1u) };
 
         m_renderGraph.PushGroup("DDGI");
 
@@ -428,7 +462,7 @@ namespace Nox
                 builder.ColorTarget(resources.DDGIRayData, NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 1000.0f });
                 builder.SetRenderArea(radianceExtent);
             },
-            [this, res = &resources, totalDDGIProbes, readIndex](RGPassContext& context)
+            [this, res = &resources, totalDDGIProbes, readIndex, compactRays](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
 
@@ -449,6 +483,7 @@ namespace Nox
                                                        ? context.Slot(res->DDGIProbeOffsets[readIndex]) : 0xFFFFFFFF;
                 radPush.prevIrradianceTextureIndex = m_frame.ddgiFirstFrame ? 0xFFFFFFFF : context.Slot(res->DDGIIrradiance[readIndex]);
                 radPush.prevDistanceTextureIndex = m_frame.ddgiFirstFrame ? 0xFFFFFFFF : context.Slot(res->DDGIDistance[readIndex]);
+                radPush.compactRays = compactRays ? 1u : 0u;
                 cmd.pushData(&radPush, sizeof(shaderio::PushConstantDDGIRadiance));
 
                 nri::drawMeshTasks(cmd, 1, 1, 1);
@@ -466,7 +501,7 @@ namespace Nox
                     builder.ColorTarget(resources.DDGIProbeOffsets[writeIndex], NRI_LOAD_OP_CLEAR, NRI_STORE_OP_STORE, { 0.0f, 0.0f, 0.0f, 0.0f });
                     builder.SetRenderArea(offsetsExtent);
                 },
-                [this, res = &resources, totalDDGIProbes, readIndex](RGPassContext& context)
+                [this, res = &resources, totalDDGIProbes, readIndex, compactRays](RGPassContext& context)
                 {
                     nri::CommandBuffer& cmd = context.Cmd();
                     cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_GRAPHICS, m_ddgiRelocationPipeline);
@@ -485,10 +520,43 @@ namespace Nox
                     push.probeCountTotal = totalDDGIProbes;
                     push.firstFrame = m_frame.ddgiFirstFrame ? 1 : 0;
                     push.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                    push.compactRays = compactRays ? 1u : 0u;
                     cmd.pushData(&push, sizeof(push));
                     nri::drawMeshTasks(cmd, 1, 1, 1);
                 });
         }
+
+        // 1c. Compact rows: the atlases copied over whole, so the probes this frame does not update keep their texels (the blends then
+        // write only the updated probes' over them). The atlases alternate frame by frame (the lighting reads one while the next is
+        // blended): a copy of 12 + 19 MB at the default 14,400 probes instead of a workgroup per skipped probe copying its own texels.
+        if (compactRays)
+        {
+            struct KeptAtlas
+            {
+                const char* name;
+                RGTexture source, target;
+                uint32_t texelsPerProbe; // the probe's tile with its border (prepareDDGIFrame: 10 irradiance, 18 distance)
+            };
+            for (const KeptAtlas& atlas : { KeptAtlas{ "DDGI Keep Irradiance", resources.DDGIIrradiance[readIndex], resources.DDGIIrradiance[writeIndex], 10u },
+                                            KeptAtlas{ "DDGI Keep Distance", resources.DDGIDistance[readIndex], resources.DDGIDistance[writeIndex], 18u } })
+            {
+                const RGTexture source = atlas.source;
+                const RGTexture target = atlas.target;
+                const uint32_t width = DDGIProbesPerRow * atlas.texelsPerProbe;
+                const uint32_t height = probeRows * atlas.texelsPerProbe;
+                m_renderGraph.AddPass(atlas.name, RGPassFlags::AsyncCompute,
+                    [&](RGBuilder& builder)
+                    {
+                        builder.Read(source, RGTextureAccess::CopySource);
+                        builder.Write(target, RGTextureAccess::CopyDestination);
+                    },
+                    [source, target, width, height](RGPassContext& context)
+                    {
+                        nriCmdCopyTexture(context.Cmd().handle(), context.Texture(source), context.Texture(target), width, height);
+                    });
+            }
+        }
+        const uint32_t blendGroups = compactRays ? rayRows : totalDDGIProbes;
 
         // 2. Blend irradiance atlas: one workgroup per probe (DDGIBlendIrradiance.slang).
         // The blends on the compute queue (async compute): compute dispatches over the rays, until the screen probes / lighting read them.
@@ -499,7 +567,7 @@ namespace Nox
                 builder.Read(resources.DDGIIrradiance[readIndex]);
                 builder.Write(resources.DDGIIrradiance[writeIndex], RGTextureAccess::StorageWrite);
             },
-            [this, res = &resources, totalDDGIProbes, readIndex, writeIndex](RGPassContext& context)
+            [this, res = &resources, totalDDGIProbes, readIndex, writeIndex, compactRays, blendGroups](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_ddgiBlendIrradiancePipeline);
@@ -514,9 +582,10 @@ namespace Nox
                 blendIrrPush.hysteresis = m_ddgiHysteresis;
                 blendIrrPush.firstFrame = m_frame.ddgiFirstFrame ? 1 : 0;
                 blendIrrPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                blendIrrPush.compactRays = compactRays ? 1u : 0u;
                 blendIrrPush.outputStorageIndex = context.StorageSlot(res->DDGIIrradiance[writeIndex]);
                 cmd.pushData(&blendIrrPush, sizeof(shaderio::PushConstantDDGIBlend));
-                cmd.dispatch(totalDDGIProbes, 1, 1);
+                cmd.dispatch(blendGroups, 1, 1);
             });
 
         // 3. Blend distance atlas: one workgroup per probe (DDGIBlendDistance.slang).
@@ -527,7 +596,7 @@ namespace Nox
                 builder.Read(resources.DDGIDistance[readIndex]);
                 builder.Write(resources.DDGIDistance[writeIndex], RGTextureAccess::StorageWrite);
             },
-            [this, res = &resources, totalDDGIProbes, readIndex, writeIndex](RGPassContext& context)
+            [this, res = &resources, totalDDGIProbes, readIndex, writeIndex, compactRays, blendGroups](RGPassContext& context)
             {
                 nri::CommandBuffer& cmd = context.Cmd();
                 cmd.bindPipeline(NRI_PIPELINE_BIND_POINT_COMPUTE, m_ddgiBlendDistancePipeline);
@@ -542,9 +611,10 @@ namespace Nox
                 blendDistPush.hysteresis = m_ddgiHysteresis;
                 blendDistPush.firstFrame = m_frame.ddgiFirstFrame ? 1 : 0;
                 blendDistPush.frameIndex = static_cast<uint32_t>(m_sceneFrameCounter);
+                blendDistPush.compactRays = compactRays ? 1u : 0u;
                 blendDistPush.outputStorageIndex = context.StorageSlot(res->DDGIDistance[writeIndex]);
                 cmd.pushData(&blendDistPush, sizeof(shaderio::PushConstantDDGIBlend));
-                cmd.dispatch(totalDDGIProbes, 1, 1);
+                cmd.dispatch(blendGroups, 1, 1);
             });
 
         m_renderGraph.PopGroup();
@@ -595,16 +665,21 @@ namespace Nox
         RGTextureDesc distanceDesc;
         distanceDesc.Format = NRI_FORMAT_R32_SFLOAT;
         distanceDesc.Usage = NRI_TEXTURE_USAGE_STORAGE;
-        resources.ScreenProbeGIDistance = m_renderGraph.CreateTexture("Screen Probe GI Distance", distanceDesc);
+        // Kept a frame too (with the result): the RT reflections' hits read last frame's (SceneGI.slang screenGIPrevious).
+        const RGTextureHistory distanceHistory = m_renderGraph.GetHistoryTexture("Screen Probe GI Distance", distanceDesc, 2);
+        resources.ScreenProbeGIDistance[0] = distanceHistory.Textures[0];
+        resources.ScreenProbeGIDistance[1] = distanceHistory.Textures[1];
         const uint32_t readIndex = m_screenProbeHistoryIndex;
         const uint32_t writeIndex = 1 - readIndex;
         m_screenProbeHistoryIndex = writeIndex;
         // Last frame's result is only this view's history if it was rendered last frame (not after a pause of the mode, a resize
         // or a reset); the previous depth / normal snapshot (addPreviousFrameCopyPass) is then last frame's too.
-        const bool historyValid = !m_isFirstFrame && !history.WasReset && m_screenProbeLastFrame + 1 == m_sceneFrameCounter;
+        const bool historyValid = !m_isFirstFrame && !history.WasReset && !distanceHistory.WasReset && m_screenProbeLastFrame + 1 == m_sceneFrameCounter;
         m_screenProbeLastFrame = m_sceneFrameCounter;
         frame.screenProbeGIAdded = true;
         frame.screenProbeGIWriteIndex = writeIndex;
+        frame.screenProbeGIReadIndex = readIndex;
+        frame.screenProbeGIHistoryValid = historyValid && m_screenProbePrevMatricesValid;
 
         shaderio::PushConstantScreenProbe common{};
         common.invViewProj = uniformData.invViewProj;
@@ -615,6 +690,14 @@ namespace Nox
             common.prevInvViewProj = glm::inverse(uniformData.prevProj * uniformData.prevView);
         common.currJitterUv = jitterScreenOffsetUv();
         common.prevJitterUv = m_screenProbePrevMatricesValid ? m_screenProbePrevJitterUv : common.currJitterUv;
+        // Last frame's camera for the RT reflections, which read last frame's result: the jittered projection it was drawn with and
+        // where the camera was (its distances are from there).
+        if (m_screenProbePrevMatricesValid)
+        {
+            uniformData.screenGIPreviousViewProj = glm::mat4(glm::dmat4(m_screenProbePrevProj) * glm::dmat4(m_screenProbePrevView));
+            uniformData.screenGIPreviousCameraPos = m_screenProbePrevCameraPos;
+        }
+        m_screenProbePrevCameraPos = uniformData.cameraWorldPos;
         m_screenProbePrevProj = uniformData.proj;
         m_screenProbePrevView = uniformData.view;
         m_screenProbePrevJitterUv = common.currJitterUv;
@@ -780,7 +863,7 @@ namespace Nox
                     ReadDDGI(builder, resources, ddgiIndex);
                 }
                 builder.Write(resources.ScreenProbeGI[writeIndex], RGTextureAccess::StorageWrite);
-                builder.Write(resources.ScreenProbeGIDistance, RGTextureAccess::StorageWrite);
+                builder.Write(resources.ScreenProbeGIDistance[writeIndex], RGTextureAccess::StorageWrite);
             },
             [this, res = &resources, common, dispatch, current, readIndex, writeIndex, historyValid, readVelocity,
              extent = frame.renderExtent](RGPassContext& context)
@@ -801,7 +884,7 @@ namespace Nox
                 if (readVelocity)
                     push.velocityTextureIndex = context.Slot(res->GBufferVelocity);
                 push.outputStorageIndex0 = context.StorageSlot(res->ScreenProbeGI[writeIndex]);
-                push.outputStorageIndex1 = context.StorageSlot(res->ScreenProbeGIDistance);
+                push.outputStorageIndex1 = context.StorageSlot(res->ScreenProbeGIDistance[writeIndex]);
                 dispatch(context.Cmd(), m_screenProbeIntegratePipeline, extent, push);
             });
 
