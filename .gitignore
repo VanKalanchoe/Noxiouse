@@ -310,3 +310,5 @@ Facerun/Assets/StreamingTest
 **/shader_cache_noxui/
 NoxEditor/assets/vfx/TornadoLoopingVDB
 Facerun/Assets/VFX/TornadoVDB
+*.noxprof
+*.mp4
