@@ -246,8 +246,8 @@ namespace Nox
                     d.AddRoundedRect({ ba.x, ba.y }, { std::max(bb.x, ba.x + 1.0f), std::max(bb.y, ba.y + 1.0f) }, glm::vec4(0.0f), glm::vec4(0.0f), 1.0f, bounds);
                     if (c.x - a.x > 70.0f && c.y - a.y > 34.0f)
                     {
-                        d.AddText(WorldGrid::CellName(cell), nullptr, { a.x + 4.0f, a.y + 3.0f }, 12.0f, NoxUI::ThemeColor("WorldCellName", { 0.9f, 0.9f, 0.92f, 0.86f }));
-                        d.AddText(std::to_string(info->second.Entities) + " entities", nullptr, { a.x + 4.0f, a.y + 17.0f }, 12.0f, NoxUI::ThemeColor("WorldCellCount", { 0.9f, 0.9f, 0.92f, 0.7f }));
+                        d.AddText(WorldGrid::CellName(cell), nullptr, { a.x + 4.0f, a.y + 3.0f }, 13.5f, NoxUI::ThemeColor("WorldCellName", { 0.9f, 0.9f, 0.92f, 0.86f }));
+                        d.AddText(std::to_string(info->second.Entities) + " entities", nullptr, { a.x + 4.0f, a.y + 18.0f }, 13.0f, NoxUI::ThemeColor("WorldCellCount", { 0.9f, 0.9f, 0.92f, 0.7f }));
                     }
                 }
             }

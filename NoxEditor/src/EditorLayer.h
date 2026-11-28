@@ -391,6 +391,10 @@ namespace Nox
         Ref<NoxUI::UIElement> m_StatusCounts;   // right: warnings and errors in the log (click: the Output Log)
         bool m_ResetLayoutRequested = false;
         bool m_LayoutBuilt = false;
+        uint64_t m_SavedMainDockVersion = 0;
+        uint64_t m_SavedViewportDockVersion = 0;
+        float m_LayoutAutoSaveTimer = 0.0f;
+        bool m_LayoutAutoSavePending = false;
         uint64_t m_LastScriptBuildNotified = 0;
         void OpenAsset(AssetHandle handle);
         // Asset editors (E6): which editor opens which asset type is registered once (RegisterAssetEditors); the manager owns

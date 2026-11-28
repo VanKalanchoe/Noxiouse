@@ -292,7 +292,7 @@ namespace Nox
     void InspectorCardBuilder::AddStatusNote(const std::string& text, const glm::vec4& color)
     {
         auto lbl = NoxUI::Label(text);
-        lbl->FontSizeOverride = 13.5f;
+        lbl->FontSizeOverride = 14.0f;
         lbl->UseColorOverride = true;
         lbl->ColorOverride = color;
         Body->AddChild(lbl);

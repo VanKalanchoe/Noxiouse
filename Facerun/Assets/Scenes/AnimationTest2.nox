@@ -147,8 +147,13 @@ Entities:
       Tag: Env
     TransformComponent:
       Translation: [0, 0, 0]
-      Rotation: [0, 0, 0]
+      Rotation: [-4.9131017, 0, 0]
       Scale: [1, 1, 1]
+    DirectionalLightComponent:
+      Color: [1, 1, 1]
+      Intensity: 1
+      AngularDiameter: 0.5357
+      ShadowSamples: 1
     EnvironmentLightComponent:
       Source: ProceduralSky
       TexturePath: ""
@@ -917,3 +922,42 @@ Entities:
     MaterialComponent:
       MaterialAssets:
         - 1596220588156943509
+  - Entity: 7084275784084942168
+    TagComponent:
+      Tag: chr_knight
+    TransformComponent:
+      Translation: [-732.4468994140625, 0, 873.5635986328125]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 2224673011389991670
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 7424412289657619581
+    TagComponent:
+      Tag: cars
+    TransformComponent:
+      Translation: [-1156.487548828125, 0, 837.1470947265625]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 9271498458651279539
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}
+  - Entity: 8264836673340114415
+    TagComponent:
+      Tag: room
+    TransformComponent:
+      Translation: [-2807.179443359375, 0, 1963.5621337890625]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    MeshComponent:
+      MeshHandle: 4912354101275396858
+      SubmeshIndex: 0
+      SubmeshCount: 1
+    MaterialComponent:
+      {}

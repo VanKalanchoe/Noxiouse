@@ -18760,6 +18760,21 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 2175710814554785740
+    FilePath: chr_knight/Meshes/chr_knight.nsmesh
+    SourceFilePath: chr_knight/chr_knight.vox
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 9.999999
+      VoxelOrigin: 0
+      VoxelMergeFaces: true
   - Handle: 2176229366682766103
     FilePath: StreamingTest/Meshes/Tile_1_57.nsmesh
     Type: AssetType::StaticMesh
@@ -32026,6 +32041,16 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 3666550295345909123
+    FilePath: Models/chr_knight/Textures/chr_knight_PaletteColor.ntex
+    SourceFilePath: Models/chr_knight/Textures/chr_knight_PaletteColor.ntex
+    Type: AssetType::Texture2D
+    FormerPaths:
+      - chr_knight/Textures/chr_knight_PaletteColor.ntex
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 3666860101273419393
     FilePath: StreamingTest/Textures/Tile_81_1.ntex
     Type: AssetType::Texture2D
@@ -41470,6 +41495,16 @@ AssetRegistry:
   - Handle: 4764310798719523304
     FilePath: StreamingTest/Textures/Tile_16_6.ntex
     Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 4766467632262430723
+    FilePath: Models/chr_knight/Textures/chr_knight_PaletteEmissive.ntex
+    SourceFilePath: Models/chr_knight/Textures/chr_knight_PaletteEmissive.ntex
+    Type: AssetType::Texture2D
+    FormerPaths:
+      - chr_knight/Textures/chr_knight_PaletteEmissive.ntex
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
@@ -88293,6 +88328,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10030584156837205532
+    FilePath: Models/chr_knight/Materials/chr_knight_Palette.nmat
+    SourceFilePath: Models/chr_knight/Materials/chr_knight_Palette.nmat
+    Type: AssetType::Material
+    FormerPaths:
+      - chr_knight/Materials/chr_knight_Palette.nmat
   - Handle: 10032174987336750075
     FilePath: StreamingTest/Textures/Tile_14_72.ntex
     Type: AssetType::Texture2D
@@ -112173,6 +112214,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 12807476084967674388
+    FilePath: VFX/NewVfx.nvfx
+    SourceFilePath: VFX/NewVfx.nvfx
+    Type: AssetType::Vfx
   - Handle: 12808406135763821890
     FilePath: StreamingTest/Textures/Tile_16_15.ntex
     Type: AssetType::Texture2D
@@ -151850,6 +151895,16 @@ AssetRegistry:
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 17313323466667706549
+    FilePath: Models/chr_knight/Textures/chr_knight_PaletteSurface.ntex
+    SourceFilePath: Models/chr_knight/Textures/chr_knight_PaletteSurface.ntex
+    Type: AssetType::Texture2D
+    FormerPaths:
+      - chr_knight/Textures/chr_knight_PaletteSurface.ntex
+    TextureSpec:
+      Format: RGBA8
       GenerateMips: true
       Flip: false
   - Handle: 17313748326091314974

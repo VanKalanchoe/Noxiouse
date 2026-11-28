@@ -136,7 +136,7 @@ namespace Nox
                 }
                 const float x = toX(m_Editor->Cursor);
                 d.AddRoundedRect({ x - 1.5f, b.Min.y }, { x + 1.5f, b.Max.y }, NoxUI::ThemeColor("ClipCursor", { 1.0f, 1.0f, 1.0f, 0.95f }));
-                d.AddText(std::format("{:.3f} s", m_Editor->Cursor), nullptr, { b.Min.x + 6.0f, b.Min.y + 10.0f }, 12.0f, NoxUI::ThemeColor("ClipCursorText", { 0.85f, 0.87f, 0.92f, 0.8f }));
+                d.AddText(std::format("{:.3f} s", m_Editor->Cursor), nullptr, { b.Min.x + 6.0f, b.Min.y + 10.0f }, 13.5f, NoxUI::ThemeColor("ClipCursorText", { 0.85f, 0.87f, 0.92f, 0.8f }));
             }
 
         private:

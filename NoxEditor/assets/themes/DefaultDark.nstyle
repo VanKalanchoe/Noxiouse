@@ -210,10 +210,10 @@ styles:
   MenuTrigger:
     fill: "#00000000"
     border_thickness: 0
-    corner_radius: 2
-    padding: [10, 4]
+    corner_radius: 4
+    padding: [10, 5]
     text_color: "$Text"
-    font_size: 18
+    font_size: 16
 
   "MenuTrigger:hover":
     fill: "$Surface2"
@@ -226,16 +226,16 @@ styles:
     shadow_color: "#0000008C"
     shadow_offset: [0, 6]
     shadow_blur: 14
-    corner_radius: 3
-    padding: 4
+    corner_radius: 5
+    padding: [4, 5]
 
   MenuItem:
     fill: "#00000000"
     border_thickness: 0
-    corner_radius: 2
-    padding: [10, 5]
+    corner_radius: 4
+    padding: [12, 6]
     text_color: "$Text"
-    font_size: 18
+    font_size: 16
 
   "MenuItem:hover":
     fill: "$Accent"

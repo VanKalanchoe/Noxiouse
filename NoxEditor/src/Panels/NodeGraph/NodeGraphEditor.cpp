@@ -1,6 +1,8 @@
 #include "NodeGraphEditor.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
@@ -44,6 +46,48 @@ namespace Nox
 {
     namespace
     {
+        std::filesystem::path NodeGraphPrefsPath()
+        {
+            if (auto project = Project::GetActive())
+                return project->GetProjectDirectory() / "Saved" / "Layout" / "NodeGraphPrefs.txt";
+            return {};
+        }
+
+        std::unordered_map<std::string, bool> LoadNodeGraphPrefs()
+        {
+            std::unordered_map<std::string, bool> prefs;
+            const std::filesystem::path path = NodeGraphPrefsPath();
+            if (path.empty())
+                return prefs;
+            std::ifstream in(path);
+            for (std::string line; std::getline(in, line);)
+            {
+                const size_t eq = line.find('=');
+                if (eq == std::string::npos)
+                    continue;
+                const std::string key = line.substr(0, eq);
+                const std::string val = line.substr(eq + 1);
+                prefs[key] = (val == "1" || val == "true");
+            }
+            return prefs;
+        }
+
+        void SaveNodeGraphPref(const std::string& key, bool value)
+        {
+            const std::filesystem::path path = NodeGraphPrefsPath();
+            if (path.empty())
+                return;
+            auto prefs = LoadNodeGraphPrefs();
+            prefs[key] = value;
+            std::error_code ec;
+            std::filesystem::create_directories(path.parent_path(), ec);
+            std::ofstream out(path, std::ios::trunc);
+            if (!out.is_open())
+                return;
+            for (const auto& [k, v] : prefs)
+                out << k << "=" << (v ? 1 : 0) << "\n";
+        }
+
         // A parameter's readers (nodes naming it) and the transition rules testing it, in this graph and every state under it.
         void RenameParameterReferences(NodeGraph& graph, const std::string& oldName, const std::string& newName)
         {
@@ -61,7 +105,7 @@ namespace Nox
             }
         }
 
-        Ref<NoxUI::UILabel> MutedLabel(const std::string& text, float size = 13.0f)
+        Ref<NoxUI::UILabel> MutedLabel(const std::string& text, float size = 14.0f)
         {
             Ref<NoxUI::UILabel> label(new NoxUI::UILabel(text, size));
             label->UseColorOverride = true;
@@ -119,7 +163,7 @@ namespace Nox
             }
 
         private:
-            static constexpr float kFont = 12.5f;
+            static constexpr float kFont = 13.5f;
             float m_Time = 0.0f;
         };
 
@@ -260,7 +304,7 @@ namespace Nox
             toolbar->AddChild(pill);
             m_CompileStatusDirty = true;
         }
-        m_Status = MutedLabel("", 13.0f);
+        m_Status = MutedLabel("", 14.0f);
         m_Status->WordWrap = false;
         m_Status->VAlign = NoxUI::UIAlignment::Center;
         m_Status->Margin = NoxUI::UIThickness{ 8.0f, 0.0f, 0.0f, 0.0f };
@@ -277,12 +321,21 @@ namespace Nox
             scroll->ChildSpacing = 6.0f;
             return scroll;
         };
+        const std::string domainKey = m_Asset && !m_Asset->Graph.Domain.empty() ? m_Asset->Graph.Domain : std::string("default");
+        const auto savedPrefs = LoadNodeGraphPrefs();
+        auto prefOr = [&](const std::string& suffix, bool fallback) -> bool
+        {
+            if (auto it = savedPrefs.find(domainKey + "." + suffix); it != savedPrefs.end())
+                return it->second;
+            return fallback;
+        };
+
         Ref<NoxUI::UIScrollView> left = column(230.0f);
         m_Parameters = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 6.0f));
         m_Parameters->WidthMode = NoxUI::UISizeMode::Fill;
         m_Parameters->Padding = NoxUI::UIThickness::All(8.0f);
         left->AddChild(m_Parameters);
-        left->Visible = !isMaterialGraph;
+        left->Visible = isMaterialGraph ? false : prefOr("LeftOpen", true);
         m_LeftPanel = left;
 
         m_Canvas = Ref<NodeGraphCanvas>(new NodeGraphCanvas());
@@ -293,7 +346,7 @@ namespace Nox
         m_Canvas->OnEditValue = [this](uint32_t nodeId, const std::string& property, const NoxUI::UIRect& at) { ShowValuePopup(nodeId, property, at); };
         m_Canvas->SetGraph(m_Asset ? &m_Asset->Graph : nullptr);
 
-        Ref<NoxUI::UIScrollView> right = column(isMaterialGraph ? 270.0f : 290.0f);
+        Ref<NoxUI::UIScrollView> right = column(isMaterialGraph ? 280.0f : 290.0f);
         if (!isMaterialGraph)
         {
             m_PreviewBox = Ref<NoxUI::UIStackBox>(new NoxUI::UIStackBox(NoxUI::UIOrientation::Vertical, 4.0f));
@@ -308,7 +361,7 @@ namespace Nox
         m_Details->WidthMode = NoxUI::UISizeMode::Fill;
         m_Details->Padding = NoxUI::UIThickness::All(8.0f);
         right->AddChild(m_Details);
-        right->Visible = !isMaterialGraph;
+        right->Visible = prefOr("RightOpen", !isMaterialGraph);
         m_RightPanel = right;
 
         m_StateView = Ref<StateMachineView>(new StateMachineView());
@@ -339,7 +392,14 @@ namespace Nox
             Ref<DrawerEdgeHandle> leftHandle(new DrawerEdgeHandle(
                 false,
                 [this]() { return m_LeftPanel && m_LeftPanel->Visible; },
-                [this]() { if (m_LeftPanel) m_LeftPanel->Visible = !m_LeftPanel->Visible; },
+                [this, domainKey]()
+                {
+                    if (m_LeftPanel)
+                    {
+                        m_LeftPanel->Visible = !m_LeftPanel->Visible;
+                        SaveNodeGraphPref(domainKey + ".LeftOpen", m_LeftPanel->Visible);
+                    }
+                },
                 "Expand or collapse the Parameters drawer"));
             body->AddChild(leftHandle);
         }
@@ -347,7 +407,14 @@ namespace Nox
         Ref<DrawerEdgeHandle> rightHandle(new DrawerEdgeHandle(
             true,
             [this]() { return m_RightPanel && m_RightPanel->Visible; },
-            [this]() { if (m_RightPanel) m_RightPanel->Visible = !m_RightPanel->Visible; },
+            [this, domainKey]()
+            {
+                if (m_RightPanel)
+                {
+                    m_RightPanel->Visible = !m_RightPanel->Visible;
+                    SaveNodeGraphPref(domainKey + ".RightOpen", m_RightPanel->Visible);
+                }
+            },
             "Expand or collapse the Node Inspector drawer"));
         body->AddChild(rightHandle);
         body->AddChild(right);

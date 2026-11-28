@@ -3438,6 +3438,35 @@ namespace Nox
             ResetLayout();
         }
 
+        // ImGui-style automatic layout persistence: debounce saves 0.6s after any dock/split/tab/float change.
+        if (m_LayoutBuilt)
+        {
+            UILayer* uiLayer = Application::Get().GetUILayer();
+            const auto& mainDock = uiLayer ? uiLayer->GetDockSpaceRef() : Ref<NoxUI::UIDockSpace>();
+            const uint64_t mainVer = mainDock ? mainDock->GetLayoutVersion() : 0;
+            const uint64_t vpVer = m_ViewportDockSpace ? m_ViewportDockSpace->GetLayoutVersion() : 0;
+            if (mainVer != m_SavedMainDockVersion || vpVer != m_SavedViewportDockVersion)
+            {
+                m_SavedMainDockVersion = mainVer;
+                m_SavedViewportDockVersion = vpVer;
+                m_LayoutAutoSavePending = true;
+                m_LayoutAutoSaveTimer = 0.6f;
+            }
+            if (m_LayoutAutoSavePending)
+            {
+                const bool dragging = (mainDock && mainDock->IsDragging()) || (m_ViewportDockSpace && m_ViewportDockSpace->IsDragging());
+                if (!dragging)
+                {
+                    m_LayoutAutoSaveTimer -= ts.GetSeconds();
+                    if (m_LayoutAutoSaveTimer <= 0.0f)
+                    {
+                        m_LayoutAutoSavePending = false;
+                        SaveLayoutFiles();
+                    }
+                }
+            }
+        }
+
         if (m_OpenSaveAndPlay)
         {
             m_OpenSaveAndPlay = false;
@@ -4233,10 +4262,7 @@ namespace Nox
                 std::stringstream ss;
                 ss << layoutFile.rdbuf();
                 const std::string saved = ss.str();
-                if (saved.find("Viewports") == std::string::npos ||
-                    (m_ShowSceneHierarchy && saved.find("Scene Hierarchy") == std::string::npos) ||
-                    (m_ShowInspector && saved.find("Inspector") == std::string::npos) ||
-                    (m_ShowToolBar && (saved.find("Toolbar") == std::string::npos || saved.find("flags: 6") == std::string::npos)))
+                if (saved.find("Viewports") == std::string::npos)
                     shouldLoad = false;
             }
             if (shouldLoad)
@@ -4543,6 +4569,11 @@ namespace Nox
             .Background(true)
         );
         m_LayoutBuilt = true;
+        if (const auto& dock = uiLayer->GetDockSpaceRef())
+            m_SavedMainDockVersion = dock->GetLayoutVersion();
+        if (m_ViewportDockSpace)
+            m_SavedViewportDockVersion = m_ViewportDockSpace->GetLayoutVersion();
+        m_LayoutAutoSavePending = false;
     }
 
     void EditorLayer::OpenAsset(AssetHandle handle)

@@ -204,12 +204,12 @@ namespace Nox
         nameRow->VAlign = NoxUI::UIAlignment::Center;
 
         m_SubheaderLabel = NoxUI::Label("");
-        m_SubheaderLabel->FontSizeOverride = 13.5f;
+        m_SubheaderLabel->FontSizeOverride = 14.0f;
         m_SubheaderLabel->UseColorOverride = true;
         m_SubheaderLabel->ColorOverride = NoxUI::ThemeColor("TextMuted", { 0.58f, 0.64f, 0.74f, 1.0f });
 
         m_SelectionBadge = NoxUI::Label("");
-        m_SelectionBadge->FontSizeOverride = 13.5f;
+        m_SelectionBadge->FontSizeOverride = 14.0f;
         m_SelectionBadge->UseColorOverride = true;
         m_SelectionBadge->ColorOverride = NoxUI::ThemeColor("InspectorSelectionBadge", { 0.45f, 0.72f, 0.98f, 1.0f });
         m_SelectionBadge->Visible = false;
@@ -595,7 +595,7 @@ namespace Nox
                     }
                     auto row = NoxUI::MakeUI<NoxUI::UIStackBox>(NoxUI::UIOrientation::Horizontal, 4.0f);
                     row->WidthMode = NoxUI::UISizeMode::Fill;
-                    Ref<NoxUI::UILabel> text(new NoxUI::UILabel(label, 12.5f));
+                    Ref<NoxUI::UILabel> text(new NoxUI::UILabel(label, 14.0f));
                     text->WidthMode = NoxUI::UISizeMode::Fill;
                     text->VAlign = NoxUI::UIAlignment::Center;
                     text->UseColorOverride = true;
@@ -781,6 +781,7 @@ namespace Nox
                                  }
                                  NotifyMutated(false);
                              });
+                         scaleEdit->SetDefaultValue(glm::vec4(1.0f));
                          c.AddRow("Scale", scaleEdit);
                          NoxUI::AppendSync(*Raw(scaleEdit), [scaleEdit = Raw(scaleEdit), entity]() mutable
                          {
@@ -1550,7 +1551,7 @@ namespace Nox
                              if (!className.empty() && !ScriptEngine::EntityClassExists(className))
                              {
                                  auto errLabel = NoxUI::Label("Class not found in loaded script assembly");
-                                 errLabel->FontSizeOverride = 13.0f;
+                                 errLabel->FontSizeOverride = 14.0f;
                                  errLabel->UseColorOverride = true;
                                  errLabel->ColorOverride = NoxUI::ThemeColor("StatusError", { 0.90f, 0.34f, 0.38f, 1.0f });
                                  c.Body->AddChild(errLabel);

@@ -19282,6 +19282,22 @@ AssetRegistry:
     FilePath: Models/bistro/Materials/bistro_LMBR_00000ee_Paris_LiquorBottle_01_Glass_Wine.nmat
     SourceFilePath: Models/bistro/Materials/bistro_LMBR_00000ee_Paris_LiquorBottle_01_Glass_Wine.nmat
     Type: AssetType::Material
+  - Handle: 2224673011389991670
+    FilePath: Models/chr_knight/Meshes/chr_knight.nsmesh
+    SourceFilePath: Models/chr_knight/chr_knight.vox
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 9.999999
+      VoxelOrigin: 0
+      VoxelMergeFaces: true
+      VoxelEmissionScale: 1
   - Handle: 2225341492537989216
     FilePath: StreamingTest/Meshes/Tile_55_66.nsmesh
     Type: AssetType::StaticMesh
@@ -31039,6 +31055,10 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_62_17_Tile_62_17.nmat
     SourceFilePath: StreamingTest/Materials/Tile_62_17_Tile_62_17.nmat
     Type: AssetType::Material
+  - Handle: 3558518569692044224
+    FilePath: Models/room/Materials/room_Palette.nmat
+    SourceFilePath: Models/room/Materials/room_Palette.nmat
+    Type: AssetType::Material
   - Handle: 3558589347592637307
     FilePath: StreamingTest/Meshes/Tile_0_28.nsmesh
     Type: AssetType::StaticMesh
@@ -32022,6 +32042,16 @@ AssetRegistry:
   - Handle: 3666432906149261130
     FilePath: StreamingTest/Textures/Tile_46_76.ntex
     Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 3666550295345909123
+    FilePath: Models/chr_knight/Textures/chr_knight_PaletteColor.ntex
+    SourceFilePath: Models/chr_knight/Textures/chr_knight_PaletteColor.ntex
+    Type: AssetType::Texture2D
+    FormerPaths:
+      - chr_knight/Textures/chr_knight_PaletteColor.ntex
     TextureSpec:
       Format: SRGBA8
       GenerateMips: true
@@ -41474,6 +41504,16 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4766467632262430723
+    FilePath: Models/chr_knight/Textures/chr_knight_PaletteEmissive.ntex
+    SourceFilePath: Models/chr_knight/Textures/chr_knight_PaletteEmissive.ntex
+    Type: AssetType::Texture2D
+    FormerPaths:
+      - chr_knight/Textures/chr_knight_PaletteEmissive.ntex
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 4766551426840063686
     FilePath: StreamingTest/Textures/Tile_44_9.ntex
     Type: AssetType::Texture2D
@@ -42878,6 +42918,22 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 4912354101275396858
+    FilePath: Models/room/Meshes/room.nsmesh
+    SourceFilePath: Models/room/room.vox
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 9.999999
+      VoxelOrigin: 0
+      VoxelMergeFaces: false
+      VoxelEmissionScale: 1
   - Handle: 4913612112320973502
     FilePath: StreamingTest/Textures/Tile_35_53.ntex
     Type: AssetType::Texture2D
@@ -48753,6 +48809,14 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 5547349979847091040
+    FilePath: Models/room/Textures/room_PaletteEmissive.ntex
+    SourceFilePath: Models/room/Textures/room_PaletteEmissive.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 5548424345143932057
     FilePath: StreamingTest/Textures/Tile_23_19.ntex
     Type: AssetType::Texture2D
@@ -81304,6 +81368,22 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 9271498458651279539
+    FilePath: Models/cars/Meshes/cars.nsmesh
+    SourceFilePath: Models/cars/cars.vox
+    Type: AssetType::StaticMesh
+    MeshSettings:
+      ImportStaticMeshes: true
+      ImportSkeletalMeshes: false
+      ImportAnimations: false
+      ImportSkinWeights: true
+      StaticCombine: 2
+      SkeletalCombine: 0
+      SourceMeshIndex: -1
+      ImportScale: 9.999999
+      VoxelOrigin: 0
+      VoxelMergeFaces: true
+      VoxelEmissionScale: 1
   - Handle: 9271841925353304331
     FilePath: StreamingTest/Meshes/Tile_48_66.nsmesh
     Type: AssetType::StaticMesh
@@ -83871,6 +83951,14 @@ AssetRegistry:
       Flip: false
   - Handle: 9543680889520343615
     FilePath: StreamingTest/Textures/Tile_80_51.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 9547386975770443101
+    FilePath: Models/cars/Textures/cars_PaletteColor.ntex
+    SourceFilePath: Models/cars/Textures/cars_PaletteColor.ntex
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
@@ -88293,6 +88381,12 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 10030584156837205532
+    FilePath: Models/chr_knight/Materials/chr_knight_Palette.nmat
+    SourceFilePath: Models/chr_knight/Materials/chr_knight_Palette.nmat
+    Type: AssetType::Material
+    FormerPaths:
+      - chr_knight/Materials/chr_knight_Palette.nmat
   - Handle: 10032174987336750075
     FilePath: StreamingTest/Textures/Tile_14_72.ntex
     Type: AssetType::Texture2D
@@ -92869,6 +92963,14 @@ AssetRegistry:
       Flip: false
   - Handle: 10576740270717492684
     FilePath: StreamingTest/Textures/Tile_26_63.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 10577345088911428264
+    FilePath: Models/room/Textures/room_PaletteColor.ntex
+    SourceFilePath: Models/room/Textures/room_PaletteColor.ntex
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
@@ -99319,6 +99421,14 @@ AssetRegistry:
       Flip: false
   - Handle: 11323767913866882181
     FilePath: StreamingTest/Textures/Tile_3_13.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: SRGBA8
+      GenerateMips: true
+      Flip: false
+  - Handle: 11324430697781023413
+    FilePath: Models/cars/Textures/cars_PaletteEmissive.ntex
+    SourceFilePath: Models/cars/Textures/cars_PaletteEmissive.ntex
     Type: AssetType::Texture2D
     TextureSpec:
       Format: SRGBA8
@@ -114810,6 +114920,14 @@ AssetRegistry:
     FilePath: StreamingTest/Materials/Tile_16_11_Tile_16_11.nmat
     SourceFilePath: StreamingTest/Materials/Tile_16_11_Tile_16_11.nmat
     Type: AssetType::Material
+  - Handle: 13117326580051565690
+    FilePath: Models/cars/Textures/cars_PaletteSurface.ntex
+    SourceFilePath: Models/cars/Textures/cars_PaletteSurface.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 13118991045248612284
     FilePath: StreamingTest/Textures/Tile_30_64.ntex
     Type: AssetType::Texture2D
@@ -143351,6 +143469,14 @@ AssetRegistry:
       SkeletalCombine: 0
       SourceMeshIndex: -1
       ImportScale: 1
+  - Handle: 16393121352659269047
+    FilePath: Models/room/Textures/room_PaletteSurface.ntex
+    SourceFilePath: Models/room/Textures/room_PaletteSurface.ntex
+    Type: AssetType::Texture2D
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 16394382639990149183
     FilePath: StreamingDense/Materials/Tile_2_18_Tile_2_18.nmat
     SourceFilePath: StreamingDense/Materials/Tile_2_18_Tile_2_18.nmat
@@ -151856,6 +151982,16 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17313323466667706549
+    FilePath: Models/chr_knight/Textures/chr_knight_PaletteSurface.ntex
+    SourceFilePath: Models/chr_knight/Textures/chr_knight_PaletteSurface.ntex
+    Type: AssetType::Texture2D
+    FormerPaths:
+      - chr_knight/Textures/chr_knight_PaletteSurface.ntex
+    TextureSpec:
+      Format: RGBA8
+      GenerateMips: true
+      Flip: false
   - Handle: 17313748326091314974
     FilePath: StreamingTest/Meshes/Tile_65_30.nsmesh
     Type: AssetType::StaticMesh
@@ -152474,6 +152610,10 @@ AssetRegistry:
       Format: SRGBA8
       GenerateMips: true
       Flip: false
+  - Handle: 17377306755401861295
+    FilePath: Models/cars/Materials/cars_Palette.nmat
+    SourceFilePath: Models/cars/Materials/cars_Palette.nmat
+    Type: AssetType::Material
   - Handle: 17379612561652623523
     FilePath: StreamingTest/Meshes/Tile_53_42.nsmesh
     Type: AssetType::StaticMesh

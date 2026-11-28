@@ -227,7 +227,7 @@ namespace Nox
                     const bool major = std::fmod(time + 1e-4f, 1.0f) < 2e-4f;
                     d.AddRoundedRect({ x, b.Min.y + (major ? 4.0f : 12.0f) }, { x + 1.0f, b.Min.y + kRuler }, NoxUI::ThemeColor("TimelineTick", { 0.59f, 0.59f, 0.59f, 1.0f }));
                     if (major)
-                        d.AddText(std::format("{:.0f}", time), nullptr, { x + 2.0f, b.Min.y + 1.0f }, 11.5f, NoxUI::ThemeColor("TimelineTickText", { 0.78f, 0.78f, 0.78f, 1.0f }));
+                        d.AddText(std::format("{:.0f}", time), nullptr, { x + 2.0f, b.Min.y + 1.0f }, 13.0f, NoxUI::ThemeColor("TimelineTickText", { 0.78f, 0.78f, 0.78f, 1.0f }));
                 }
                 d.PopClipRect();
 
@@ -243,12 +243,12 @@ namespace Nox
                     d.PushClipRect({ b.Min.x, std::max(top, b.Min.y + kRuler) }, { b.Min.x + kLabelWidth, top + kLane });
                     d.AddRoundedRect({ b.Min.x + 4.0f, top + 5.0f }, { b.Min.x + 18.0f, top + 19.0f }, track.Muted ? NoxUI::ThemeColor("TimelineMuted", { 0.25f, 0.25f, 0.28f, 1.0f }) : NoxUI::ThemeColor("TimelineMuteBox", { 0.35f, 0.62f, 0.95f, 1.0f }),
                                      glm::vec4(3.0f));
-                    d.AddText(TrackName(track, player), nullptr, { b.Min.x + 24.0f, top + 5.0f }, 12.5f,
+                    d.AddText(TrackName(track, player), nullptr, { b.Min.x + 24.0f, top + 5.0f }, 13.5f,
                               selected ? NoxUI::ThemeColor("TimelineTrackSelected", { 1.0f, 0.8f, 0.4f, 1.0f }) : (track.Muted ? dim : text));
                     d.AddRoundedRect({ b.Min.x + kLabelWidth - 70.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 34.0f, top + kLane - 3.0f }, NoxUI::ThemeColor("TimelineKeyButton", { 0.24f, 0.26f, 0.32f, 1.0f }), glm::vec4(3.0f));
-                    d.AddText("Key", nullptr, { b.Min.x + kLabelWidth - 64.0f, top + 5.0f }, 12.0f, text);
+                    d.AddText("Key", nullptr, { b.Min.x + kLabelWidth - 64.0f, top + 5.0f }, 13.0f, text);
                     d.AddRoundedRect({ b.Min.x + kLabelWidth - 30.0f, top + 3.0f }, { b.Min.x + kLabelWidth - 6.0f, top + kLane - 3.0f }, NoxUI::ThemeColor("TimelineRemoveButton", { 0.32f, 0.20f, 0.20f, 1.0f }), glm::vec4(3.0f));
-                    d.AddText("X", nullptr, { b.Min.x + kLabelWidth - 22.0f, top + 5.0f }, 12.0f, text);
+                    d.AddText("X", nullptr, { b.Min.x + kLabelWidth - 22.0f, top + 5.0f }, 13.0f, text);
                     d.PopClipRect();
 
                     d.PushClipRect({ b.Min.x + kLabelWidth, std::max(top, b.Min.y + kRuler) }, { b.Max.x, top + kLane });
@@ -273,7 +273,7 @@ namespace Nox
                             const float x0 = TimeToX(section.Time), x1 = TimeToX(end);
                             d.AddRoundedRect({ x0, top + 3.0f }, { x1, top + kLane - 4.0f }, section.Asset != 0 ? NoxUI::ThemeColor("TimelineAudioSection", { 0.24f, 0.47f, 0.35f, 0.8f }) : NoxUI::ThemeColor("TimelineAudioSectionMissing", { 0.43f, 0.24f, 0.24f, 0.8f }), glm::vec4(3.0f));
                             d.PushClipRect({ x0, top }, { x1, top + kLane });
-                            d.AddText(section.Asset != 0 ? AssetManager::GetMetadata(section.Asset).FilePath.stem().string() : std::string("(no sound)"), nullptr, { x0 + 9.0f, top + 5.0f }, 11.5f, text);
+                            d.AddText(section.Asset != 0 ? AssetManager::GetMetadata(section.Asset).FilePath.stem().string() : std::string("(no sound)"), nullptr, { x0 + 9.0f, top + 5.0f }, 13.0f, text);
                             d.PopClipRect();
                         }
                     for (size_t k = 0; k < track.Keys.size(); ++k)
